@@ -1,0 +1,17 @@
+# Build artefacts
+build/
+*.o
+*.elf
+*.uf2
+*.bin
+*.map
+
+# Dependency symlinks are created by tools/setup_links.sh, never committed —
+# a committed symlink dangles on any machine with a different layout, and
+# fails later as something that looks like a toolchain problem.
+deps/
+
+# Bench logs: truncated per run and regenerated. Captures under
+# tests/captures/ ARE committed — they are replay fixtures, not output.
+tests/logs/
+__pycache__/
