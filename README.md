@@ -6,7 +6,7 @@ Status: **early. Specification work landed; codec implementation not started.** 
 
 ## What this is
 
-A portable C implementation of the Meshtastic on-air protocol, written from the published specification rather than derived from the upstream firmware, plus extensions that ride the same mesh at the same time.
+A portable `no_std` Rust implementation of the Meshtastic on-air protocol, written from the published specification rather than derived from the upstream firmware, plus extensions that ride the same mesh at the same time. It links into C and C++ firmware as an ordinary static library — see `DISTRIBUTION.md` for the language rationale, the prebuilt artifacts and their caveat.
 
 Two things live side by side on one radio, one preset, one mesh — not switched between:
 
@@ -41,7 +41,7 @@ tests/captures/               real on-air frames as replay fixtures
 tools/check_cleanroom.sh      the GPL gate
 ```
 
-Portable C with no hardware dependency. A radio driver is deliberately not included — implementers have their own, and tying the stack to one part would narrow it for no benefit.
+Portable `no_std` Rust with no hardware dependency, exported over a C ABI. A radio driver is deliberately not included — implementers have their own, and tying the stack to one part would narrow it for no benefit.
 
 ## Read this first
 

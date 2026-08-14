@@ -88,7 +88,7 @@ Third-party 64–127: SERIAL 64, STORE_FORWARD 65, RANGE_TEST 66, TELEMETRY 67, 
 
 **TOFU has a documented hole:** *"When a node rolls off the NodeDB, the Meshtastic firmware has no way to confirm that a future User packet isn't a spoof of that Node Number, with a different public key."*
 
-**Routing is managed flooding, not naive flooding.** A node decrements `hop_limit` and rebroadcasts if non-zero, but only after listening to see whether someone else already did, suppressing itself if so. The contention window is **SNR-scaled** — *"The CW size is small for a low SNR, such that nodes that are further away are more likely to flood first"* — which is a more sophisticated suppression than a sibling mesh layer's flat jitter. ROUTER and REPEATER roles rebroadcast regardless of hearing others.
+**Routing is managed flooding, not naive flooding.** A node decrements `hop_limit` and rebroadcasts if non-zero, but only after listening to see whether someone else already did, suppressing itself if so. The contention window is **SNR-scaled** — *"The CW size is small for a low SNR, such that nodes that are further away are more likely to flood first"* — a notably more adaptive suppression than a flat random delay. ROUTER and REPEATER roles rebroadcast regardless of hearing others.
 
 **Next-hop routing exists since firmware 2.6** for direct messages: after initial managed flooding locates the destination, later packets route via identified relays, falling back to flooding on the final retry.
 
@@ -106,10 +106,10 @@ These are commonly asserted in secondary descriptions and are **not** confirmed 
 2. **The AES-CTR nonce construction** — the draft's `packet_id(8) ‖ from(4) ‖ extra_nonce(4)` layout and the 4-byte counter size.
 3. **The channel hash function** — the draft's `xorHash(name) ^ xorHash(psk)`.
 4. **The PKI/DM scheme details** — the docs confirm Curve25519 with "encryption and digital signatures" and mention "AES-CTR or AES-CCM" for admin session keys, but not the DM KDF, tag size, or where the extra nonce travels.
-5. **The raw sync-word value the a companion radio driver must be programmed with.** This is the flagged P1 risk: `0x2B` is a RadioLib API-level value that its SX126x driver expands into a register pair, and the a companion radio driver register model differs. Nothing read so far pins the on-air value.
+5. **The raw sync-word register value a receiver must be programmed with.** The commonly quoted `0x2B` is a library API-level value that gets expanded into a register pair by the driver beneath it; a different radio family's register model will differ. Nothing read so far pins the on-air value itself.
 6. **Preset SF/BW/CR parameters.** The enum names are confirmed; the numeric parameters behind each are not, and with 17 presets including 62.5 kHz and 20 kHz variants the draft's 7-row table cannot be complete.
 
-**Resolving these needs either an authoritative byte-level document or first-light capture.** Items 1–3 are directly recoverable from P4 passive RX once P1 can hear traffic — decode a real frame and the layout confirms itself. That makes P1 the unblocker for most of this list, and it argues for bringing the a companion radio driver up on ambient traffic early.
+**Resolving these needs either an authoritative byte-level document or a first capture.** Items 1–3 are directly recoverable from passive reception of ambient traffic — decode one real frame and the layout confirms itself. Getting a receiver listening is therefore the unblocker for most of this list.
 
 ---
 
@@ -121,7 +121,7 @@ Whether stock nodes relay traffic on channels they cannot decrypt. The entire ex
 
 **Why that is not yet proof:** "allows the option of **eventually** allowing" is forward-looking. It describes what the header design permits, not what current firmware does. The channel-hash filter is applied on receive, and whether a hash miss drops before or after the rebroadcast decision is exactly the question — and it is not documented either way.
 
-**Status: PLAUSIBLE, UNPROVEN.** Settle it by observation in P4, or by a targeted test once one Heltec is on the bench: put a frame on a channel the stock node does not hold, and watch whether it repeats it. Until then, no code should assume free carriage.
+**Status: PLAUSIBLE, UNPROVEN.** Settle it by observation, or by a targeted test with any stock device to hand: put a frame on a channel that device does not hold, and watch whether it repeats it. Until then, no code should assume free carriage.
 
 ---
 
