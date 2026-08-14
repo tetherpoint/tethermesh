@@ -15,3 +15,9 @@ deps/
 # tests/captures/ ARE committed — they are replay fixtures, not output.
 tests/logs/
 __pycache__/
+
+# Reference binaries live OUTSIDE this repository entirely (see
+# tools/fetch_oracle.sh). Should a local path ever be used, it is never
+# committed: running a program creates no derivative work, but vendoring its
+# code would place copyleft-licensed files in this repository's history.
+oracle/

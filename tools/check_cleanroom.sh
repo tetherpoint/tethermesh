@@ -30,6 +30,12 @@
 #
 # FORBIDDEN — expression:
 #   - copying implementation from firmware, mobile apps or clients
+#   - FETCHING their source at all. Not discouraged, not fetched-then-ignored:
+#     never present. Reference BINARIES are installed regardless — they run on
+#     the bench hardware — so availability is not the line. SOURCE is the line.
+#     A source tree in the environment turns "read their implementation" from a
+#     deliberate act into an accident one grep away, and the temptation peaks
+#     exactly when someone is stuck on a mismatch.
 #   - VENDORING .proto files into this tree (read them upstream, pinned in
 #     DEPS.md; a copy here is a GPL file in our repo)
 #   - running a code generator over their .proto — the output is derived from
@@ -84,7 +90,7 @@ while IFS= read -r f; do
 
     grep -Iq . "$p" 2>/dev/null || continue   # skip binaries
 
-    if grep -qE "GNU GENERAL PUBLIC LICENSE|GPL-3\.0|SPDX-License-Identifier: *GPL" "$p" 2>/dev/null; then
+    if grep -qE "GNU GENERAL PUBLIC LICENSE|SPDX-License-Identifier: *GPL|This program is free software" "$p" 2>/dev/null; then
         fail "$f — carries a GPL licence header."
     fi
     if grep -qiE "\bRadioLib\b" "$p" 2>/dev/null; then
@@ -92,6 +98,36 @@ while IFS= read -r f; do
               driver; if one is added it must be independently written."
     fi
 done <<< "$files"
+
+# ── nothing may FETCH or BUILD their source ────────────────────────────────
+# Black-box observation is the textbook clean-room method. Reading source is
+# what forfeits it. Availability is not the line — reference binaries are
+# installed on the bench regardless — so the line is drawn at source, and it
+# is drawn mechanically rather than left to discipline.
+while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    p="$ROOT/$f"
+    [ -f "$p" ] || continue
+    case "$f" in tools/check_cleanroom.sh|tools/fetch_oracle.sh|*.md) continue ;; esac
+    grep -Iq . "$p" 2>/dev/null || continue
+    if grep -qiE "git +clone[^|;]*meshtastic" "$p" 2>/dev/null; then
+        fail "$f — clones a reference source repository. Binaries and containers only."
+    fi
+    if grep -qiE "(platformio|[^a-z]pio) +run|platformio\\.ini" "$p" 2>/dev/null; then
+        fail "$f — builds firmware from source. The oracle is fetched prebuilt, never built."
+    fi
+    if grep -qiE "meshtastic[^ \"']*(firmware|protobufs)[^ \"']*\\.(tar\\.gz|tar\\.xz|zip)" "$p" 2>/dev/null; then
+        fail "$f — downloads a reference source archive."
+    fi
+done <<< "$files"
+
+# ── and none may be PRESENT, tracked or not ────────────────────────────────
+# Absence from the environment, not absence from the index: something fetched
+# into a scratch directory is still one grep away.
+for m in RadioInterface.cpp MeshService.cpp NodeDB.cpp platformio.ini mesh.proto portnums.proto; do
+    found=$(find "$ROOT" -name "$m" -not -path '*/.git/*' 2>/dev/null | head -3)
+    [ -n "$found" ] && while IFS= read -r x; do fail "reference source present: ${x#$ROOT/}"; done <<< "$found"
+done
 
 if [ "$violations" -gt 0 ]; then
     printf '\033[31m[cleanroom] %d violation(s). REFUSING.\033[0m\n' "$violations" >&2
