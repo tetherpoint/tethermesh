@@ -95,6 +95,10 @@ The second is the direction that fails in the field, and the one a lenient decod
 
 Managed flooding: hop-limit decrement, duplicate suppression keyed on sender and identifier, the SNR-scaled contention window, and duty-cycle accounting.
 
+**2026-08-16 — the load-bearing assumption is SETTLED, and the answer is yes.** Stock 2.7.26 nodes relay traffic on channels they cannot decrypt: measured on two Heltec V3s, with a same-channel control proving the link and a frequency check proving the receiver still heard the transmitter. The relaying node never decrypted, never handed the packet to a module, and rebroadcast it anyway with `hop_limit` decremented and **the originator's channel hash preserved**. Detail and the log-line evidence in `meshtastic/WIRE_REFERENCE.md`.
+
+This is the assumption the whole extension suite rests on, so L7 is no longer contingent on it. It also removes the reason to hedge L5's design.
+
 **2026-08-16 — duplicate suppression is done**, ahead of the rest of L5, because it needs no header layout: it takes two numbers and answers whether they have been seen. `meshtastic/core/history.rs`, a fixed-capacity age-evicting ring, default 400 entries to match what the reference was observed to use.
 
 Deliberately **not** included: a `should_relay`. Suppression is one input to the rebroadcast decision; the others are the hop limit, the contention window, duty budget — and whether a node relays on channels it cannot decrypt, which is still PLAUSIBLE, UNPROVEN. Writing that function today would mean taking a position on the open question in code, which is how an assumption stops looking like one.

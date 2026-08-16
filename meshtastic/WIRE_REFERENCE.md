@@ -173,7 +173,36 @@ So items 1 and 2 are reachable by exactly three routes, and passive local captur
 
 ---
 
-## THE LOAD-BEARING ASSUMPTION — still unproven, now with evidence
+## THE LOAD-BEARING ASSUMPTION — SETTLED 2026-08-16, ON HARDWARE
+
+**Stock nodes DO relay traffic on channels they cannot decrypt.** Measured, not inferred, on two Heltec V3s running `2.7.26.54e0d8d` about 3 m apart at 10 dBm.
+
+**Method.** Node A transmitted a broadcast text with `hop_limit = 3` on the default channel (hash `0x08`). Node B's primary channel had its **PSK replaced with sixteen zero bytes while its name was left as `LongFast`** — moving B's channel hash to `0x0a` and leaving it unable to decrypt anything from A.
+
+Changing only the PSK is the point. The frequency slot derives from the channel *name*, so renaming B would have moved it to a different frequency, and "did not hear" is indistinguishable in a log from "did not relay". B was confirmed still on `channel_num: 20`, `906.875 MHz` after the change.
+
+**Result.** Against a control run on a matching channel:
+
+| log line | control | hash mismatch |
+|---|---|---|
+| `[RadioIf] Lora RX … Ch=0x8` | yes | **yes** |
+| `[Router] Use channel 0 (hash 0x8)` | yes | **no** |
+| `[Router] decoded message` | yes | **no** |
+| `[Router] handleReceived(REMOTE)` | yes | **no** |
+| `[Router] Rebroadcast received message` | yes | **yes** |
+| `[RadioIf] Started Tx … HopLim=2` | yes | **yes** |
+
+B never matched the channel, never decrypted, never handed the packet to any module — **and rebroadcast it regardless**, with `hop_limit` decremented 3 → 2.
+
+**Three details that matter to the extension design:**
+
+- **The channel hash is preserved on relay.** The forwarded frame still carries `Ch=0x8`, A's hash, not B's. A relaying node does not restamp it.
+- **`hop_limit` is the only field observed to change** (3 → 2). `transport` also moved 0 → 1, marking the packet as relayed rather than local.
+- **Duplicate suppression runs even for undecryptable traffic.** B logged `Packet History - insert` for the frame it could not read, so a node's dedup window is spent on foreign traffic too.
+
+The documentation's *"allows the option of eventually allowing"* understated current behaviour: 2.7.26 already does it. **Free carriage may now be assumed** — for this firmware version, which is the only claim the measurement supports.
+
+## The earlier reasoning, kept for the record
 
 Whether stock nodes relay traffic on channels they cannot decrypt. The entire extension strategy rests on it.
 
@@ -190,6 +219,8 @@ The first obstacle is that the reference's simulated radio is process-local, so 
 **The second obstacle is not removable, and it is the one that matters.** Captured UDP traffic carries `hop_limit` and `hop_start` **absent, i.e. zero**. A packet with no hops left is not a candidate for rebroadcast at all, so this transport never reaches the managed-flooding decision — the exact decision the question is about. Two nodes exchanging over UDP demonstrate delivery, not relay.
 
 So the position is unchanged in substance and better understood: settling this needs two real radios. A local UDP mesh will produce traffic that *looks* like a mesh and cannot answer the question, which makes it a trap worth naming rather than a route worth trying.
+
+**That prediction held.** Two real radios settled it in a single afternoon, and the local routes never could have. Recorded because the reasoning was right for the right reason, and the same shape of argument applies to what is still open: the packed header bytes are not obtainable from any local boundary either.
 
 ---
 
