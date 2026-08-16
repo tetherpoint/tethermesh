@@ -1,0 +1,53 @@
+{
+  "corpus": "routing_ack",
+  "boundary": "a stock node's acknowledgement frames, captured on the air and decrypted with our own code",
+  "provenance": {
+    "captured": "2026-08-16",
+    "responder": "Heltec V3, stock Meshtastic 2.7.26.54e0d8d, US/LongFast",
+    "observer": "Heltec V3 running instruments/heltec_v3_sniffer",
+    "method": "Two probes were sent with want_ack set and the replies captured: one channel-encrypted direct message, and one PKI direct message. The node's responses were decrypted and decoded by tests/host_unit, not by any third-party tool.",
+    "why": "WIRE_REFERENCE.md records PortNum ROUTING = 5 but has never recorded that message's structure, so acknowledgement GENERATION could not be implemented from verified facts. Rather than guess the layout, a stock node was asked for one.",
+    "note": "Our two nodes only. Ambient third-party traffic seen during capture is excluded per TESTING.md.",
+    "clean_room_note": "Black-box: transmissions captured off the air and decoded with our own codec."
+  },
+  "acknowledgement_shape": {
+    "portnum": 5,
+    "carrier": "Data.request_id echoes the ORIGINAL packet's id. That is the whole matching key, and it needs nothing beyond fields this project had already verified.",
+    "payload": "a Routing message, carried as Data.payload",
+    "routing_field_3": "the status. 0 on success, non-zero on rejection."
+  },
+  "observations": [
+    {
+      "case": "PKI direct message, accepted",
+      "request_id": "0x0bae0475",
+      "routing_payload_hex": "1800",
+      "routing_field_3": 0,
+      "channel_byte": "0x08",
+      "header_flags": "0x4a",
+      "want_ack_on_the_ack": true,
+      "transmissions_observed": 3,
+      "note": "SUCCESS IS ENCODED EXPLICITLY AS FIELD 3 = 0, not omitted. proto3 normally drops a zero varint, so an acknowledgement generated from first principles would have carried an EMPTY payload and might not have been recognised. This is the single most useful thing this capture produced."
+    },
+    {
+      "case": "channel-encrypted direct message to a node holding our public key, rejected",
+      "request_id": "0x0bac0410",
+      "routing_payload_hex": "1806",
+      "routing_field_3": 6,
+      "channel_byte": "0x08",
+      "header_flags": "0x42",
+      "want_ack_on_the_ack": false,
+      "transmissions_observed": 1,
+      "note": "A non-zero status. The enum NAME for 6 is not established here -- naming it needs the schema read as specification. Recorded as an observed value, not interpreted. The plausible cause is that the destination holds our public key and expects PKI for direct messages, but that is inference and is not claimed."
+    }
+  ],
+  "findings": [
+    "The acknowledgement is returned CHANNEL-ENCRYPTED (channel byte 0x08) even when the message being acknowledged was PKI (channel byte 0x00). The reply does not inherit the request's encryption mode.",
+    "The positive acknowledgement itself sets want_ack, and was therefore retransmitted three times on the measured ~7 s ladder because this stack never acknowledges anything. The rejection did NOT set want_ack and was sent once. That asymmetry is observed, not explained.",
+    "hop_limit on both replies was 2 with hop_start 2, against the probe's 3."
+  ],
+  "consequence_for_our_implementation": {
+    "matching": "Match an incoming Data with portnum 5 on request_id against the pending queue. No knowledge of the Routing message is needed to match -- only to interpret status.",
+    "generation": "Emit Data{portnum:5, request_id:<their id>} with payload Routing{field 3 = 0}, encoded EXPLICITLY as the two bytes 18 00, on the channel rather than PKI.",
+    "do_not_copy": "Setting want_ack on our own acknowledgements would mean retransmitting them when nobody acks an ack, spending shared airtime for no delivery benefit. Observed upstream; deliberately not adopted."
+  }
+}

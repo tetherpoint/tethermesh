@@ -324,6 +324,30 @@ So items 1 and 2 were reachable by exactly three routes, and passive local captu
 
 ---
 
+## ACKNOWLEDGEMENTS — MEASURED 2026-08-16
+
+`PortNum ROUTING = 5` was known from the schema; the message it carries was not, so acknowledgement **generation** could not be written from verified facts. A stock node was asked for one instead. Record in `tests/captures/routing_ack.json`.
+
+```
+Data { portnum: 5, request_id: <the original packet's id>, payload: <Routing> }
+Routing field 3 = 0   accepted
+Routing field 3 = 6   rejected (one observed case)
+```
+
+**`Data.request_id` is the whole matching key**, and it needs nothing this project had not already verified. Matching an acknowledgement requires no knowledge of the `Routing` message at all — only interpreting its *status* does.
+
+**Success is encoded EXPLICITLY as field 3 = 0 — the two bytes `18 00` — not omitted.** proto3 normally drops a zero varint, so an acknowledgement generated from first principles would have carried an empty payload. This is the single most useful thing the capture produced, and it is exactly the kind of detail that is invisible until something refuses to accept your frame.
+
+Three further observations, recorded as observed rather than explained:
+
+- **The reply comes back channel-encrypted (`ch=0x08`) even when the message being acknowledged was PKI (`ch=0x00`).** The acknowledgement does not inherit the request's encryption mode.
+- **The positive acknowledgement itself sets `want_ack`**, and was therefore retransmitted three times on the ~7 s ladder, because this stack never acknowledges anything. The rejection did **not** set `want_ack` and was sent once. The asymmetry is observed; no explanation is claimed.
+- `hop_limit` on both replies was 2 with `hop_start` 2, against the probe's 3.
+
+**The enum name for status 6 is not established here.** Naming it needs the schema read as specification. The plausible cause — the destination holds our public key and expects PKI for direct messages, and the probe was channel-encrypted — is inference and is not claimed.
+
+---
+
 ## RETRY BEHAVIOUR — MEASURED 2026-08-16
 
 A stock node was driven to send a `want_ack` direct message to a node that **never acknowledges anything**, and every transmission was captured on the air with a firmware timestamp. Withholding the acknowledgement required no special mode: this stack sends none at all. Record in `tests/captures/retry_behaviour.json`.

@@ -2469,6 +2469,9 @@ fn emit_pki_dm_frame_for_the_bench() {
         id,
         hop_limit: 3,
         hop_start: 3,
+        // DM_ACK=1 requests an acknowledgement, which is how a real ROUTING
+        // response is obtained rather than guessed at.
+        want_ack: std::env::var("DM_ACK").is_ok(),
         channel: 0x00, // the PKI marker
         relay_node: (FROM & 0xFF) as u8,
         ..Header::default()
@@ -2648,4 +2651,90 @@ fn the_measured_contention_window_matches_the_constant_that_cites_it() {
          on hardware — the constant must not claim a smaller window than measured",
         ContentionWindow::MESHTASTIC_SHAPE.max_slots
     );
+}
+
+/// A channel-encrypted text addressed to a specific node, with `want_ack` set.
+///
+/// Built to make a stock node **send us an acknowledgement**, so the `ROUTING`
+/// message it replies with can be captured and decoded. `WIRE_REFERENCE.md`
+/// records `PortNum ROUTING = 5` but has never recorded that message's
+/// structure, so acknowledgement *generation* cannot be implemented from
+/// verified facts — only acknowledgement *matching*, which needs nothing but
+/// `Data.request_id`.
+///
+/// Rather than guess the layout, ask for one. `PEER_NODE` is the destination,
+/// `WA_ID` overrides the packet id.
+#[test]
+fn emit_want_ack_probe_for_the_bench() {
+    const FROM: u32 = 0x7e57_0001;
+    let Ok(peer) = std::env::var("PEER_NODE") else {
+        println!("WANT_ACK_FRAME skipped — set PEER_NODE");
+        return;
+    };
+    let to = u32::from_str_radix(peer.trim_start_matches("0x"), 16).expect("PEER_NODE hex");
+    let id: u32 = std::env::var("WA_ID").ok()
+        .and_then(|v| u32::from_str_radix(v.trim_start_matches("0x"), 16).ok())
+        .unwrap_or(0x0bad_ac00);
+
+    let Psk::Aes128(key) = expand_psk(&[0x01]).unwrap() else { panic!() };
+    let data = Data {
+        portnum: PortNum::TEXT_MESSAGE_APP.0,
+        payload: b"ack-probe",
+        ..Data::default()
+    };
+    let mut payload = [0u8; 64];
+    let plen = data.encode(&mut payload).expect("Data encode");
+
+    let header = Header {
+        to,
+        from: FROM,
+        id,
+        hop_limit: 3,
+        hop_start: 3,
+        want_ack: true,          // the whole point
+        channel: channel_hash(b"LongFast", &key),
+        relay_node: (FROM & 0xFF) as u8,
+        ..Header::default()
+    };
+    let mut fb = [0u8; frame::MAX_FRAME];
+    let n = frame::encode(&header, &payload[..plen], &key, 0, &mut fb).expect("frame encode");
+    println!("WANT_ACK_FRAME {}", fb[..n].iter().map(|b| format!("{b:02x}")).collect::<String>());
+}
+
+/// Decode a captured frame supplied as hex, for bench analysis.
+///
+/// Exists because `WIRE_REFERENCE.md` records `PortNum ROUTING = 5` and has
+/// never recorded that message's structure. Rather than guess it, a stock node
+/// was asked for an acknowledgement and this decodes what it sent.
+#[test]
+fn decode_supplied_frame_for_the_bench() {
+    let Ok(hex) = std::env::var("FRAME_HEX") else {
+        println!("DECODE skipped — set FRAME_HEX");
+        return;
+    };
+    let mut f = hex_to_bytes(&hex);
+    let Psk::Aes128(key) = expand_psk(&[0x01]).unwrap() else { panic!() };
+    let hdr = Header::decode(&f).expect("header");
+    println!(
+        "HDR to={:08x} from={:08x} id={:08x} hop_limit={} want_ack={} hop_start={} ch={:02x} relay={:02x}",
+        hdr.to, hdr.from, hdr.id, hdr.hop_limit, hdr.want_ack, hdr.hop_start, hdr.channel, hdr.relay_node
+    );
+    let (_, plain) = frame::decode_in_place(&mut f, &key, 0).expect("decrypt");
+    println!("PLAIN {}", plain.iter().map(|b| format!("{b:02x}")).collect::<String>());
+    match Data::decode(plain) {
+        Ok(d) => {
+            println!(
+                "DATA portnum={} payload_len={} want_response={} dest={:08x} source={:08x} request_id={:08x} reply_id={:08x}",
+                d.portnum, d.payload.len(), d.want_response, d.dest, d.source, d.request_id, d.reply_id
+            );
+            println!("DATA payload={}", d.payload.iter().map(|b| format!("{b:02x}")).collect::<String>());
+            // Walk the payload as raw protobuf — this is the message whose
+            // structure is not in the wire reference.
+            let mut r = Reader::new(d.payload);
+            while let Ok(Some(f)) = r.next_field() {
+                println!("  ROUTING field {} = {:?}", f.number, f.value);
+            }
+        }
+        Err(e) => println!("DATA decode failed: {e:?}"),
+    }
 }
