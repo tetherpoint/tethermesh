@@ -1,0 +1,257 @@
+{
+  "corpus": "contention_window",
+  "boundary": "a stock node's own log, relaying broadcasts we transmitted at varying power",
+  "provenance": {
+    "captured": "2026-08-16",
+    "transmitter": "Heltec V3 running our heltec_v3_sniffer, TX power swept +14..-9 dBm via a PWR command added for this measurement",
+    "observer": "Heltec V3, stock Meshtastic 2.7.26.54e0d8d, US/LongFast, ~3 m away",
+    "method": "27 broadcast NodeInfo frames, each with a distinct packet id to defeat duplicate suppression. The node logs 'rx_snr found. hop_limit:N rx_snr:X' and 'Setting tx delay:Y' each time it relays; pairs were read from its own output.",
+    "note": "Our two nodes, our own frames. No third-party traffic. Publishable under TESTING.md.",
+    "clean_room_note": "Black-box observation of the reference node's log. No reference source was read."
+  },
+  "primary_axis_failed": {
+    "intent": "vary receive SNR to measure how the contention window scales with it",
+    "result": "FAILED. 23 dB of transmit power moved reported SNR by 1.25 dB (5.50 to 6.75).",
+    "why": "At ~3 m the link is far too strong. Even at -9 dBm the received level is roughly -46 dBm against an SF11/BW250 sensitivity near -134 dBm - about 88 dB of margin - so LoRa's reported SNR sits at its ceiling regardless of transmit power.",
+    "what_would_work": "Real attenuation (fixed pad or much greater separation), not a power setting. Until then the SNR SCALING of the window is unmeasured."
+  },
+  "measured": {
+    "samples": 33,
+    "snr_db": {
+      "min": 5.5,
+      "max": 6.75,
+      "spread": 1.25
+    },
+    "delay_ms": {
+      "min": 644,
+      "max": 3976
+    },
+    "slots": {
+      "min": 23,
+      "max": 142,
+      "mean": 79.8,
+      "median": 79,
+      "sorted": [
+        23,
+        24,
+        29,
+        29,
+        32,
+        37,
+        40,
+        41,
+        43,
+        46,
+        47,
+        51,
+        57,
+        66,
+        73,
+        79,
+        79,
+        87,
+        89,
+        91,
+        103,
+        103,
+        103,
+        104,
+        106,
+        116,
+        119,
+        130,
+        133,
+        134,
+        138,
+        140,
+        142
+      ]
+    },
+    "slot_time_ms": 28
+  },
+  "findings": [
+    {
+      "claim": "The transmit delay is a RANDOM DRAW, not a deterministic function of SNR.",
+      "evidence": "33 samples across a 1.25 dB SNR span produced delays from 644 to 3976 ms, a 3332 ms spread. A deterministic mapping cannot produce that at fixed input.",
+      "status": "SETTLED. This was the specific ambiguity a single earlier sample could not resolve."
+    },
+    {
+      "claim": "Delays are quantised to the 28 ms slot time.",
+      "evidence": "All 33 delays are exact integer multiples of 28 ms, with no exceptions.",
+      "status": "SETTLED. Confirms the window is counted in slots, and that the slot time the node reports is the quantum actually used."
+    },
+    {
+      "claim": "At roughly 6 dB SNR the window reaches at least 142 slots.",
+      "evidence": "Observed slot draws span 23..142, mean 79.8, median 79, broadly uniform across the range.",
+      "status": "MEASURED AT ONE SNR ONLY. With 33 uniform samples the true upper bound is likely somewhat above 142; the low end of the window, at low SNR, is NOT measured because the SNR axis could not be varied."
+    }
+  ],
+  "consequence_for_our_implementation": "meshtastic/core/routing.rs shipped ContentionWindow::MESHTASTIC_SHAPE with max_slots = 8. The measured window at high SNR is at least 142 slots - wrong by more than an order of magnitude. The documented DIRECTION was right; the scale was a guess and the guess was bad. Separately, slots_for_snr returned a deterministic wait, whereas the real behaviour draws uniformly within the window.",
+  "pairs": [
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 5.5,
+      "tx_delay_ms": 1316
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.25,
+      "tx_delay_ms": 644
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 5.75,
+      "tx_delay_ms": 2884
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.25,
+      "tx_delay_ms": 2212
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.25,
+      "tx_delay_ms": 896
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.25,
+      "tx_delay_ms": 2968
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.0,
+      "tx_delay_ms": 1036
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 5.75,
+      "tx_delay_ms": 2212
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.5,
+      "tx_delay_ms": 3920
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.5,
+      "tx_delay_ms": 2044
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.5,
+      "tx_delay_ms": 812
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.25,
+      "tx_delay_ms": 2548
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.0,
+      "tx_delay_ms": 1148
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.75,
+      "tx_delay_ms": 2436
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.0,
+      "tx_delay_ms": 3752
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.75,
+      "tx_delay_ms": 1428
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.0,
+      "tx_delay_ms": 1288
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.0,
+      "tx_delay_ms": 2884
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.0,
+      "tx_delay_ms": 3640
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.25,
+      "tx_delay_ms": 812
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.75,
+      "tx_delay_ms": 1596
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.5,
+      "tx_delay_ms": 672
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.0,
+      "tx_delay_ms": 2884
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 5.75,
+      "tx_delay_ms": 2492
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 5.75,
+      "tx_delay_ms": 3976
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.25,
+      "tx_delay_ms": 3864
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 5.75,
+      "tx_delay_ms": 1848
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 5.75,
+      "tx_delay_ms": 3332
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.0,
+      "tx_delay_ms": 3724
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.0,
+      "tx_delay_ms": 1120
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.25,
+      "tx_delay_ms": 1204
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.5,
+      "tx_delay_ms": 2912
+    },
+    {
+      "hop_limit": 2,
+      "rx_snr_db": 6.5,
+      "tx_delay_ms": 3248
+    }
+  ]
+}

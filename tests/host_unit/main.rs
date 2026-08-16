@@ -2108,9 +2108,9 @@ fn relaying_decrements_the_hop_limit_by_exactly_one() {
         0,
     );
     match d {
-        Relay::After { hop_limit, slots } => {
+        Relay::After { hop_limit, window_slots } => {
             assert_eq!(hop_limit, 2, "hop limit must be spent exactly once");
-            assert!(slots > 0);
+            assert!(window_slots > 0);
         }
         Relay::No(r) => panic!("expected a relay, got {r:?}"),
     }
@@ -2565,5 +2565,62 @@ fn every_measured_modem_preset_agrees_with_our_airtime_model() {
         checked, 9,
         "expected nine valid presets in the fixture; a changed fixture must be \
          re-adjudicated rather than silently checked less"
+    );
+}
+
+/// The measured contention window, tied to the constant that claims it.
+///
+/// `tests/captures/contention_window.json` records 33 relays observed off a
+/// stock node. This asserts the two properties that measurement settled and
+/// that `ContentionWindow::MESHTASTIC_SHAPE` now depends on, so the constant
+/// cannot drift from its evidence.
+///
+/// **The SNR axis of that measurement failed** — 23 dB of transmit power moved
+/// reported SNR by 1.25 dB, because at 3 m the link sits ~88 dB above
+/// sensitivity and LoRa's reported SNR is pegged. So this checks the window at
+/// ONE SNR. The low-SNR end, and therefore the slope, remain unmeasured, and
+/// the fixture says so in `primary_axis_failed`.
+#[test]
+fn the_measured_contention_window_matches_the_constant_that_cites_it() {
+    let doc = fs::read_to_string(captures_dir().join("contention_window.json"))
+        .expect("cannot read contention_window.json");
+
+    // Every observed delay was an exact multiple of the 28 ms slot time. That
+    // is what makes a slot-counted window the right model at all.
+    let mut delays: Vec<u32> = Vec::new();
+    let mut rest = doc.as_str();
+    while let Some(i) = rest.find("\"tx_delay_ms\":") {
+        rest = &rest[i + 14..];
+        let tail = rest.trim_start();
+        let end = tail.find(|c: char| !c.is_ascii_digit()).unwrap_or(tail.len());
+        if let Ok(v) = tail[..end].parse::<u32>() {
+            delays.push(v);
+        }
+    }
+    assert!(delays.len() >= 30, "expected the full sample, got {}", delays.len());
+
+    for d in &delays {
+        assert_eq!(d % 28, 0, "delay {d} ms is not a multiple of the 28 ms slot time");
+    }
+
+    // The backoff is a random draw, not a fixed delay. If this spread ever
+    // collapsed, `Relay::After` handing back a window rather than a wait would
+    // no longer be justified.
+    let lo = *delays.iter().min().expect("min");
+    let hi = *delays.iter().max().expect("max");
+    assert!(
+        hi - lo > 2_000,
+        "delays spread only {} ms at near-constant SNR; that looks deterministic, \
+         and would invalidate treating the result as a window",
+        hi - lo
+    );
+
+    // The constant must cover what was actually observed.
+    let max_slots_seen = u8::try_from(hi / 28).expect("slot count fits");
+    assert!(
+        ContentionWindow::MESHTASTIC_SHAPE.max_slots >= max_slots_seen,
+        "MESHTASTIC_SHAPE.max_slots is {} but {max_slots_seen} slots were observed \
+         on hardware — the constant must not claim a smaller window than measured",
+        ContentionWindow::MESHTASTIC_SHAPE.max_slots
     );
 }

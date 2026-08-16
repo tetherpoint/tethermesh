@@ -21,23 +21,34 @@
 //!
 //! # What is ours, and must not be mistaken for theirs
 //!
-//! **The contention-window *mechanism* is documented; its *bounds* are not.**
-//! The official documentation states the direction — *"The CW size is small
-//! for a low SNR, such that nodes that are further away are more likely to
-//! flood first"* — and that is all any primary source read so far provides.
-//! The actual `CW_MIN`/`CW_MAX`, and the SNR range they map across, have
-//! **never been observed**.
+//! **The mechanism is documented; the bounds were guessed, and the guess was
+//! measured and found badly wrong.** The official documentation gives only the
+//! direction — *"The CW size is small for a low SNR, such that nodes that are
+//! further away are more likely to flood first"*.
 //!
-//! So [`ContentionWindow::MESHTASTIC_SHAPE`] is **our** parameterisation. It
-//! reproduces the documented direction and nothing more. Two consequences,
-//! both stated rather than buried:
+//! On 2026-08-16 a bench measurement established three things a single earlier
+//! observation could not. Full record in
+//! `tests/captures/contention_window.json`:
 //!
-//! - A node using these values interoperates — the frames are identical and
-//!   suppression still works — but its *timing* will not match a stock node's,
-//!   so it may win or lose races it would otherwise have lost or won.
-//! - Nothing here may be cited as evidence of what upstream does. Settling it
-//!   needs a capture of several nodes relaying one frame, timed. That is
-//!   recorded as an open item in `WIRE_REFERENCE.md`.
+//! 1. **The backoff is a random draw, not a fixed delay.** 33 relays at
+//!    essentially constant SNR produced delays spread across 3332 ms. No
+//!    deterministic mapping does that from a constant input. This is why
+//!    [`Relay::After`] hands back a *window* rather than a wait.
+//! 2. **Delays are quantised to the slot time.** All 33 were exact multiples
+//!    of 28 ms, with no exceptions.
+//! 3. **The window at ~6 dB SNR reaches at least 142 slots**, where this module
+//!    originally guessed a maximum of 8 — wrong by more than an order of
+//!    magnitude.
+//!
+//! **What is still ours: the low-SNR end.** The SNR axis could not be varied on
+//! this bench — at ~3 m even −9 dBm leaves roughly 88 dB of margin over
+//! sensitivity, so reported SNR stayed pegged across a 23 dB power sweep. So
+//! `max_slots` is measured and `min_slots` is not, and the slope between them
+//! is unconstrained. Measuring it needs real attenuation, not a power setting.
+//!
+//! A node using these values interoperates regardless — the frames are
+//! identical and suppression still works — but its *timing* will not match a
+//! stock node's until the low end is measured too.
 //!
 //! Per `DISTRIBUTION.md`, the answer to an unknown like this is our own design
 //! plus a citation of the wire behaviour it implements — never a read of their
@@ -86,21 +97,45 @@ pub struct ContentionWindow {
 }
 
 impl ContentionWindow {
-    /// **Our** parameterisation of the documented shape. See the module note:
-    /// the direction is upstream's, these numbers are not.
+    /// The documented shape, with the **high-SNR end now measured** and the
+    /// low-SNR end still ours.
     ///
-    /// SNR is quarter-dB signed, the unit `WIRE_REFERENCE.md` established from
-    /// a traceroute reply carrying `snr_towards: [26]` for 6.5 dB. The range
-    /// spans −20 dB (`-80`) to +10 dB (`40`), which covers the usable span of
-    /// these spreading factors comfortably at both ends.
+    /// # This was wrong, and measurement caught it
+    ///
+    /// The first version of this constant used `max_slots: 8`. On 2026-08-16 a
+    /// bench measurement observed a stock node drawing **up to 142 slots** at
+    /// roughly 6 dB SNR — wrong by more than an order of magnitude. The
+    /// documented *direction* was right; the *scale* was a guess, and the guess
+    /// was bad. Recorded rather than quietly corrected, because it is the
+    /// clearest illustration in this crate of what an unmeasured parameter is
+    /// worth.
+    ///
+    /// # What is measured and what is not
+    ///
+    /// 33 relays observed at 5.50–6.75 dB gave slot draws spanning 23–142,
+    /// mean 79.8, consistent with a uniform draw over roughly 17–143 slots.
+    /// `max_slots` is set from that. With 33 samples the true bound is likely a
+    /// little above the largest draw, so 143 is a lower bound presented as a
+    /// value.
+    ///
+    /// **`min_slots` is still not measured.** The SNR axis could not be varied:
+    /// at ~3 m even −9 dBm leaves ~88 dB of margin over sensitivity, so
+    /// reported SNR stayed pegged across a 23 dB power sweep. Measuring the
+    /// low-SNR end needs real attenuation, not a power setting. See
+    /// `tests/captures/contention_window.json`.
     pub const MESHTASTIC_SHAPE: Self = Self {
-        min_slots: 2,
-        max_slots: 8,
+        // NOT MEASURED. The documented direction says the window is small for a
+        // weak signal; how small is unknown.
+        min_slots: 8,
+        // Measured: largest observed draw at ~6 dB SNR, +1.
+        max_slots: 143,
         snr_floor_quarter_db: -80,
         snr_ceil_quarter_db: 40,
     };
 
-    /// Window size for a received frame's SNR, in slots.
+    /// Width of the contention window for a received frame's SNR, in slots.
+    ///
+    /// The caller draws uniformly in `[0, result)`. This is not a delay.
     ///
     /// **Small window for weak signal.** A distant node hears the originator
     /// faintly, draws a short backoff and relays early; a near node waits and
@@ -162,14 +197,34 @@ pub enum Suppressed {
 /// The outcome of the rebroadcast decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Relay {
-    /// Relay after waiting this many contention slots.
+    /// Relay after a backoff drawn from this many contention slots.
     ///
-    /// The caller converts slots to time using its own slot duration and must
-    /// re-check for another node's relay while waiting — the wait is what
-    /// makes suppression possible, so skipping it defeats the mechanism.
+    /// # This is a WINDOW, not a wait
+    ///
+    /// The caller must **draw uniformly in `[0, window_slots)`** and wait that
+    /// many slots. It is not a delay to sit out verbatim.
+    ///
+    /// That distinction was a real defect here until 2026-08-16. This variant
+    /// originally carried a field named `slots` documented as the number to
+    /// wait, which is deterministic — and a deterministic backoff defeats the
+    /// entire mechanism, because every node hearing a frame at similar SNR
+    /// would transmit at the same instant and collide rather than suppress.
+    /// Measurement settled it: 33 relays observed at essentially fixed SNR
+    /// produced delays spread over 3332 ms, which no deterministic mapping can
+    /// produce from a constant input.
+    ///
+    /// **The draw belongs to the caller because this crate has no entropy.**
+    /// `DISTRIBUTION.md` forbids global state and this is `no_std` with no RNG;
+    /// inventing one here would be worse than handing the caller a window.
+    ///
+    /// The caller converts slots to time using its own slot duration — measured
+    /// at 28 ms for LongFast, and every observed delay was an exact multiple of
+    /// it — and must re-check for another node's relay while waiting. The wait
+    /// is what makes suppression possible, so skipping it defeats the point.
     After {
-        /// Contention slots to wait before transmitting.
-        slots: u8,
+        /// Width of the contention window, in slots. Draw uniformly in
+        /// `[0, window_slots)`; do not wait this value directly.
+        window_slots: u8,
         /// `hop_limit` already decremented, to write into the relayed frame.
         hop_limit: u8,
     },
@@ -226,7 +281,7 @@ pub fn should_relay(
         return Relay::No(Suppressed::DutyBudgetExhausted);
     }
     Relay::After {
-        slots: window.slots_for_snr(observed.snr_quarter_db),
+        window_slots: window.slots_for_snr(observed.snr_quarter_db),
         hop_limit,
     }
 }
