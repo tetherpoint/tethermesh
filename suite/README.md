@@ -31,7 +31,15 @@ Deliberately *not* included: per-message author signatures. Upstream is adding X
 
 A Meshtastic channel is a group in the user interface but not in structure: membership is implicit, being whoever holds the key. Nobody — including whoever created it — can enumerate the members, add one, or remove one. There is no owner and no revocation; a departed member keeps the key forever.
 
+**Put more sharply, and confirmed against upstream's own documentation on 2026-08-16: the URL *is* the key exchange.** The pre-shared key travels inside the channel link, so sharing the link shares the key and there is no separate exchange step to attach membership to. Upstream states the consequence plainly — *"there is no per-member revocation; revoking access means rotating the key and re-sharing a new URL"* — which is not a gap in their implementation but the design working as intended for what it is.
+
+**Nothing upstream addresses this, and nothing appears to be coming.** The 2.8.x work is XEdDSA packet signing, which this suite deliberately does not duplicate, and `KEY_VERIFICATION_APP = 12` addresses trust-on-first-use. Both are adjacent to membership and neither is membership. Re-checked 2026-08-16 against the published encryption documentation.
+
 The extension adds an **owner, a member roster, invitation, and revocation via a channel epoch**. The epoch costs one byte per packet; rekeying costs one wrapped key per member and is therefore a deliberate, infrequent act rather than a routine one.
+
+**What revocation does and does not give, stated before anyone assumes otherwise.** It protects *future* traffic: a revoked member cannot read anything sent under a later epoch. It does **not** retroactively protect past traffic, because that traffic was encrypted under a key the member legitimately held. Upstream has the same property and says so — *"everything sent on a channel can be stored and decrypted later by anyone who gains access to the key"* — and this extension does not change it.
+
+**This is not forward secrecy and must not be described as such.** Achieving that would need per-message ephemeral keys, which costs a key exchange per message and is not viable at 233 bytes and sub-kilobit airtime. What the epoch buys is *membership control going forward*, which is a different and more modest property than the word "revocation" tends to suggest.
 
 This is the largest genuine gap in the protocol as it stands and nothing upstream addresses it.
 
