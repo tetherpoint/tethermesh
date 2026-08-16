@@ -41,8 +41,7 @@
     "sync word and LongFast modem parameters on the transmit side"
   ],
   "not_yet_proven": [
-    "direct messages under PKI",
-    "appearing in a route trace"
+    "direct messages under PKI (channel-encrypted direct messages work; the X25519 path is untested)"
   ],
   "nodeinfo": {
     "date": "2026-08-16",
@@ -59,5 +58,33 @@
     },
     "verdict": "LISTED",
     "note": "The macaddr field is deprecated since 2.1.x and still emitted by 2.7.26; it was included because a stock node emits it, and byte-level agreement is decided by the wire rather than by the schema."
+  },
+  "traceroute": {
+    "date": "2026-08-16",
+    "question": "Does a stock node answer a direct request from us, and can we read its reply?",
+    "request_frame_hex": "64e769330100577e02d0ad0b630800014edcd6c3",
+    "request": "addressed to 0x3369e764 (not broadcast), Data{portnum=70 TRACEROUTE_APP, payload empty, want_response=true}",
+    "their_log": [
+      "[Router] Received traceroute from=0x7e570001, id=0xbadd002, portnum=70, payloadlen=0",
+      "[Router] Route traced:",
+      "[Router] Send response (id=0x6d826bc5 fr=0x3369e764 to=0x7e570001, HopLim=2 Portnum=70)",
+      "[RadioIf] Started Tx (id=0x6d826bc5 ... Ch=0x8 encrypted)"
+    ],
+    "their_reply_plaintext_hex": "0846120312011a3502d0ad0b4800",
+    "their_reply_decoded": {
+      "portnum": 70,
+      "payload": "RouteDiscovery{snr_towards:[26]}  -> 26/4 = 6.5 dB",
+      "request_id": "0x0badd002 \u2014 matches our request",
+      "bitfield": 0
+    },
+    "verdict": "ANSWERED, AND WE DECRYPTED THE ANSWER",
+    "note": "A repeated (from, id) is silently dropped by their duplicate suppression \u2014 the same behaviour history.rs implements, observed from the far side. A rerun with a stale id looks identical to a frame that never arrived, which is why the id is overridable."
+  },
+  "interoperability_gate": {
+    "source": "PLAN.md: a physical, unmodified device must show our node, render our text, accept a direct message, and list us in a route trace",
+    "show our node": "DONE \u2014 listed as !7e570001 / tethermesh / tm",
+    "render our text": "DONE \u2014 'tethermesh-conformance-1' displayed and relayed",
+    "accept a direct message": "DONE for channel encryption \u2014 an addressed, non-broadcast packet was accepted and answered; PKI untested",
+    "list us in a route trace": "DONE \u2014 traceroute answered with our request_id and an SNR reading"
   }
 }

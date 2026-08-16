@@ -125,6 +125,8 @@ A side effect worth recording: the oracle **loaded a `ChannelFile` we hand-encod
 
 **Header fields confirmed present, with observed values:** `id` (32-bit), `from`, `to` (`0xffffffff` for broadcast), `hop_limit` (3 by default), `hop_start` (3), `want_ack`, the one-byte channel hash, `relay_node`, and a `transport` field observed as 0. Payload length is reported separately as `encrypted len`.
 
+**A traceroute reply carries `request_id` and per-hop SNR, and the SNR is quarter-dB.** Captured from a stock node answering our request: `Data{portnum=70, payload=RouteDiscovery{snr_towards:[26]}, request_id=0x0badd002}`. The 26 is 6.5 dB — SNR travels as quarter-dB signed units, matching the packet-status encoding the radio reports. `request_id` echoes the initiator's packet id, which is how a reply is matched to its request.
+
 **A deprecated schema field is still on the wire.** `User.macaddr` (field 4, `bytes`) is marked `[deprecated = true]` and was deprecated in Meshtastic 2.1.x, yet firmware 2.7.26 emits it in every `User` — six zero bytes. Anything reproducing reference output must carry it. The general form of this matters more than the instance: **the schema says what a field means, not whether it is transmitted**, so a codec derived from field numbers alone will be wrong in ways only comparison against real output reveals. Found exactly that way, by a wrapper failing to re-encode captured bytes.
 
 **Packet identifiers are 32-bit and re-randomised per packet** — the node logs `Initial packet id`, then `Partially randomized packet id` for each transmission. Relevant to the L2 packet-id discipline: under CTR a repeated `(packet_id, sender)` pair leaks the XOR of two plaintexts.

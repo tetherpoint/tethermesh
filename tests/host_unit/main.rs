@@ -1158,3 +1158,50 @@ fn emit_nodeinfo_frame_for_the_bench() {
         fb[..n].iter().map(|b| format!("{b:02x}")).collect::<String>()
     );
 }
+
+/// Emit a traceroute request addressed to the stock node.
+///
+/// `TRACEROUTE_APP` carries a `RouteDiscovery`, empty on the way out — the
+/// firmware appends each hop. Addressed rather than broadcast, and with
+/// `want_response`, because the interesting part is whether they answer.
+#[test]
+fn emit_traceroute_frame_for_the_bench() {
+    const FROM: u32 = 0x7e57_0001;
+    const TO: u32 = 0x3369_e764;          // the stock Heltec on the bench
+    // Overridable, because a repeated (from, id) is dropped by the receiver's
+    // duplicate suppression — the same behaviour history.rs implements, seen
+    // from the far side. A rerun with a stale id looks exactly like a frame
+    // that never arrived.
+    let id: u32 = std::env::var("TR_ID").ok()
+        .and_then(|v| u32::from_str_radix(v.trim_start_matches("0x"), 16).ok())
+        .unwrap_or(0x0bad_c0e0);
+
+    let Psk::Aes128(key) = expand_psk(&[0x01]).unwrap() else { panic!() };
+
+    let data = Data {
+        portnum: 70,                       // TRACEROUTE_APP
+        payload: &[],                      // empty RouteDiscovery
+        want_response: true,
+        ..Data::default()
+    };
+    let mut payload = [0u8; 64];
+    let plen = data.encode(&mut payload).expect("Data encode failed");
+
+    let header = Header {
+        to: TO,
+        from: FROM,
+        id,
+        hop_limit: 3,
+        hop_start: 3,
+        want_ack: false,
+        channel: channel_hash(b"LongFast", &key),
+        relay_node: (FROM & 0xFF) as u8,
+        ..Header::default()
+    };
+    let mut fb = [0u8; frame::MAX_FRAME];
+    let n = frame::encode(&header, &payload[..plen], &key, 0, &mut fb).expect("frame encode failed");
+    println!(
+        "TRACEROUTE_FRAME {}",
+        fb[..n].iter().map(|b| format!("{b:02x}")).collect::<String>()
+    );
+}

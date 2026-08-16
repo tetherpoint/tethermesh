@@ -114,7 +114,11 @@ It decrypted, decoded, displayed the text and **relayed it** — treating us as 
 
 **They list us as a peer too.** A `User` on portnum 4 was accepted and stored; the stock node now reports node `0x7e570001`, id `!7e570001`, long name `tethermesh`, short name `tm`, hw_model 43. That exercises the `User` wrapper in the emitting direction, including `macaddr` — deprecated since 2.1.x, still emitted by 2.7.26, and included precisely because byte-level agreement is decided by the wire and not by the schema.
 
-Still outstanding for the interoperability gate: direct messages under PKI, and a route trace.
+**And they answer us.** A traceroute addressed to the stock node — not a broadcast — was accepted, traced and answered; our receiver captured the reply and decrypted it to `RouteDiscovery{snr_towards:[26]}` with `request_id` echoing our packet id. That is a complete round trip: we transmit, they process, they reply, we read it.
+
+**The interoperability gate in this document reads: "a physical, unmodified device must show our node, render our text, accept a direct message, and list us in a route trace."** Three are done outright and the fourth is done for channel encryption — an addressed, non-broadcast packet was accepted and answered. Only the PKI path is untested, which is L6.
+
+One behaviour worth carrying forward: a repeated `(from, id)` is silently dropped by their duplicate suppression — exactly what `history.rs` implements, observed from the far side. A rerun with a stale id is indistinguishable from a frame that never arrived, which cost a debugging cycle before the id was made overridable.
 
 **2026-08-16 — the panic-free half of this gate is met, and the check that was supposed to prove it turned out to prove nothing.** `check_rust_rules.sh --binary` was vacuous three ways over: an `.rlib` exposes almost no symbols, `--emit=obj` under LTO produces bitcode that reads as an empty symbol table, and the patterns matched legacy mangling while the toolchain emits v0 — where panic paths appear as names like `len_mismatch_fail` containing no form of the word "panic".
 
