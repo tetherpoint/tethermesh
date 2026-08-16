@@ -13,6 +13,7 @@ use std::path::PathBuf;
 
 use tethermesh::channel::channel_hash;
 use tethermesh::message::{ChannelSettings, Data, PortNum, User};
+use tethermesh::packet_id::{NextId, PacketIdSource};
 use tethermesh::protobuf::{Error as ProtoError, Reader, Value, Writer};
 
 fn captures_dir() -> PathBuf {
@@ -519,4 +520,143 @@ fn channel_settings_round_trip_and_feed_the_verified_hash() {
         Some(0x08),
         "the primary channel's settings did not produce the hash the oracle used"
     );
+}
+
+/// Simulate a node that reboots at arbitrary, hostile moments.
+///
+/// Returns every identifier it managed to transmit. The rule modelled is the
+/// one that matters: an identifier counts as used the moment it is handed
+/// out, and a crash may occur between a durable write and the next write, or
+/// part-way through a block, or immediately after resuming.
+fn run_with_reboots(seed: u32, block: u32, reboots: &[usize]) -> Vec<u32> {
+    let mut issued = Vec::new();
+    // What survived the last crash. Only ever what was actually written.
+    let mut durable = seed;
+
+    for &packets_before_crash in reboots {
+        let mut src = PacketIdSource::resume(durable, block);
+        let mut sent = 0usize;
+        while sent < packets_before_crash {
+            match src.issue() {
+                NextId::Ready(id) => {
+                    issued.push(id);
+                    sent += 1;
+                }
+                NextId::PersistFirst { high_water } => {
+                    // The write lands, then is acknowledged. This is the only
+                    // point at which `durable` may move.
+                    durable = high_water;
+                    src.persisted(high_water);
+                }
+                NextId::Exhausted => return issued,
+            }
+        }
+        // Crash here: anything reserved-but-unissued is lost, and `durable`
+        // keeps whatever was last written.
+    }
+    issued
+}
+
+/// PLAN's L2 requirement, stated there as: no `(packet_id, sender)` pair
+/// repeats across a simulated reboot.
+///
+/// The sender is fixed for a given node, so the pair repeats exactly when the
+/// identifier does. Under CTR that reissues a keystream, and the published
+/// documentation says an attacker who deduces one plaintext can then forge
+/// using the pair without the PSK. So this is a forgery test, not a
+/// uniqueness nicety.
+#[test]
+fn packet_ids_never_repeat_across_reboots() {
+    // Reboot after wildly varying numbers of packets, including 0 and values
+    // that land mid-block and exactly on block boundaries.
+    let schedules: &[&[usize]] = &[
+        &[0, 1, 1, 1, 1],
+        &[5, 5, 5, 5, 5],
+        &[256, 1, 255, 257, 3],
+        &[1000, 1, 1, 999],
+        &[7, 0, 13, 0, 1, 512],
+    ];
+    for (n, schedule) in schedules.iter().enumerate() {
+        for &block in &[1u32, 4, 256] {
+            let ids = run_with_reboots(0, block, schedule);
+            let unique: std::collections::HashSet<u32> = ids.iter().copied().collect();
+            assert_eq!(
+                unique.len(),
+                ids.len(),
+                "schedule {n} block {block}: {} identifiers issued, {} distinct — \
+                 a repeat reissues a CTR keystream",
+                ids.len(),
+                unique.len()
+            );
+        }
+    }
+}
+
+/// Identifiers are only issued below a mark that is already durable.
+///
+/// This is the property that makes the reboot test hold for reboots that
+/// were not simulated, rather than only for the schedules listed above.
+#[test]
+fn no_id_is_issued_beyond_what_was_persisted() {
+    let mut src = PacketIdSource::resume(0, 8);
+    let mut durable: Option<u32> = None;
+    for _ in 0..64 {
+        match src.issue() {
+            NextId::Ready(id) => {
+                let mark = durable.expect("issued an identifier before anything was persisted");
+                assert!(
+                    id < mark,
+                    "issued {id} but only {mark} is durable — an unclean restart would reissue it"
+                );
+            }
+            NextId::PersistFirst { high_water } => {
+                durable = Some(high_water);
+                src.persisted(high_water);
+            }
+            NextId::Exhausted => break,
+        }
+    }
+}
+
+/// A stale or replayed confirmation must not move the mark backwards.
+#[test]
+fn a_stale_persist_confirmation_cannot_reopen_used_ids() {
+    let mut src = PacketIdSource::resume(100, 16);
+    let NextId::PersistFirst { high_water } = src.issue() else {
+        panic!("expected a reservation first")
+    };
+    src.persisted(high_water);
+    let NextId::Ready(first) = src.issue() else {
+        panic!("expected an identifier")
+    };
+
+    src.persisted(0);
+    src.persisted(high_water.saturating_sub(8));
+    assert_eq!(src.reserved_until(), high_water, "the mark moved backwards");
+
+    let NextId::Ready(second) = src.issue() else {
+        panic!("expected an identifier")
+    };
+    assert!(second > first);
+}
+
+/// Exhaustion is reported, not wrapped.
+///
+/// Wrapping would reissue every identifier from the beginning, which is
+/// precisely the failure this type exists to prevent.
+#[test]
+fn exhaustion_is_reported_rather_than_wrapping() {
+    let mut src = PacketIdSource::resume(u32::MAX, 16);
+    let mut saw_exhausted = false;
+    for _ in 0..8 {
+        match src.issue() {
+            NextId::Exhausted => {
+                saw_exhausted = true;
+                break;
+            }
+            NextId::PersistFirst { high_water } => src.persisted(high_water),
+            NextId::Ready(id) => assert_eq!(id, u32::MAX, "issued past the end of the space"),
+        }
+    }
+    assert!(saw_exhausted, "ran off the end of the identifier space without saying so");
 }

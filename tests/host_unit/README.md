@@ -54,6 +54,14 @@ Per the rule above, recorded rather than claimed:
 | protobuf round-trip (L3 gate) | made the writer emit **non-minimal** varints | gate failed on the first message |
 | proto3 default omission | made the encoder emit a zero-valued field | `an all-default Data encoded to 2 bytes, expected 0` |
 | `User` wrapper vs reference bytes | *not deliberate* — the wrapper was missing `macaddr` | failed with a 38-byte re-encode against 46 reference bytes |
+| `packet_id` non-repeat across reboot | issued identifiers before the high-water mark was durable — the RAM-only-counter bug | `4 identifiers issued, 1 distinct` |
+
+The `packet_id` row is the domain red list's *"`packet_id` must **not** repeat
+across a simulated reboot"*, and it is worth noting what the broken version
+looked like: perfectly reasonable code that reserves a block and hands out an
+identifier in the same step. It passes any single-run test. It only fails
+once a restart is modelled, and then it reissues the *same* identifier every
+time — which under CTR reissues a keystream.
 
 The `User` row is the useful one, because nobody planted it. The wrapper was
 built from a list of field numbers extracted with a regex that matched

@@ -48,4 +48,5 @@
 
 pub mod channel;
 pub mod message;
+pub mod packet_id;
 pub mod protobuf;

@@ -48,6 +48,12 @@ Header pack and unpack, channel hash, AES-CTR with the verified nonce constructi
 
 Includes the **packet-id discipline**: drawn from a CSPRNG and persisted across restart, with a test proving no `(packet_id, sender)` pair repeats across a simulated reboot. This is not hygiene — under CTR, a repeated pair leaks the XOR of two plaintexts, and the identifier is only 32 bits.
 
+**2026-08-16 — the packet-id discipline is done**, ahead of the rest of L2, because it needs no header layout and is the part with a security consequence. `meshtastic/core/packet_id.rs`.
+
+It is a **counter, not a CSPRNG draw**, which is a deliberate departure from the line above. At 32 bits, random identifiers collide by the birthday bound after roughly 77,000 packets — a figure a busy node reaches — while a counter cannot collide until it wraps. Entropy still belongs at the seed, so a fresh node does not start at zero and announce its restarts, but the sequence itself must be a counter.
+
+The hard part is restart, and the resolution is a **high-water mark persisted ahead of use, in blocks**: identifiers are only ever issued below a value already durably stored, so a power loss can lose the unissued remainder of a block and never an identifier that was actually used. One write per block instead of one per packet, which matters on flash with a finite erase budget. The API returns `PersistFirst` instead of an identifier when the mark must be written, so the obligation cannot be skipped by accident. Exhaustion is reported rather than wrapped — a node that stops identifying packets is visibly broken, which beats one that quietly starts leaking plaintext XORs.
+
 **Gate:** a real captured frame decrypts to parseable payload bytes.
 
 ## L3 — protobuf codec
