@@ -37,9 +37,12 @@ meshtastic/core/              header · channel hash · AES-CTR · protobuf code
 meshtastic/routing/           managed flood · dedup · hop limit · duty accounting
 suite/                        the extension suite and its specification
 tests/host_unit/              algorithmic tests, green and red
-tests/captures/               real on-air frames as replay fixtures
+tests/captures/               replay fixtures, synthetic-equivalent
+DEPS.md                       what every result was obtained against
 tools/check_cleanroom.sh      the GPL gate
 ```
+
+The reference implementation, the harness that drives it and the tools that fetch it are **not** in this tree. They live in a sibling directory alongside the hardware bench's copy, untracked — see `TESTING.md` and that directory's own `RULE.md`. What stays here is the provenance of our claims and fixtures that are ours to publish.
 
 Portable `no_std` Rust with no hardware dependency, exported over a C ABI. A radio driver is deliberately not included — implementers have their own, and tying the stack to one part would narrow it for no benefit.
 
