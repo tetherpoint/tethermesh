@@ -245,17 +245,21 @@ These are commonly asserted in secondary descriptions and are **not** confirmed 
 5. ~~**The raw sync-word register value**~~ — **RESOLVED 2026-08-16**: `0x0740 = 0x24`, `0x0741 = 0xB4`, confirmed by decoding real traffic.
 6. **Preset SF/BW/CR parameters** — **LongFast resolved** (SF11 / BW250 / CR4/5); sixteen presets remain, including the 62.5 kHz and 20 kHz variants.
 
-**Resolving these needs either an authoritative byte-level document or a first capture.** Item 3 is now resolved. Items 1 and 2 remain, and the route to them is narrower than this document previously assumed.
+**Only item 6 remains.** Items 1–5 are resolved above, each by capture or observation rather than by assertion. Sixteen presets are outstanding, and they are bounded rather than unknown: the method that resolved LongFast works unchanged.
+
+~~**Resolving these needs either an authoritative byte-level document or a first capture.** Item 3 is now resolved. Items 1 and 2 remain, and the route to them is narrower than this document previously assumed.~~ **Struck 2026-08-16** — this sentence and the three-routes analysis below it were written while items 1 and 2 were open, and were left standing when the capture closed them. The analysis is kept because it is *how* they were closed: the first of the three routes is the one that worked.
 
 **Correction, 2026-08-15 — the local oracle cannot supply the packed bytes.** The plan assumed the raw frame appears at the simulated-radio boundary. It does not. The reference's `SimRadio` is process-local: it hands the frame to a simulated PHY inside the same process and loops it straight back, so no socket ever carries it and nothing outside the process observes the packing. Two instances on one host do not hear each other at all.
 
 The UDP transport is not a way around this. The binary's own strings read `Broadcasting packet over UDP (id=%u)` and `Decoding MeshPacket from UDP len=%u` — UDP over mesh carries a protobuf `MeshPacket`, not the packed LoRa frame. Capturing it would re-encode the same fields in a different encoding and still say nothing about wire layout.
 
-So items 1 and 2 are reachable by exactly three routes, and passive local capture is not among them:
+So items 1 and 2 were reachable by exactly three routes, and passive local capture was not among them:
 
-- **a real radio** receiving ambient traffic, which is also what items 5 and 6 need;
-- **an authoritative byte-level document**, which has not been found; or
-- **differential testing against their decoder** — construct a frame under a candidate layout, offer it to the oracle, and let acceptance or rejection decide. This is slower than reading a capture and it is available now, entirely locally. It is the L4 direction that matters, applied earlier than planned.
+- **a real radio** receiving ambient traffic, which is also what items 5 and 6 need — **this is the one that worked**, 2026-08-16;
+- **an authoritative byte-level document**, which was never found; or
+- **differential testing against their decoder** — construct a frame under a candidate layout, offer it to the oracle, and let acceptance or rejection decide. Not needed for items 1 and 2 in the end, but this became the L4 conformance direction independently.
+
+**Why the correction above is worth keeping rather than deleting.** The premise that the raw frame appears at the simulated-radio boundary was wrong, and it was wrong in a way that would have produced *confident* results: a field-level view looks like a capture until you try to read byte offsets off it. The route that settled these items required hardware that had not arrived when the plan was written.
 
 ---
 
