@@ -25,3 +25,10 @@ __pycache__/
 # committed: running a program creates no derivative work, but vendoring its
 # code would place copyleft-licensed files in this repository's history.
 oracle/
+
+# The resume / hand-off document is a working note for whoever picks this up
+# next, not a published artifact. Deliberately untracked: it names bench paths,
+# half-finished threads and the state of open questions, none of which belong
+# in a repository that publishes as clean-room. It is also exactly the kind of
+# file that would need the check_cleanroom.sh exemption list widened for it.
+RESUME.md

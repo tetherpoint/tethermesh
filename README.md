@@ -42,7 +42,7 @@ DEPS.md                       what every result was obtained against
 tools/check_cleanroom.sh      the GPL gate
 ```
 
-The reference implementation, the harness that drives it and the tools that fetch it are **not** in this tree. They live in a sibling directory alongside the hardware bench's copy, untracked — see `TESTING.md` and that directory's own `RULE.md`. What stays here is the provenance of our claims and fixtures that are ours to publish.
+Nothing here needs them to be verified: every fixture the tests read is committed under `tests/captures/`, so the full suite, the proofs and `tools/check_all.sh` run against a bare clone with no oracle, no network and no hardware. The reference implementation, the harness that drives it and the tools that fetch it are **not** in this tree. They live in a sibling directory alongside the hardware bench's copy, untracked — see `TESTING.md` and that directory's own `RULE.md`. What stays here is the provenance of our claims and fixtures that are ours to publish.
 
 Portable `no_std` Rust with no hardware dependency, exported over a C ABI. A radio driver is deliberately not included — implementers have their own, and tying the stack to one part would narrow it for no benefit.
 

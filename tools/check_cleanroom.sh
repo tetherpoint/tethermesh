@@ -58,6 +58,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 say()  { printf '\033[36m[cleanroom]\033[0m %s\n' "$*"; }
 fail() { printf '\033[31m[cleanroom] VIOLATION: %s\033[0m\n' "$*" >&2; violations=$((violations+1)); }
 
+# One definition for both the in-tree check and the submodule sweep below.
+# These were written out twice and the copies disagreed: the sweep was
+# missing a pattern, so a submodule could carry a header the tree could not.
+GPL_HEADER_RE="GNU GENERAL PUBLIC LICENSE|SPDX-License-Identifier: *GPL|This program is free software"
+
 violations=0
 MODE="${1:-full}"
 
@@ -73,14 +78,20 @@ while IFS= read -r f; do
     p="$ROOT/$f"
     [ -f "$p" ] || continue
 
-    # This checker quotes the very strings it forbids; exempt it and the docs
-    # that explain the rule, or the rule cannot be written down.
+    # This checker quotes the very strings it forbids, so it is exempt from
+    # everything. The docs that explain the rule need to NAME the forbidden
+    # library — but only that. They were exempt from every check here, which
+    # meant a GPL licence header pasted into docs/ would have passed silently.
+    # Naming it and carrying its licence header are different acts.
+    may_name_it=0
     case "$f" in
-        tools/check_cleanroom.sh|PLAN.md|README.md|docs/*|meshtastic/WIRE_REFERENCE.md) continue ;;
-        # Pinned upstream code, licence recorded in DEPS.md. It is scanned for
-        # GPL contamination below like anything else, but it is not held to
-        # rules about how WE write code.
-        third_party/*) continue ;;
+        tools/check_cleanroom.sh) continue ;;
+        PLAN.md|README.md|docs/*|meshtastic/WIRE_REFERENCE.md) may_name_it=1 ;;
+        # Pinned upstream code, licence recorded in DEPS.md. Not held to rules
+        # about how WE write code, but it IS scanned for GPL contamination --
+        # see the submodule sweep after this loop, which is where the real
+        # content lives. A tracked third_party entry is only a gitlink.
+        third_party/*) may_name_it=1 ;;
     esac
 
     case "$f" in
@@ -94,14 +105,29 @@ while IFS= read -r f; do
 
     grep -Iq . "$p" 2>/dev/null || continue   # skip binaries
 
-    if grep -qE "GNU GENERAL PUBLIC LICENSE|SPDX-License-Identifier: *GPL|This program is free software" "$p" 2>/dev/null; then
+    if grep -qE "$GPL_HEADER_RE" "$p" 2>/dev/null; then
         fail "$f — carries a GPL licence header."
     fi
-    if grep -qiE "\bRadioLib\b" "$p" 2>/dev/null; then
+    if [ "$may_name_it" -eq 0 ] && grep -qiE "\bRadioLib\b" "$p" 2>/dev/null; then
         fail "$f — references RadioLib (GPL-3.0). This stack carries no radio
               driver; if one is added it must be independently written."
     fi
 done <<< "$files"
+
+# ── vendored submodules: the real GPL risk is a version bump ───────────────
+# The loop above walks `git ls-files`, which reports a submodule as a single
+# gitlink -- none of its files. So the code that actually compiles into our
+# artifact was never scanned. A submodule bump is exactly how GPL material
+# would arrive, so sweep the working trees.
+for d in "$ROOT"/third_party/*/; do
+    [ -d "$d" ] || continue
+    while IFS= read -r hit; do
+        [ -n "$hit" ] || continue
+        fail "${hit#"$ROOT"/} — GPL licence header inside a vendored submodule.
+              DEPS.md records these as permissively licensed; a version bump
+              that changes that must be caught here, not at release."
+    done < <(grep -rlE "$GPL_HEADER_RE" "$d" 2>/dev/null || true)
+done
 
 # ── nothing may FETCH or BUILD their source ────────────────────────────────
 # Black-box observation is the textbook clean-room method. Reading source is
