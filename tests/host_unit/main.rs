@@ -1106,3 +1106,55 @@ fn emit_conformance_frame_for_the_bench() {
     );
     println!("CONFORMANCE_TEXT {}", core::str::from_utf8(TEXT).unwrap());
 }
+
+/// Emit a NodeInfo frame, so a stock node can be asked whether it lists us.
+///
+/// The on-air payload for `NODEINFO_APP` is a bare `User`, which exercises the
+/// wrapper that was verified against reference bytes earlier — this time in
+/// the emitting direction, where being wrong is not forgiven.
+#[test]
+fn emit_nodeinfo_frame_for_the_bench() {
+    const FROM: u32 = 0x7e57_0001;
+    const ID: u32 = 0x0bad_c0df;
+
+    let Psk::Aes128(key) = expand_psk(&[0x01]).unwrap() else { panic!() };
+
+    let user = User {
+        id: b"!7e570001",
+        long_name: b"tethermesh",
+        short_name: b"tm",
+        // Deprecated since 2.1.x and still emitted by 2.7.26 — matching what
+        // a stock node puts on the wire rather than what the schema implies.
+        macaddr: &[0, 0, 0, 0, 0, 0],
+        hw_model: 43,
+        ..User::default()
+    };
+    let mut ubuf = [0u8; 128];
+    let ulen = user.encode(&mut ubuf).expect("User encode failed");
+
+    let data = Data {
+        portnum: PortNum::NODEINFO_APP.0,
+        payload: &ubuf[..ulen],
+        want_response: false,
+        ..Data::default()
+    };
+    let mut payload = [0u8; 200];
+    let plen = data.encode(&mut payload).expect("Data encode failed");
+
+    let header = Header {
+        to: 0xFFFF_FFFF,
+        from: FROM,
+        id: ID,
+        hop_limit: 3,
+        hop_start: 3,
+        channel: channel_hash(b"LongFast", &key),
+        relay_node: (FROM & 0xFF) as u8,
+        ..Header::default()
+    };
+    let mut fb = [0u8; frame::MAX_FRAME];
+    let n = frame::encode(&header, &payload[..plen], &key, 0, &mut fb).expect("frame encode failed");
+    println!(
+        "NODEINFO_FRAME {}",
+        fb[..n].iter().map(|b| format!("{b:02x}")).collect::<String>()
+    );
+}

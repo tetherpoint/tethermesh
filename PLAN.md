@@ -112,7 +112,9 @@ The second is the direction that fails in the field, and the one a lenient decod
 
 It decrypted, decoded, displayed the text and **relayed it** — treating us as a peer on the mesh. One line validates the whole stack simultaneously: header layout and endianness, flag packing, channel hash, PSK expansion, AES key schedule, CTR keystream, nonce byte order, protobuf encoding with proto3 default omission, frame assembly, sync word and modem parameters. Any one of them wrong and there is no log line at all. Record in `tests/captures/conformance_record.json`.
 
-Still outstanding for the interoperability gate: appearing in their node list (NodeInfo), direct messages under PKI, and a route trace.
+**They list us as a peer too.** A `User` on portnum 4 was accepted and stored; the stock node now reports node `0x7e570001`, id `!7e570001`, long name `tethermesh`, short name `tm`, hw_model 43. That exercises the `User` wrapper in the emitting direction, including `macaddr` — deprecated since 2.1.x, still emitted by 2.7.26, and included precisely because byte-level agreement is decided by the wire and not by the schema.
+
+Still outstanding for the interoperability gate: direct messages under PKI, and a route trace.
 
 **2026-08-16 — the panic-free half of this gate is met, and the check that was supposed to prove it turned out to prove nothing.** `check_rust_rules.sh --binary` was vacuous three ways over: an `.rlib` exposes almost no symbols, `--emit=obj` under LTO produces bitcode that reads as an empty symbol table, and the patterns matched legacy mangling while the toolchain emits v0 — where panic paths appear as names like `len_mismatch_fail` containing no form of the word "panic".
 

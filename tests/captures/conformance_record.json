@@ -41,8 +41,23 @@
     "sync word and LongFast modem parameters on the transmit side"
   ],
   "not_yet_proven": [
-    "NodeInfo, so we appear in their node list",
     "direct messages under PKI",
     "appearing in a route trace"
-  ]
+  ],
+  "nodeinfo": {
+    "date": "2026-08-16",
+    "question": "Does a stock node parse our User record and list us as a peer?",
+    "frame_hex": "ffffffff0100577edfc0ad0b630800018d06b113f6f2b34f4943d48cb32548424a189e80c04445091304caaabc0a521d692688771e4373bb2a",
+    "their_node_info_record": "2234088180dcf20712250a09213765353730303031120a7465746865726d6573681a02746d2206000000000000282b250000c8404800",
+    "decoded_by_them": {
+      "num": "0x7e570001",
+      "id": "!7e570001",
+      "long_name": "tethermesh",
+      "short_name": "tm",
+      "macaddr": "000000000000",
+      "hw_model": 43
+    },
+    "verdict": "LISTED",
+    "note": "The macaddr field is deprecated since 2.1.x and still emitted by 2.7.26; it was included because a stock node emits it, and byte-level agreement is decided by the wire rather than by the schema."
+  }
 }
