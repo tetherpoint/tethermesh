@@ -1,6 +1,6 @@
 # WIRE_REFERENCE — Meshtastic on-air facts
 
-**Status: v1, 2026-08-14. P0 deliverable, partially complete — read the UNVERIFIED section before writing any codec.**
+**Status: v2, 2026-08-15. P0 deliverable, partially complete — read the UNVERIFIED section before writing any codec.** v2 adds a section of facts verified by observing a pinned local oracle, resolves the channel hash, and corrects an assumption about what a local oracle can show.
 
 This is the single source of truth for what tethermesh puts on and takes off the air. Every claim is sourced. Where this document disagrees with any secondary description of the Meshtastic protocol — including widely repeated ones — this document wins, because those descriptions were checked and several were stale.
 
@@ -98,18 +98,63 @@ Third-party 64–127: SERIAL 64, STORE_FORWARD 65, RANGE_TEST 66, TELEMETRY 67, 
 
 ---
 
+## VERIFIED — from oracle observation
+
+**2026-08-15**, against `meshtastic/meshtasticd@sha256:23e92b13…` (tag `2.7.26.54e0d8d`), run locally in simulated-radio mode. Provenance in `DEPS.md`; the observations themselves in `tests/captures/oracle_observations.json`.
+
+These are **field-level** observations — the node names each header field and its value as it hands the frame to the radio. They establish what the header *contains*, not how it is *packed*. That distinction is kept explicitly, because collapsing it is how an unverified layout becomes a "fact".
+
+**The channel hash function is `xor_fold(name) ^ xor_fold(psk)`**, folding every byte of each with XOR, yielding one byte. Draft item 3 is resolved. Two independent data points:
+
+| channel name | PSK | predicted | observed |
+|---|---|---|---|
+| `LongFast` | default PSK #1 | `0x08` | `0x08` |
+| `TetherTest` | `000102…0f` (XOR-fold `0x00`) | `0x0c` | `0x0c` |
+
+The second case is the one that carries the weight. We supplied the PSK, so the result does not depend on the commonly-asserted default-PSK value being correct, and a second match rules out the 1-in-256 coincidence the first case alone would leave open. Vectors in `tests/captures/channel_hash.json`.
+
+**The default channel's name is empty on the wire, and hashing the empty string is wrong.** Proto3 omits defaults, so the primary channel's `ChannelSettings` carries no `name` field at all — confirmed in the reference's own saved `channels.proto` and in the captured API stream. Folding an empty name yields `0x02`, not the observed `0x08`. The name that is hashed is the **modem preset name**, `LongFast`, substituted when the field is absent. An implementation that takes the name straight from the message will compute the wrong hash for the single most common channel on the network, and will do so silently.
+
+A side effect worth recording: the oracle **loaded a `ChannelFile` we hand-encoded** (`Loaded /prefs/channels.proto successfully`). That is an early, narrow instance of the direction that matters — our encoder, their decoder.
+
+**The default primary channel's stored PSK is the single byte `0x01`** — a short index, not a key, expanded at use (`Expand short PSK #1`) into a 128-bit key (`Use AES128 key!`). A 16-byte PSK supplied directly also selects AES128. This corroborates the asserted default-PSK value without independently proving it: given the now-verified hash function, the observed `0x08` requires `xor_fold(default_psk) == 0x02`, which the asserted value satisfies — necessary, not sufficient.
+
+**`relay_node` is a one-byte truncation of the sender's node number.** Node `0x7739e49b` transmitted `relay=0x9b`. Confirmed twice more, and independently of the log channel, on captured UDP traffic: `0x266cbc2b → 0x2b` and `0x2f7f90dc → 0xdc` (`tests/captures/udp_mesh_capture.json`).
+
+**The `channel` field carries the one-byte channel hash.** Captured packets on the default channel show `channel = 8`, matching `xor_fold("LongFast") ^ xor_fold(default_psk)` — the hash function verified above, now corroborated at a second boundary.
+
+**Header fields confirmed present, with observed values:** `id` (32-bit), `from`, `to` (`0xffffffff` for broadcast), `hop_limit` (3 by default), `hop_start` (3), `want_ack`, the one-byte channel hash, `relay_node`, and a `transport` field observed as 0. Payload length is reported separately as `encrypted len`.
+
+**A deprecated schema field is still on the wire.** `User.macaddr` (field 4, `bytes`) is marked `[deprecated = true]` and was deprecated in Meshtastic 2.1.x, yet firmware 2.7.26 emits it in every `User` — six zero bytes. Anything reproducing reference output must carry it. The general form of this matters more than the instance: **the schema says what a field means, not whether it is transmitted**, so a codec derived from field numbers alone will be wrong in ways only comparison against real output reveals. Found exactly that way, by a wrapper failing to re-encode captured bytes.
+
+**Packet identifiers are 32-bit and re-randomised per packet** — the node logs `Initial packet id`, then `Partially randomized packet id` for each transmission. Relevant to the L2 packet-id discipline: under CTR a repeated `(packet_id, sender)` pair leaks the XOR of two plaintexts.
+
+**Default LongFast radio parameters, as computed by the reference at runtime** — region UNSET on a 902–928 MHz band: 104 channels × 250 kHz, channel number 20, frequency 906.875 MHz, slot time 28 ms, preamble 131 ms, bitrate 118.394 bytes/sec. A 70-byte encrypted NodeInfo reported `Packet TX: 755ms`. These are the *simulator's* numbers and are consistent with the ~805 ms figure used for planning; they are **not** a substitute for measuring real silicon.
+
+---
+
 ## UNVERIFIED — do not write a codec against these yet
 
 These are commonly asserted in secondary descriptions and are **not** confirmed by any primary source read so far. The official "encryption technical" page is explicitly a high-level overview and omits packet-level specification.
 
 1. **The 16-byte header byte layout** — field order, endianness, and the exact flag bit positions. Only `hop_limit` (3 bits) and `hop_start` (3 bits, per the proto comment) are documentarily confirmed as living in the unencrypted header.
 2. **The AES-CTR nonce construction** — the draft's `packet_id(8) ‖ from(4) ‖ extra_nonce(4)` layout and the 4-byte counter size.
-3. **The channel hash function** — the draft's `xorHash(name) ^ xorHash(psk)`.
+3. ~~**The channel hash function**~~ — **RESOLVED 2026-08-15** by oracle observation, above. It is `xor_fold(name) ^ xor_fold(psk)`.
 4. **The PKI/DM scheme details** — the docs confirm Curve25519 with "encryption and digital signatures" and mention "AES-CTR or AES-CCM" for admin session keys, but not the DM KDF, tag size, or where the extra nonce travels.
 5. **The raw sync-word register value a receiver must be programmed with.** The commonly quoted `0x2B` is a library API-level value that gets expanded into a register pair by the driver beneath it; a different radio family's register model will differ. Nothing read so far pins the on-air value itself.
 6. **Preset SF/BW/CR parameters.** The enum names are confirmed; the numeric parameters behind each are not, and with 17 presets including 62.5 kHz and 20 kHz variants the draft's 7-row table cannot be complete.
 
-**Resolving these needs either an authoritative byte-level document or a first capture.** Items 1–3 are directly recoverable from passive reception of ambient traffic — decode one real frame and the layout confirms itself. Getting a receiver listening is therefore the unblocker for most of this list.
+**Resolving these needs either an authoritative byte-level document or a first capture.** Item 3 is now resolved. Items 1 and 2 remain, and the route to them is narrower than this document previously assumed.
+
+**Correction, 2026-08-15 — the local oracle cannot supply the packed bytes.** The plan assumed the raw frame appears at the simulated-radio boundary. It does not. The reference's `SimRadio` is process-local: it hands the frame to a simulated PHY inside the same process and loops it straight back, so no socket ever carries it and nothing outside the process observes the packing. Two instances on one host do not hear each other at all.
+
+The UDP transport is not a way around this. The binary's own strings read `Broadcasting packet over UDP (id=%u)` and `Decoding MeshPacket from UDP len=%u` — UDP over mesh carries a protobuf `MeshPacket`, not the packed LoRa frame. Capturing it would re-encode the same fields in a different encoding and still say nothing about wire layout.
+
+So items 1 and 2 are reachable by exactly three routes, and passive local capture is not among them:
+
+- **a real radio** receiving ambient traffic, which is also what items 5 and 6 need;
+- **an authoritative byte-level document**, which has not been found; or
+- **differential testing against their decoder** — construct a frame under a candidate layout, offer it to the oracle, and let acceptance or rejection decide. This is slower than reading a capture and it is available now, entirely locally. It is the L4 direction that matters, applied earlier than planned.
 
 ---
 
@@ -122,6 +167,14 @@ Whether stock nodes relay traffic on channels they cannot decrypt. The entire ex
 **Why that is not yet proof:** "allows the option of **eventually** allowing" is forward-looking. It describes what the header design permits, not what current firmware does. The channel-hash filter is applied on receive, and whether a hash miss drops before or after the rebroadcast decision is exactly the question — and it is not documented either way.
 
 **Status: PLAUSIBLE, UNPROVEN.** Settle it by observation, or by a targeted test with any stock device to hand: put a frame on a channel that device does not hold, and watch whether it repeats it. Until then, no code should assume free carriage.
+
+**2026-08-15 — still open, and now with a measured reason why the cheap route fails.** The plan expected to answer this in local simulation, where topology is a coordinate rather than a hardware problem.
+
+The first obstacle is that the reference's simulated radio is process-local, so two instances on one host hear nothing of each other. **That obstacle is removable:** setting `network.enabled_protocols = UDP_BROADCAST (0x0001)` makes meshtasticd join multicast `224.0.0.69:4403`, and two local instances then do form a mesh — each node's database independently listed the other. An earlier note here said no such transport existed; that was wrong, and this supersedes it.
+
+**The second obstacle is not removable, and it is the one that matters.** Captured UDP traffic carries `hop_limit` and `hop_start` **absent, i.e. zero**. A packet with no hops left is not a candidate for rebroadcast at all, so this transport never reaches the managed-flooding decision — the exact decision the question is about. Two nodes exchanging over UDP demonstrate delivery, not relay.
+
+So the position is unchanged in substance and better understood: settling this needs two real radios. A local UDP mesh will produce traffic that *looks* like a mesh and cannot answer the question, which makes it a trap worth naming rather than a route worth trying.
 
 ---
 
