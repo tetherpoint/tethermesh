@@ -54,5 +54,8 @@ pub mod history;
 pub mod message;
 pub mod packet_id;
 pub mod protobuf;
+
+#[cfg(kani)]
+mod proofs;
 pub mod sha256;
 pub mod x25519;

@@ -68,6 +68,18 @@ meaningful, and tests for **undefined references outside a compiler-intrinsic
 allowlist** rather than for names containing "panic". `check_all.sh` builds a
 suitable object and runs it every time.
 
+## Proven, not just tested
+
+Some properties are now machine-checked over every input rather than sampled:
+`cargo kani` verifies six harnesses in `meshtastic/core/proofs.rs`, all
+against our own code. See `docs/FORMAL-VERIFICATION.md` for what is proven,
+what is merely checked against a third party's answer, and what is neither.
+
+A red test found its way in here too: the first draft of the proof module
+carried a defensive `#![allow(clippy::indexing_slicing)]`, and
+`check_rust_rules.sh` rejected it. Correctly — a proof module that suspends
+the crate's rules proves things about code the crate would not accept.
+
 ## Coverage audit, 2026-08-16
 
 Gaps found and closed:

@@ -34,6 +34,11 @@ publish = false
 # check_rust_rules.sh inspects the library object alone. So the audited code
 # checks ours on every run without shipping in it.
 
+# `cfg(kani)` is set by the Kani verifier, not by cargo, so declare it rather
+# than let every normal build warn about an unexpected condition name.
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(kani)'] }
+
 [dev-dependencies]
 # The reference X25519 for differential testing ONLY. BSD-3-Clause, audited,
 # and never linked into the shipped library — see the note above. Hand-written
