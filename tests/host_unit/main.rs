@@ -2368,3 +2368,123 @@ fn mutated_captures_are_rejected_or_handled_but_never_panic() {
     }
     assert!(mutations > 1_000, "fuzzer did too little work to mean anything");
 }
+
+/// Build a PKI direct message for the bench to transmit — L6's open half.
+///
+/// L6's gate has two directions. Decrypting a DM a stock node sent us is done
+/// and is covered by `x25519_reproduces_the_bench_exchange_and_decrypts_the_message`.
+/// This is the other one: **emit a DM a stock node accepts.**
+///
+/// The construction is `WIRE_REFERENCE.md`'s, measured rather than assumed:
+///
+/// ```text
+/// key agreement  X25519
+/// KDF            SHA-256 over the raw shared secret
+/// cipher         AES-256-CCM, 8-byte tag, full 32-byte key
+/// nonce (13 B)   packet_id (u32 LE) || extra_nonce (4 B) || from (u32 LE) || 0x00
+/// payload        ciphertext || tag(8) || extra_nonce(4)
+/// channel byte   0x00 marks a PKI packet on the wire
+/// ```
+///
+/// **The frame is assembled here rather than through `frame::encode`**, and
+/// that is not a shortcut. `frame::encode` applies the channel AES-CTR layer
+/// unconditionally, which is right for channel traffic and wrong here: a PKI
+/// payload is already sealed by CCM, and a second keystream over it would
+/// produce a frame no one can read. The two paths genuinely differ.
+///
+/// Environment, all required, because none of them may be guessed:
+/// `TM_PRIV` our private scalar, `PEER_PUB` the peer's public key, `PEER_NODE`
+/// their node number. `DM_ID` overrides the packet id — a repeated `(from, id)`
+/// is silently dropped by their duplicate suppression, which is
+/// indistinguishable from a frame that never arrived and has already cost this
+/// project two debugging cycles.
+#[test]
+fn emit_pki_dm_frame_for_the_bench() {
+    const FROM: u32 = 0x7e57_0001;
+
+    let (Ok(priv_hex), Ok(peer_hex), Ok(peer_node)) = (
+        std::env::var("TM_PRIV"),
+        std::env::var("PEER_PUB"),
+        std::env::var("PEER_NODE"),
+    ) else {
+        // Not a failure: the suite must pass on a bare clone with no bench.
+        println!("PKI_DM_FRAME skipped — set TM_PRIV, PEER_PUB, PEER_NODE");
+        return;
+    };
+
+    let id: u32 = std::env::var("DM_ID").ok()
+        .and_then(|v| u32::from_str_radix(v.trim_start_matches("0x"), 16).ok())
+        .unwrap_or(0x0bad_d100);
+    let extra_nonce: u32 = std::env::var("DM_EXTRA").ok()
+        .and_then(|v| u32::from_str_radix(v.trim_start_matches("0x"), 16).ok())
+        .unwrap_or(0x1122_3344);
+    let text = std::env::var("DM_TEXT").unwrap_or_else(|_| "tethermesh-pki-1".into());
+    let to = u32::from_str_radix(peer_node.trim_start_matches("0x"), 16)
+        .expect("PEER_NODE must be hex");
+
+    let mut sk = [0u8; 32];
+    sk.copy_from_slice(&hex_to_bytes(&priv_hex));
+    let mut pk = [0u8; 32];
+    pk.copy_from_slice(&hex_to_bytes(&peer_hex));
+
+    // Agreement, then the KDF. Both our own code, end to end.
+    let shared = x25519(&sk, &pk).expect("peer key is small-order");
+    let key = sha256(&shared);
+
+    // The plaintext is an ordinary Data wrapper; PKI changes the envelope,
+    // not the payload schema.
+    let data = Data {
+        portnum: PortNum::TEXT_MESSAGE_APP.0,
+        payload: text.as_bytes(),
+        want_response: false,
+        ..Data::default()
+    };
+    let mut plain = [0u8; 200];
+    let plen = data.encode(&mut plain).expect("Data encode");
+
+    // CCM in place: buffer carries plaintext, then ciphertext||tag.
+    let mut work = [0u8; 220];
+    work[..plen].copy_from_slice(&plain[..plen]);
+    let mut nonce13 = [0u8; 13];
+    nonce13[..4].copy_from_slice(&id.to_le_bytes());
+    nonce13[4..8].copy_from_slice(&extra_nonce.to_le_bytes());
+    nonce13[8..12].copy_from_slice(&FROM.to_le_bytes());
+    // nonce13[12] stays 0.
+    let sealed = ccm_encrypt_in_place(&key, &nonce13, &mut work, plen, CCM_TAG_LEN)
+        .expect("CCM seal");
+
+    let header = Header {
+        to,
+        from: FROM,
+        id,
+        hop_limit: 3,
+        hop_start: 3,
+        channel: 0x00, // the PKI marker
+        relay_node: (FROM & 0xFF) as u8,
+        ..Header::default()
+    };
+
+    let mut frame_bytes = Vec::with_capacity(HEADER_LEN + sealed + 4);
+    frame_bytes.extend_from_slice(&header.encode());
+    frame_bytes.extend_from_slice(&work[..sealed]);
+    frame_bytes.extend_from_slice(&extra_nonce.to_le_bytes());
+
+    // Prove it round-trips under our own reader before putting it on the air.
+    // A frame we cannot decrypt ourselves is not one to spend an over-the-air
+    // debugging cycle on.
+    {
+        let body = &frame_bytes[HEADER_LEN..];
+        let mut back = body[..body.len() - 4].to_vec();
+        let n = ccm_decrypt_in_place(&key, &nonce13, &mut back, CCM_TAG_LEN)
+            .expect("our own DM must decrypt under our own reader");
+        let d = Data::decode(&back[..n]).expect("decode our own Data");
+        assert_eq!(d.payload, text.as_bytes(), "round-trip changed the text");
+        assert_eq!(d.portnum, PortNum::TEXT_MESSAGE_APP.0);
+    }
+
+    println!(
+        "PKI_DM_FRAME {}",
+        frame_bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
+    );
+    println!("PKI_DM_TO {to:08x} ID {id:08x} LEN {}", frame_bytes.len());
+}

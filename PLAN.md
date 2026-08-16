@@ -53,7 +53,15 @@ Not achievable against this oracle: **byte-exact LoRa frames.** See the L0 corre
 
 So the committed corpus is three things, labelled distinctly rather than blurred: byte-exact protobuf, field-level radio observations, and synthetic known-answer vectors.
 
-**Gate:** a byte-exact frame corpus committed as synthetic-equivalent vectors, with the oracle version recorded alongside. *Version recorded; byte-exactness outstanding, and it needs one of the three routes named in the wire reference — not more work against this oracle.*
+**2026-08-16 — byte-exactness arrived, by the route this section said it would need.** `tests/captures/on_air_frames.json` holds **raw LoRa PHY payloads** captured off the air by our own SX1262 receiver: three 35-byte frames from a stock Heltec on `2.7.26.54e0d8d`, at 906.875 MHz / SF11 / BW250 / CR4-5 / preamble 16 / sync `0x24 0xB4`. Our nodes, our channel, our own text — synthetic-equivalent under `TESTING.md`, with no third-party traffic — and the receiver's driver is independently written from the SX126x datasheet, recorded in the file's own `clean_room_note`.
+
+That capture also corroborates the **sixteen-symbol preamble** from a third direction, independently of the 131 ms figure and of `airtime.rs`'s model.
+
+**Gate:** a byte-exact frame corpus committed as synthetic-equivalent vectors, with the oracle version recorded alongside. ***Met.*** The version is in `DEPS.md`; the bytes are in `tests/captures/`.
+
+**The honest qualifier: the corpus is thin.** Three frames, all the same length and portnum. It satisfies the gate and it is what unblocked L2's header work, but it is a sample rather than a survey — broadening it across payload sizes and message types is cheap now that the receiver exists, and worth doing before anything depends on frame diversity.
+
+~~*Version recorded; byte-exactness outstanding, and it needs one of the three routes named in the wire reference — not more work against this oracle.*~~ **Struck** — written 2026-08-15, superseded the next day by the capture above. The judgement in it was correct: it did need a real radio, and more work against the oracle would not have produced it.
 
 ## L2 — frame codec
 
