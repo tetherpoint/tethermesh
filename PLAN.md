@@ -176,7 +176,15 @@ channel byte   0x00 distinguishes a PKI packet on the wire
 
 Two behaviours constrain any implementation: a stock node uses PKI for DMs **by default and refuses to fall back** to channel encryption without the destination's public key, so a node that never publishes a key cannot be messaged directly at all; and the key must have been learned in the current boot.
 
-**Gate:** decrypt a captured direct message; produce one the reference accepts.
+**2026-08-16 — the first half of the gate is met.** `meshtastic/core/sha256.rs` and the CCM half of `meshtastic/core/crypto.rs` decrypt a real captured direct message to `Data{portnum=1, payload="pki-probe-B"}`, using our own SHA-256 for the KDF and our own AES-256-CCM.
+
+SHA-256 is checked against the published FIPS 180-4 vectors first, and then against something better: it reproduces the exact shared-key prefix a stock node logged while encrypting to us. AES-256 needed its own key schedule rather than a longer loop — the extra `SubWord` every eighth word is easy to omit and yields a cipher that is self-consistent and wrong.
+
+Tamper tests matter more here than anywhere else in the crate, because **this is the one layer that can tell a forgery from a message.** Flipping any byte of ciphertext or tag, or using the wrong key, returns `Unauthentic` rather than plaintext.
+
+**Still to build:** X25519 itself. The construction above takes a shared secret; producing that secret from a keypair is the remaining piece, and the captured exchange is a known-answer vector for it.
+
+**Gate:** decrypt a captured direct message; produce one the reference accepts. *First half met; the second needs X25519 so we can key an outbound message.*
 
 ## L7 — the extension suite
 

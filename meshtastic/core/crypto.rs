@@ -167,7 +167,7 @@ impl Aes128 {
         Self { round_keys: rk }
     }
 
-    fn add_round_key(state: &mut [u8; BLOCK], rk: &[u8; BLOCK]) {
+    pub(crate) fn add_round_key(state: &mut [u8; BLOCK], rk: &[u8; BLOCK]) {
         for (s, k) in state.iter_mut().zip(rk.iter()) {
             *s ^= *k;
         }
@@ -328,4 +328,232 @@ pub fn expand_psk(stored: &[u8]) -> Option<Psk> {
         }
         _ => None,
     }
+}
+
+
+/// An expanded AES-256 key schedule.
+///
+/// Direct messages use AES-256-CCM with the **full** 32-byte SHA-256 output as
+/// the key — measured, not assumed. Truncating it to 128 bits is the obvious
+/// wrong guess and produces a tag that never verifies.
+#[derive(Clone)]
+pub struct Aes256 {
+    round_keys: [[u8; BLOCK]; 15],
+}
+
+impl Aes256 {
+    /// Expand a 256-bit key.
+    ///
+    /// AES-256 differs from AES-128 in more than round count: the schedule
+    /// applies an extra `SubWord` every eighth word, which is easy to omit and
+    /// produces a cipher that is self-consistent and wrong.
+    #[must_use]
+    pub fn new(key: &[u8; 32]) -> Self {
+        let mut w = [0u8; 240];                      // 60 words of 4 bytes
+        for (i, b) in key.iter().enumerate() {
+            set(&mut w, i, *b);
+        }
+        let mut rcon: u8 = 1;
+        for i in 8..60usize {
+            let p = i.wrapping_sub(1).wrapping_mul(4);
+            let mut t = [at(&w, p), at(&w, p.wrapping_add(1)),
+                         at(&w, p.wrapping_add(2)), at(&w, p.wrapping_add(3))];
+            if i % 8 == 0 {
+                t = [sbox(at(&t, 1)) ^ rcon, sbox(at(&t, 2)), sbox(at(&t, 3)), sbox(at(&t, 0))];
+                rcon = xtime(rcon);
+            } else if i % 8 == 4 {
+                t = [sbox(at(&t, 0)), sbox(at(&t, 1)), sbox(at(&t, 2)), sbox(at(&t, 3))];
+            }
+            let q = i.wrapping_sub(8).wrapping_mul(4);
+            let d = i.wrapping_mul(4);
+            for j in 0..4usize {
+                let v = at(&w, q.wrapping_add(j)) ^ at(&t, j);
+                set(&mut w, d.wrapping_add(j), v);
+            }
+        }
+        let mut rk = [[0u8; BLOCK]; 15];
+        for r in 0..15usize {
+            let base = r.wrapping_mul(BLOCK);
+            let mut block = [0u8; BLOCK];
+            for j in 0..BLOCK {
+                set(&mut block, j, at(&w, base.wrapping_add(j)));
+            }
+            if let Some(slot) = rk.get_mut(r) {
+                *slot = block;
+            }
+        }
+        Self { round_keys: rk }
+    }
+
+    /// Encrypt one block in place. CCM never needs the inverse cipher.
+    pub fn encrypt_block(&self, block: &mut [u8; BLOCK]) {
+        const ZERO: [u8; BLOCK] = [0u8; BLOCK];
+        let rk = |i: usize| -> &[u8; BLOCK] { self.round_keys.get(i).unwrap_or(&ZERO) };
+        Aes128::add_round_key(block, rk(0));
+        for round in 1..14usize {
+            Aes128::sub_bytes(block);
+            Aes128::shift_rows(block);
+            Aes128::mix_columns(block);
+            Aes128::add_round_key(block, rk(round));
+        }
+        Aes128::sub_bytes(block);
+        Aes128::shift_rows(block);
+        Aes128::add_round_key(block, rk(14));
+    }
+}
+
+/// What went wrong in an authenticated decryption.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CcmError {
+    /// The buffer is smaller than the tag it is supposed to carry.
+    TooShort,
+    /// **The tag did not verify.** The message is forged, corrupted, or
+    /// addressed to a different key. The plaintext must not be used.
+    Unauthentic,
+    /// Nonce length outside what this construction supports.
+    BadNonce,
+}
+
+/// Tag length used by Meshtastic direct messages, in bytes.
+pub const CCM_TAG_LEN: usize = 8;
+
+/// Nonce length used by Meshtastic direct messages, in bytes.
+pub const CCM_NONCE_LEN: usize = 13;
+
+fn ccm_blocks(nonce: &[u8], msg_len: usize, tag_len: usize) -> Result<([u8; BLOCK], [u8; BLOCK]), CcmError> {
+    if nonce.len() != CCM_NONCE_LEN {
+        return Err(CcmError::BadNonce);
+    }
+    // L = 15 - nonce_len. With a 13-byte nonce, L = 2, so the length field is
+    // two bytes and messages are limited to 65535 bytes — far above the 233
+    // the wire allows anyway.
+    let l: usize = 2;
+    let mut b0 = [0u8; BLOCK];
+    // flags = 64*has_aad + 8*((t-2)/2) + (L-1); no additional data here.
+    let t_field = tag_len.saturating_sub(2) / 2;
+    set(&mut b0, 0, ((t_field as u8) << 3) | ((l as u8).saturating_sub(1)));
+    for (i, b) in nonce.iter().enumerate() {
+        set(&mut b0, i.wrapping_add(1), *b);
+    }
+    set(&mut b0, 14, ((msg_len >> 8) & 0xFF) as u8);
+    set(&mut b0, 15, (msg_len & 0xFF) as u8);
+
+    let mut a0 = [0u8; BLOCK];
+    set(&mut a0, 0, (l as u8).saturating_sub(1));
+    for (i, b) in nonce.iter().enumerate() {
+        set(&mut a0, i.wrapping_add(1), *b);
+    }
+    Ok((b0, a0))
+}
+
+fn cbc_mac(aes: &Aes256, b0: &[u8; BLOCK], plaintext: &[u8]) -> [u8; BLOCK] {
+    let mut x = *b0;
+    aes.encrypt_block(&mut x);
+    for chunk in plaintext.chunks(BLOCK) {
+        for (i, b) in chunk.iter().enumerate() {
+            let cur = at(&x, i);
+            set(&mut x, i, cur ^ *b);
+        }
+        aes.encrypt_block(&mut x);
+    }
+    x
+}
+
+fn ctr_xor(aes: &Aes256, a0: &[u8; BLOCK], data: &mut [u8]) {
+    let mut counter: u16 = 1;
+    for chunk in data.chunks_mut(BLOCK) {
+        let mut ks = *a0;
+        set(&mut ks, 14, ((counter >> 8) & 0xFF) as u8);
+        set(&mut ks, 15, (counter & 0xFF) as u8);
+        aes.encrypt_block(&mut ks);
+        for (d, k) in chunk.iter_mut().zip(ks.iter()) {
+            *d ^= *k;
+        }
+        counter = counter.wrapping_add(1);
+    }
+}
+
+/// Decrypt and authenticate in place. `buf` is `ciphertext || tag`.
+///
+/// Returns the plaintext length, which is `buf.len() - tag_len`.
+///
+/// **The tag is checked before the plaintext is offered.** On
+/// [`CcmError::Unauthentic`] the buffer holds whatever the keystream produced
+/// and must be discarded — a forged direct message decrypts to *something*,
+/// and the tag is the only thing that says it is not real.
+///
+/// # Errors
+///
+/// [`CcmError`] on a short buffer, a bad nonce, or a tag mismatch.
+pub fn ccm_decrypt_in_place(
+    key: &[u8; 32],
+    nonce: &[u8],
+    buf: &mut [u8],
+    tag_len: usize,
+) -> Result<usize, CcmError> {
+    let msg_len = buf.len().checked_sub(tag_len).ok_or(CcmError::TooShort)?;
+    let (b0, a0) = ccm_blocks(nonce, msg_len, tag_len)?;
+    let aes = Aes256::new(key);
+
+    // Recover the tag first: it is encrypted with counter 0.
+    let mut received = [0u8; BLOCK];
+    for (i, b) in buf.iter().skip(msg_len).take(tag_len).enumerate() {
+        set(&mut received, i, *b);
+    }
+    let mut s0 = a0;
+    aes.encrypt_block(&mut s0);
+    for i in 0..tag_len {
+        let v = at(&received, i) ^ at(&s0, i);
+        set(&mut received, i, v);
+    }
+
+    let body = buf.get_mut(..msg_len).ok_or(CcmError::TooShort)?;
+    ctr_xor(&aes, &a0, body);
+
+    let expect = cbc_mac(&aes, &b0, body);
+    // Constant-time-ish comparison: no early exit on the first differing byte.
+    let mut diff = 0u8;
+    for i in 0..tag_len {
+        diff |= at(&expect, i) ^ at(&received, i);
+    }
+    if diff != 0 {
+        return Err(CcmError::Unauthentic);
+    }
+    Ok(msg_len)
+}
+
+/// Encrypt and authenticate in place.
+///
+/// `buf` holds the plaintext in its first `msg_len` bytes and must have room
+/// for `tag_len` more. Returns the total length written.
+///
+/// # Errors
+///
+/// [`CcmError`] on a short buffer or a bad nonce.
+pub fn ccm_encrypt_in_place(
+    key: &[u8; 32],
+    nonce: &[u8],
+    buf: &mut [u8],
+    msg_len: usize,
+    tag_len: usize,
+) -> Result<usize, CcmError> {
+    let total = msg_len.checked_add(tag_len).ok_or(CcmError::TooShort)?;
+    if buf.len() < total {
+        return Err(CcmError::TooShort);
+    }
+    let (b0, a0) = ccm_blocks(nonce, msg_len, tag_len)?;
+    let aes = Aes256::new(key);
+
+    let body = buf.get_mut(..msg_len).ok_or(CcmError::TooShort)?;
+    let tag = cbc_mac(&aes, &b0, body);
+    ctr_xor(&aes, &a0, body);
+
+    let mut s0 = a0;
+    aes.encrypt_block(&mut s0);
+    for i in 0..tag_len {
+        let v = at(&tag, i) ^ at(&s0, i);
+        set(buf, msg_len.wrapping_add(i), v);
+    }
+    Ok(total)
 }

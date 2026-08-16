@@ -12,13 +12,17 @@ use std::fs;
 use std::path::PathBuf;
 
 use tethermesh::channel::channel_hash;
-use tethermesh::crypto::{ctr_apply, expand_psk, nonce, Aes128, Psk, DEFAULT_KEY};
+use tethermesh::crypto::{
+    ccm_decrypt_in_place, ccm_encrypt_in_place, ctr_apply, expand_psk, nonce, Aes128, CcmError,
+    Psk, CCM_TAG_LEN, DEFAULT_KEY,
+};
 use tethermesh::frame;
 use tethermesh::header::{Header, HEADER_LEN};
 use tethermesh::history::{PacketHistory, Seen};
 use tethermesh::message::{ChannelSettings, Data, PortNum, User};
 use tethermesh::packet_id::{NextId, PacketIdSource};
 use tethermesh::protobuf::{Error as ProtoError, Reader, Value, Writer};
+use tethermesh::sha256::{sha256, Sha256};
 
 fn captures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/captures")
@@ -1217,5 +1221,157 @@ fn emit_traceroute_frame_for_the_bench() {
     println!(
         "TRACEROUTE_FRAME {}",
         fb[..n].iter().map(|b| format!("{b:02x}")).collect::<String>()
+    );
+}
+
+/// FIPS 180-4 / RFC 6234 published SHA-256 vectors.
+#[test]
+fn sha256_matches_published_vectors() {
+    let cases: &[(&[u8], &str)] = &[
+        (b"", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+        (b"abc", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"),
+        (b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
+         "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"),
+    ];
+    for (input, want) in cases {
+        let got = sha256(input).iter().map(|b| format!("{b:02x}")).collect::<String>();
+        assert_eq!(&got, want, "sha256({:?})", core::str::from_utf8(input).unwrap_or("<bytes>"));
+    }
+    // A multi-block input, and the streaming path split at an awkward point.
+    let long = vec![b'a'; 1000];
+    let one_shot = sha256(&long);
+    let mut h = Sha256::new();
+    h.update(&long[..7]);
+    h.update(&long[7..129]);
+    h.update(&long[129..]);
+    assert_eq!(h.finalize(), one_shot, "streaming and one-shot must agree");
+}
+
+/// The KDF, against the key a real stock node derived.
+///
+/// The firmware printed the first bytes of its shared key while sending us a
+/// direct message. Reproducing them from the raw X25519 secret is what pinned
+/// the KDF as plain SHA-256 rather than anything with a salt or a label.
+#[test]
+fn the_pki_kdf_reproduces_a_real_nodes_derived_key() {
+    let shared = hex_to_bytes("b82315ffc2c374aba1ee1b290a7d4823a1837049920f9821b34a4dfd0a8f3d60");
+    let derived = sha256(&shared);
+    let prefix = derived[..8].iter().map(|b| format!("{b:02x}")).collect::<String>();
+    assert_eq!(
+        prefix, "d885d224e6cc3de0",
+        "must match the shared_key prefix the firmware logged"
+    );
+}
+
+/// AES-256-CCM against a real PKI direct message captured off the air.
+///
+/// Everything here came from the bench: the frame from our receiver, the
+/// shared secret from an X25519 exchange whose both halves we hold. If this
+/// decrypts, the KDF, the key size, the nonce layout, the tag length and the
+/// payload framing are all simultaneously right.
+#[test]
+fn a_captured_pki_direct_message_decrypts() {
+    let doc = fs::read_to_string(captures_dir().join("pki_dm_record.json")).unwrap();
+    let frame_hex = json_str(&doc[doc.find("\"frame_hex\"").unwrap()..], "frame_hex").unwrap();
+    let frame = hex_to_bytes(frame_hex);
+
+    let hdr = Header::decode(&frame).expect("header");
+    assert_eq!(hdr.channel, 0x00, "a PKI packet is marked by channel byte 0x00");
+    assert!(!hdr.is_broadcast(), "a direct message is addressed");
+
+    // SHA-256 over the raw X25519 shared secret — our own hash, our own KDF.
+    let shared = hex_to_bytes("b82315ffc2c374aba1ee1b290a7d4823a1837049920f9821b34a4dfd0a8f3d60");
+    let key = sha256(&shared);
+
+    let payload = &frame[HEADER_LEN..];
+    let extra = &payload[payload.len() - 4..];
+    let body = &payload[..payload.len() - 4];
+
+    // nonce = packet_id(LE) || extra_nonce || from(LE) || 0x00
+    let mut nonce = [0u8; 13];
+    nonce[..4].copy_from_slice(&hdr.id.to_le_bytes());
+    nonce[4..8].copy_from_slice(extra);
+    nonce[8..12].copy_from_slice(&hdr.from.to_le_bytes());
+    assert_eq!(
+        nonce.iter().map(|b| format!("{b:02x}")).collect::<String>(),
+        "9af44fc02df4515864e7693300",
+        "must match the nonce the firmware logged"
+    );
+
+    let mut work = body.to_vec();
+    let n = ccm_decrypt_in_place(&key, &nonce, &mut work, CCM_TAG_LEN)
+        .expect("the tag must verify against a genuine message");
+
+    let d = Data::decode(&work[..n]).expect("plaintext should parse as Data");
+    assert_eq!(d.portnum, PortNum::TEXT_MESSAGE_APP.0);
+    assert_eq!(d.payload, b"pki-probe-B");
+}
+
+/// A forged or corrupted direct message must be rejected, not decrypted.
+///
+/// This is the property channel encryption does not have: CTR will decrypt
+/// anything into something, and only CCM's tag distinguishes a real message
+/// from an attacker's.
+#[test]
+fn a_tampered_pki_message_fails_authentication() {
+    let doc = fs::read_to_string(captures_dir().join("pki_dm_record.json")).unwrap();
+    let frame_hex = json_str(&doc[doc.find("\"frame_hex\"").unwrap()..], "frame_hex").unwrap();
+    let frame = hex_to_bytes(frame_hex);
+    let hdr = Header::decode(&frame).unwrap();
+    let shared = hex_to_bytes("b82315ffc2c374aba1ee1b290a7d4823a1837049920f9821b34a4dfd0a8f3d60");
+    let key = sha256(&shared);
+    let payload = &frame[HEADER_LEN..];
+    let extra = &payload[payload.len() - 4..];
+    let body = &payload[..payload.len() - 4];
+    let mut nonce = [0u8; 13];
+    nonce[..4].copy_from_slice(&hdr.id.to_le_bytes());
+    nonce[4..8].copy_from_slice(extra);
+    nonce[8..12].copy_from_slice(&hdr.from.to_le_bytes());
+
+    for flip in [0usize, 5, 16, 20] {
+        let mut work = body.to_vec();
+        work[flip] ^= 0x01;
+        assert_eq!(
+            ccm_decrypt_in_place(&key, &nonce, &mut work, CCM_TAG_LEN),
+            Err(CcmError::Unauthentic),
+            "flipping byte {flip} must fail the tag"
+        );
+    }
+    // A wrong key must also fail, not merely produce garbage.
+    let mut work = body.to_vec();
+    assert_eq!(
+        ccm_decrypt_in_place(&[0u8; 32], &nonce, &mut work, CCM_TAG_LEN),
+        Err(CcmError::Unauthentic)
+    );
+}
+
+#[test]
+fn ccm_round_trips_and_rejects_short_buffers() {
+    let key = sha256(b"a shared secret");
+    let nonce = [7u8; 13];
+    for len in [0usize, 1, 15, 16, 17, 100] {
+        let mut buf = vec![0u8; len + CCM_TAG_LEN];
+        for (i, b) in buf.iter_mut().take(len).enumerate() {
+            *b = (i as u8).wrapping_mul(7);
+        }
+        let original = buf[..len].to_vec();
+        let total = ccm_encrypt_in_place(&key, &nonce, &mut buf, len, CCM_TAG_LEN).unwrap();
+        assert_eq!(total, len + CCM_TAG_LEN);
+        if len > 0 {
+            assert_ne!(&buf[..len], &original[..], "len {len}: ciphertext equals plaintext");
+        }
+        let n = ccm_decrypt_in_place(&key, &nonce, &mut buf[..total], CCM_TAG_LEN).unwrap();
+        assert_eq!(n, len);
+        assert_eq!(&buf[..len], &original[..], "len {len}: round trip failed");
+    }
+    let mut tiny = [0u8; 4];
+    assert_eq!(
+        ccm_decrypt_in_place(&key, &nonce, &mut tiny, CCM_TAG_LEN),
+        Err(CcmError::TooShort)
+    );
+    let mut buf = [0u8; 32];
+    assert_eq!(
+        ccm_decrypt_in_place(&key, &[0u8; 12], &mut buf, CCM_TAG_LEN),
+        Err(CcmError::BadNonce)
     );
 }

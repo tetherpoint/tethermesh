@@ -54,3 +54,4 @@ pub mod history;
 pub mod message;
 pub mod packet_id;
 pub mod protobuf;
+pub mod sha256;
