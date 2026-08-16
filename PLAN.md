@@ -16,9 +16,13 @@ So hardware is needed for exactly two things: **the physical layer** (sync word 
 
 `meshtastic/WIRE_REFERENCE.md` exists and separates verified facts from unverified. **Six items remain unverified and block the codec**: header byte layout, CTR nonce construction, the channel hash function, PKI/DM details, the raw sync-word register value, and per-preset SF/BW/CR parameters.
 
-Four of the six fall out of captured traffic at the simulated-radio boundary, where the raw frame appears. The sync word and modulation parameters need real silicon and stay open until then.
+~~Four of the six fall out of captured traffic at the simulated-radio boundary, where the raw frame appears.~~ The sync word and modulation parameters need real silicon and stay open until then.
 
-**Gate:** every item either verified with a source, or explicitly still open. No item silently promoted from "commonly asserted" to "fact".
+**Status 2026-08-15 — partially done, and the premise above was wrong.** The channel hash is **resolved** (`xor_fold(name) ^ xor_fold(psk)`, two data points, one with a PSK we supplied). PKI/DM detail is untouched. The sync word and preset parameters remain open on silicon, as expected.
+
+The correction: **the raw frame does not appear at the simulated-radio boundary.** The reference's `SimRadio` is process-local — it loops the frame back inside the same process, no socket carries it, and two local instances do not hear each other. What the oracle yields is a *field-level* view (every header field named with its value), not a byte-level one, so it cannot settle header packing or the CTR nonce. Those now need a real radio, an authoritative document, or differential testing against their decoder. See `meshtastic/WIRE_REFERENCE.md` § UNVERIFIED.
+
+**Gate:** every item either verified with a source, or explicitly still open. No item silently promoted from "commonly asserted" to "fact". *Gate holds — items 1, 2, 4, 5, 6 are marked open, with the reason each is open now recorded.*
 
 ## L1 — oracle harness and fixture corpus
 
@@ -26,7 +30,17 @@ Stand up the reference implementation locally per `TESTING.md` — binaries and 
 
 The corpus matters more than the harness: **once captured, day-to-day testing runs against fixtures rather than against the oracle**, which makes results reproducible, keeps CI independent, and limits exposure to a moving upstream.
 
-**Gate:** a byte-exact frame corpus committed as synthetic-equivalent vectors, with the oracle version recorded alongside.
+**Status 2026-08-15 — harness done, corpus partially done, gate NOT met.**
+
+Done: the oracle is pinned by digest (`meshtastic/meshtasticd@sha256:23e92b13…`, tag `2.7.26.54e0d8d`), fetched, verified, and runs locally; `fetch_oracle.sh --verify` checks the digest rather than mere presence; the harness (`oracle.sh`, `capture.py`) drives nodes and parses their radio-boundary output; provenance is recorded in `DEPS.md`; a corpus is committed under `tests/captures/`. Per the rule, the binaries, the harness and every tool that touches them live outside this tree.
+
+Not achievable against this oracle: **byte-exact LoRa frames.** See the L0 correction — the packing never leaves the process.
+
+**But byte-exact protobuf is, and it was the corpus worth having first.** The oracle's TCP API is a second boundary, and everything crossing it is encoded by their encoder: `tests/captures/fromradio_corpus.json` holds 43 messages across 9 `FromRadio` variants, captured over loopback in a second. Two properties were measured on capture — 43/43 re-emit bit-identically under minimal-varint re-encoding, and 43/43 carry fields in ascending order. Their encoder is canonical, which is what makes **L3's gate reachable at all**; had it emitted non-minimal varints or arbitrary field order, "bit-identical round-trip" would have been an impossible requirement and the gate would have needed rewriting.
+
+So the committed corpus is three things, labelled distinctly rather than blurred: byte-exact protobuf, field-level radio observations, and synthetic known-answer vectors.
+
+**Gate:** a byte-exact frame corpus committed as synthetic-equivalent vectors, with the oracle version recorded alongside. *Version recorded; byte-exactness outstanding, and it needs one of the three routes named in the wire reference — not more work against this oracle.*
 
 ## L2 — frame codec
 
@@ -40,7 +54,25 @@ Includes the **packet-id discipline**: drawn from a CSPRNG and persisted across 
 
 Hand-written minimal encoder and decoder plus per-message wrappers. Hand-written for two reasons: no code-generation dependency in the build, and generated output would derive from a copyleft input.
 
-**Gate:** every message in the corpus round-trips decode→encode bit-identically.
+**2026-08-15 — the crate exists.** `Cargo.toml` plus `meshtastic/core/lib.rs` carrying all seven required attributes, so `tools/check_rust_rules.sh` reports *"crate rules hold"* rather than *"NOTHING TO CHECK"*. The lints were red-tested: a module using slice indexing, bare arithmetic and `unwrap()` is rejected with three errors. The first real code is `channel::channel_hash`, the one wire fact verified well enough to implement, tested against the committed corpus and also observed red. Details in `tests/host_unit/README.md`.
+
+**2026-08-15 — the wire layer is done and the gate is met.** `meshtastic/core/protobuf.rs` is a hand-written reader and writer for tags, wire types and lengths. **All 43 corpus messages round-trip bit-identically.** No allocation, no slice indexing, no bare arithmetic; malformed input returns an error and is tested against truncation, non-terminating and over-long varints, group and unassigned wire types, and field number zero.
+
+The module is deliberately **schema-free** — it knows nothing of any message, field name or type. That is the clean-room boundary in code: a decoder that understood the messages is precisely the artefact that must not derive from their schema, so the message layer above it stays small and obviously ours.
+
+**Wrappers and nested round-tripping are done too.** `meshtastic/core/message.rs` carries `Data` and `User`, written to proto3 rules — ascending field order, defaults omitted, `optional` modelled as real presence. `User` is verified against reference bytes lifted out of the corpus (`FromRadio.node_info` → `NodeInfo.user`), not against our own encoder's opinion of itself. The round-trip gate now recurses: **100 messages checked against 43 top-level**, which is where a mis-sized length prefix would hide, since the outer length still matches.
+
+Two things this phase established that were not in the plan:
+
+- **A relay path must not go through the wrapper layer.** These structs are fixed and allocate nothing, so an unknown field is dropped on decode and a re-encoded packet differs from the one received. Forward-compatibility lives in the primitive layer, which copies payloads verbatim. Written into the module documentation and asserted by a test, because it is an architectural constraint, not a caveat.
+- **Deprecated in the schema is not absent from the wire.** `User.macaddr` has been deprecated since 2.1.x and 2.7.26 still emits it. A codec built from field numbers alone will miss it and fail byte identity.
+- **Absent in the message is not empty on the wire.** The default channel carries no `name`, and the name to hash is the modem preset name. Folding the empty string gives `0x02` where the oracle uses `0x08` — wrong for the most common channel on the network, and silent.
+
+`ChannelSettings` is wrapped as well, which closes a loop: reference bytes → PSK short index → expansion → `channel_hash` → `0x08`, the value the oracle was observed to use. That path is now a test.
+
+**Not wrapped yet**, and not needed before L2: `Position`, `Routing`, `NodeInfo`, `MeshPacket`. The pattern is mechanical and the corpus can verify the first three.
+
+**Gate:** every message in the corpus round-trips decode→encode bit-identically. *The corpus now exists — `tests/captures/fromradio_corpus.json`, 43 messages, 9 variants — and their encoder was measured to be canonical, so the gate is reachable. This is unblocked and ready to implement against.*
 
 ## L4 — conformance, both directions
 
@@ -57,9 +89,11 @@ The second is the direction that fails in the field, and the one a lenient decod
 
 Managed flooding: hop-limit decrement, duplicate suppression keyed on sender and identifier, the SNR-scaled contention window, and duty-cycle accounting.
 
-**And the assumption everything else rests on.** Whether nodes relay traffic on channels they cannot decrypt is currently PLAUSIBLE, UNPROVEN. Settle it here: several instances, controlled topology, inject a frame on a channel none of them holds, observe whether it is repeated. In simulation topology is a coordinate rather than a hardware problem.
+**And the assumption everything else rests on.** Whether nodes relay traffic on channels they cannot decrypt is currently PLAUSIBLE, UNPROVEN. Settle it here: several instances, controlled topology, inject a frame on a channel none of them holds, observe whether it is repeated. ~~In simulation topology is a coordinate rather than a hardware problem.~~
 
-**Gate:** relay behaviour matches the reference across a topology matrix, and the relay question is answered in the wire reference either way.
+**2026-08-15 — the simulation route was tried and does not work.** Two local instances can be made to form a mesh, by enabling `UDP_BROADCAST`; the process-local SimRadio alone will not do it. But captured UDP traffic carries `hop_limit = 0`, so those packets are never candidates for rebroadcast and the managed-flooding decision is never reached. A local UDP mesh produces traffic that looks like a mesh and cannot answer this question. Settling it needs two real radios. Detail in `meshtastic/WIRE_REFERENCE.md`.
+
+**Gate:** relay behaviour matches the reference across a topology matrix, and the relay question is answered in the wire reference either way. *Now gated on hardware, not on effort.*
 
 ## L6 — PKI direct messages
 
