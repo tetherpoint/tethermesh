@@ -65,6 +65,49 @@ The line is **facts versus expression**. Field numbers, wire layouts and transcr
 
 Enforced by `tools/check_cleanroom.sh`, which refuses vendored `.proto`, generated `*.pb.*`, GPL licence headers and RadioLib references, and is red-tested against all three.
 
+### The four sources, and nothing else
+
+Everything in `meshtastic/WIRE_REFERENCE.md` is tagged with which of these it came from. Anything that came from none of them is listed as UNVERIFIED rather than assumed.
+
+1. **The upstream `.proto` files, read as specification** — pinned at a named commit in `DEPS.md`. Field numbers and wire layouts are facts. The files themselves are never copied here and never run through a code generator, because generated output derives from a GPL input. That is why the protobuf codec is hand-written.
+2. **Published protocol documentation.**
+3. **Black-box observation of a pinned reference binary** — the `meshtasticd` container, fetched by digest and run as a program, never built from source. Using a program creates no derivative work; vendoring its code would.
+4. **Our own on-air captures**, from real radios.
+
+**Source is the line, not availability.** Reference *binaries* are installed — they have to be, to observe them. Reference *source* is never fetched at all: not fetched-then-ignored, never present. A source tree in the environment turns "read their implementation" from a deliberate act into an accident one `grep` away, and the temptation peaks exactly when someone is stuck on a mismatch. `check_cleanroom.sh` refuses any script that would clone or build it.
+
+**The reference implementation, the harness that drives it, and every tool that touches its binaries live outside this repository**, in a sibling directory shared with the hardware bench. The strongest answer to *"what was in your source tree?"* is a source tree containing only our own work. What stays here is the **provenance of our claims** (`DEPS.md`) and fixtures that are ours to publish.
+
+### Why hardware was necessary, and not a nice-to-have
+
+The original plan assumed the reference's simulated radio would expose packed frames. **It does not, and that assumption was wrong in a way that would have produced confident, wrong results.** `SimRadio` is process-local: it hands a frame to a simulated PHY inside the same process and loops it straight back. No socket carries it, two local instances cannot hear each other, and what the oracle yields is a *field-level* view — every header field named with its value — which looks like a capture right up until you try to read a byte offset off it.
+
+So the byte-level facts needed real radios. The bench is two Heltec V3s (ESP32-S3 + SX1262) about 3 m apart:
+
+- **One runs stock Meshtastic**, the same build as the pinned container, so bench and oracle observations are comparable.
+- **One runs our own SX1262 driver**, written from the SX126x datasheet's documented command set — not from any radio library. It prints raw PHY payloads verbatim and parses nothing, so the layout is decided by inspection afterwards rather than by whatever the receiver assumed.
+
+Facts that only silicon could settle: the 16-byte header layout, the AES-CTR nonce construction, the sync-word register values, per-preset modulation parameters, and the load-bearing routing assumption that stock nodes relay traffic on channels they cannot decrypt.
+
+That last one shows the method. Node B's channel PSK was replaced with sixteen zero bytes **while its name was left unchanged** — moving B's channel hash so it could not decrypt A, but leaving it on the same frequency slot, because the slot derives from the channel *name*. Renaming B would have made "did not hear" indistinguishable from "did not relay" in the log. B was confirmed still on the same frequency after the change, and then observed rebroadcasting a frame it could not read.
+
+### Correctness is proven in both directions
+
+A decoder that reads their traffic proves half of compatibility. The half that fails in the field is the other one, and a lenient decoder hides it.
+
+- **Their encoder → our decoder.** Every message in the committed corpus decodes and re-encodes **bit-identically**.
+- **Our encoder → their decoder.** A stock, unmodified node accepted a frame built entirely by our code, displayed the text, and relayed it. It lists us as a peer, answers an addressed traceroute, and **accepts a PKI direct message** — deriving the shared secret independently and matching ours byte for byte.
+
+**The instrument rule.** Never measure a suspect through its own counters. For interoperability the stock device is the instrument; our own decoder reporting success is not evidence. Every acceptance gate is phrased as *"a stock device reads us"*.
+
+**Every capture becomes a committed fixture**, so an interop bug turns into a regression test that is fixable without a radio — and so the full suite, the Kani proofs and `tools/check_all.sh` run against a bare clone with **no oracle, no network and no hardware**. Fixtures are synthetic-equivalent: our nodes, our channels, our own text, never third-party traffic.
+
+### On a mismatch, and why this is the rule that matters
+
+**Do not go looking for their source to explain it.** Go to the protocol definitions, the published documentation, or a capture. If none of those resolves it, that is not a blocker — it is a finding, and it gets written into `meshtastic/WIRE_REFERENCE.md` recording **both** behaviours.
+
+Measurement has twice overturned something written confidently from documentation alone: a part credited with a crypto accelerator it does not have, and a routing parameter whose real value was more than an order of magnitude off the guess. Both were caught by measuring rather than reviewing, which is the argument for the discipline in one line.
+
 ## Layout
 
 ```
@@ -88,12 +131,14 @@ Portable `no_std` Rust with no hardware dependency, exported over a C ABI. A rad
 
 All six items that once blocked the frame codec are now settled on hardware — header byte layout, CTR nonce, channel hash, PKI/DM scheme, sync-word register values and per-preset modulation parameters. What remains open is listed in that document's UNVERIFIED section with the measurement each would need.
 
-## Conventions
+## Working conventions
 
-- **Green and red, with red proven.** Every guard has been observed to fire. A test that has never failed is not yet a test.
-- **No silent no-ops.** Anything unimplemented says so and exits non-zero. A pass that never ran is worse than a failure.
-- **Captures are fixtures.** Every on-air capture enters a replay corpus, so an interop bug becomes a regression test that is fixable without a radio.
-- **The instrument rule.** Never measure a suspect through its own counters. For interop the stock device is the instrument; our own decoder reporting 98 % is not evidence.
+Beyond the principles above, which are enforced mechanically:
+
+- **No silent no-ops.** Anything unimplemented says so and exits non-zero. A check that passed because there was nothing to check is indistinguishable from a real pass in a log, which makes it worse than a failure. Every gate here refuses rather than shrugs.
+- **Provenance, or it is not a result.** A compatibility claim that cannot name the version it was obtained against is not a claim. `DEPS.md` records the pinned schema commit, the reference build and its digest, the toolchain, and the vendored submodules — updated at every milestone, not at release.
+- **A measurement nobody can re-run is a claim.** Where a figure decides something, the method is committed as a script rather than described in prose. `tools/measure_panic_symbols.sh` exists because a table of numbers with no recorded harness could not be defended or refuted when someone tried.
+- **Corrections stay visible.** Where a conclusion changed, the superseded reasoning is struck rather than deleted, and the reason it was wrong is recorded next to it. Several entries here were confidently wrong; the record of *how* is more useful than a tidy document.
 
 ## Licence
 
