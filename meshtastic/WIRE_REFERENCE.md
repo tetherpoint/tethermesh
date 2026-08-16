@@ -324,6 +324,21 @@ So items 1 and 2 were reachable by exactly three routes, and passive local captu
 
 ---
 
+## `next_hop` — OBSERVED 2026-08-16
+
+The schema documents it as *"Last byte of the node number… Set by the firmware internally, clients are not supposed to set this."* Now seen directly:
+
+| frames | `next_hop` | `hop_limit` / `hop_start` |
+|---|---|---|
+| broadcasts (`to = 0xffffffff`) | `0x00` | 3 / 3 |
+| an addressed reply (`to = 0x7e570001`) | **`0x01`** — the destination's last byte | 2 / 2 |
+
+So `next_hop` is **zero on broadcasts and the destination's low byte on addressed frames**, and an addressed reply travels on a shorter hop budget than the broadcast that provoked it. This is the first direct evidence of next-hop routing on this bench.
+
+**It does not settle the per-hop retry question.** That asks whether the routing *mode* changes across retransmission attempts, which needs a multi-hop path to observe. This shows only that the field is populated as documented on a single hop.
+
+---
+
 ## ACKNOWLEDGEMENTS — MEASURED 2026-08-16
 
 `PortNum ROUTING = 5` was known from the schema; the message it carries was not, so acknowledgement **generation** could not be written from verified facts. A stock node was asked for one instead. Record in `tests/captures/routing_ack.json`.

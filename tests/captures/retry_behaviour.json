@@ -40,7 +40,7 @@
     {
       "claim": "The PAYLOAD changes on every retransmission -- it is re-encrypted, not resent verbatim.",
       "detail": "Ciphertext bytes differ between attempts while the packet id stays the same, which means a fresh extra_nonce per attempt. Observed in 3 of 3 want_ack messages.",
-      "status": "MEASURED."
+      "status": "MEASURED, BUT PKI-SPECIFIC \u2014 see the correction below."
     }
   ],
   "limitation_hops": {
@@ -50,5 +50,6 @@
   "consequence_for_our_implementation": {
     "ceiling": "3 attempts, ~7 s apart. PLAN.md's rule is that upstream's policy is a CEILING and never a target, because retransmission spends shared airtime and each retry is re-flooded by every neighbour that hears it. Our policy must sit at or below this.",
     "re_encryption": "We need NOT re-encrypt per attempt. Resending the identical frame is cryptographically safe -- same key, same nonce, same plaintext yields the same ciphertext, and nonce reuse is only dangerous across DIFFERENT plaintexts. It also costs less state, since the encoded frame can be held rather than the plaintext plus a re-encryption. A receiver cannot tell the difference: it drops the repeated (from, id) as a duplicate either way. Recorded as a deliberate deviation with its justification, per the standing rule."
-  }
+  },
+  "correction_2026_08_16": "The payload-changes claim above was observed on PKI direct messages only, where a fresh extra_nonce is drawn per attempt. Channel-encrypted retransmissions captured later the same day are BYTE-IDENTICAL, because the channel nonce derives from (id, from) and is deterministic. The claim was true of what it observed and over-general as written. Recorded here rather than edited away, because the shape of the error -- generalising from one encryption mode to both -- is the useful part. See on_air_frames.json."
 }

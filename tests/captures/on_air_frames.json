@@ -81,7 +81,8 @@
       },
       "ciphertext_hex": "b430ebeecaa9adc2077085ba93c0f1035eea57",
       "plaintext_hex": "0801120d736e6966662d70726f62652d304800",
-      "plaintext_note": "Data{portnum=1 TEXT_MESSAGE_APP, payload='sniff-probe-N', bitfield=0}"
+      "plaintext_note": "Data{portnum=1 TEXT_MESSAGE_APP, payload='sniff-probe-N', bitfield=0}",
+      "portnum": 1
     },
     {
       "raw_hex": "ffffffff64e7693344bf3bb2630800644a7e017e592fe266c6ba7b3a3a1740e701a1b8",
@@ -101,7 +102,8 @@
       },
       "ciphertext_hex": "4a7e017e592fe266c6ba7b3a3a1740e701a1b8",
       "plaintext_hex": "0801120d736e6966662d70726f62652d314800",
-      "plaintext_note": "Data{portnum=1 TEXT_MESSAGE_APP, payload='sniff-probe-N', bitfield=0}"
+      "plaintext_note": "Data{portnum=1 TEXT_MESSAGE_APP, payload='sniff-probe-N', bitfield=0}",
+      "portnum": 1
     },
     {
       "raw_hex": "ffffffff64e769334537c29a63080064dfbe442faa198cbb7e1ea6bbb84ea7ecd49812",
@@ -121,8 +123,30 @@
       },
       "ciphertext_hex": "dfbe442faa198cbb7e1ea6bbb84ea7ecd49812",
       "plaintext_hex": "0801120d736e6966662d70726f62652d324800",
-      "plaintext_note": "Data{portnum=1 TEXT_MESSAGE_APP, payload='sniff-probe-N', bitfield=0}"
+      "plaintext_note": "Data{portnum=1 TEXT_MESSAGE_APP, payload='sniff-probe-N', bitfield=0}",
+      "portnum": 1
+    },
+    {
+      "raw_hex": "ffffffff64e769335dfa8856630800645195d8ae37667fc0968f1628cbbbbe714925684b2be4f5abcd95f3f25d35c7d750810b34077d77a33ec3cb9e014dc8574341037e4f532679497ed9bacaf308c78d362e6fa102f1116438869740db7e5da8cd64fb43ac",
+      "len": 102,
+      "rssi": -40,
+      "snr": 6,
+      "plaintext_note": "Data{portnum=4 NODEINFO_APP, payload=User{id='!3369e764', long_name='Meshtastic e764', short_name='e764', macaddr=64e83369e764, hw_model=43, public_key=f2b087c1...}}. Their encoder producing an 80-byte User -- the longest frame in this corpus and the only stock-originated NodeInfo in it.",
+      "elicited_by": "a NodeInfo carrying want_response, transmitted over the air. Meshtastic nodes broadcast spontaneously only every few minutes to hours, so waiting for variety does not work; requests that compel a reply do.",
+      "portnum": 4
+    },
+    {
+      "raw_hex": "0100577e64e769335e9e2570420801648c85d4620e8ae5515cfda2a727",
+      "len": 29,
+      "rssi": -39,
+      "snr": 7,
+      "plaintext_note": "Data{portnum=5 ROUTING_APP, request_id=0x0c300350, payload=Routing{field 3 = 6}}. A rejection, echoing the request_id of a channel-encrypted want_ack direct message sent to a node that holds our public key. See routing_ack.json.",
+      "elicited_by": "a want_ack probe transmitted over the air.",
+      "portnum": 5
     }
   ],
-  "coding_rate_caveat": "This file previously recorded 'CR 4/5' among the radio parameters, which read as a measured property of the transmission. It is not. It is what our receiver was configured to, and in LoRa explicit-header mode that setting is ignored: the header carries the payload's coding rate, is itself sent at a fixed 4/8, and the receiver reconfigures from it. Demonstrated 2026-08-16 -- a receiver deliberately set to 4/8 and to 4/6 decoded the same frames with crc=ok at matched SF and BW. So successful reception says nothing about the transmitter's coding rate, and LongFast's CR has never been measured by this project."
+  "coding_rate_caveat": "This file previously recorded 'CR 4/5' among the radio parameters, which read as a measured property of the transmission. It is not. It is what our receiver was configured to, and in LoRa explicit-header mode that setting is ignored: the header carries the payload's coding rate, is itself sent at a fixed 4/8, and the receiver reconfigures from it. Demonstrated 2026-08-16 -- a receiver deliberately set to 4/8 and to 4/6 decoded the same frames with crc=ok at matched SF and BW. So successful reception says nothing about the transmitter's coding rate, and LongFast's CR has never been measured by this project.",
+  "corpus_breadth_note": "Extended 2026-08-16 from three frames of one length and one portnum. Now spans 29 to 102 bytes across portnums 1 (text), 4 (NodeInfo) and 5 (Routing). PLAN.md had flagged the original as 'a sample rather than a survey'.",
+  "retransmission_note": "REFINES A CLAIM MADE IN retry_behaviour.json. That record says the payload changes on every retransmission -- re-encrypted rather than resent verbatim. That was observed on PKI direct messages only, where a fresh extra_nonce is drawn per attempt. The two 29-byte Routing retransmissions captured here are CHANNEL-encrypted and BYTE-IDENTICAL, because the channel nonce derives from (id, from) and is therefore deterministic. So the original claim was true of what it observed and over-general as written; the behaviour depends on the encryption mode.",
+  "schema_note": "Every frame carries an explicit `portnum`. Added 2026-08-16 when the corpus grew past text messages and three tests failed -- they had scraped every raw_hex and assumed all of them decrypt to 'sniff-probe-N'. That assumption was invisible while the corpus was homogeneous. Tests now filter on portnum rather than assuming."
 }

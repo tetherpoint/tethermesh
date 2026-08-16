@@ -38,6 +38,34 @@ use tethermesh::routing::{
 use tethermesh::sha256::{sha256, Sha256};
 use tethermesh::x25519::{public_key, x25519};
 
+
+/// Frames from `on_air_frames.json` as `(portnum, raw_hex)`.
+///
+/// The corpus is heterogeneous since 2026-08-16 — text, NodeInfo and Routing —
+/// so a caller must say which it wants. Three tests previously scraped every
+/// `raw_hex` and assumed all of them were text; that held only while the corpus
+/// was one message type, and broke the moment it stopped being one.
+fn on_air_frames() -> Vec<(u32, String)> {
+    let doc = fs::read_to_string(captures_dir().join("on_air_frames.json")).unwrap();
+    let mut out = Vec::new();
+    let mut from = 0usize;
+    while let Some(hit) = doc[from..].find("\"raw_hex\"") {
+        let abs = from + hit;
+        let hex = json_str(&doc[abs..], "raw_hex").map(str::to_string);
+        // portnum follows raw_hex within the same object
+        let tail = &doc[abs..];
+        let pn = tail.find("\"portnum\"").and_then(|i| {
+            tail[i + 9..].trim_start_matches([':', ' ']).split(|c: char| !c.is_ascii_digit())
+                .next().and_then(|t| t.parse::<u32>().ok())
+        });
+        if let (Some(h), Some(p)) = (hex, pn) {
+            out.push((p, h));
+        }
+        from = abs + 9;
+    }
+    out
+}
+
 fn captures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/captures")
 }
@@ -803,7 +831,17 @@ fn header_decodes_and_re_encodes_real_captured_frames() {
         let h = Header::decode(&frame).expect("failed to decode a real frame");
 
         // Cross-checks against facts established by other means entirely.
-        assert!(h.is_broadcast(), "frame {i}: captured frames were broadcasts");
+        //
+        // Addressing is asserted per frame rather than blanket-broadcast. The
+        // original corpus was all broadcasts and this read `is_broadcast()` for
+        // every entry — a property of that sample, not of frames. It broke the
+        // moment a Routing reply addressed to us was added, which is the
+        // corpus doing its job.
+        assert!(
+            h.is_broadcast() || h.to == 0x7e57_0001,
+            "frame {i}: addressed to 0x{:08x}, which is neither broadcast nor us",
+            h.to
+        );
         assert_eq!(h.from, 0x3369_e764, "frame {i}: sender does not match the transmitting board");
         assert_eq!(h.channel, 0x08, "frame {i}: channel hash should be LongFast's verified 0x08");
         assert_eq!(
@@ -811,11 +849,36 @@ fn header_decodes_and_re_encodes_real_captured_frames() {
             (h.from & 0xFF) as u8,
             "frame {i}: relay_node must be the low byte of the sender"
         );
-        assert_eq!(h.hop_limit, 3, "frame {i}: hop_limit was set to 3 when transmitting");
-        assert_eq!(h.hop_start, 3, "frame {i}: hop_start should match the original hop_limit");
-        assert!(!h.want_ack);
+        // INVARIANTS, not sample values. This block asserted hop_limit == 3,
+        // hop_start == 3 and !want_ack — all true of the original three
+        // broadcasts and none of them true of a Routing reply, which travels
+        // at hop_limit 2 with hop_start 2. Extending the corpus exposed four
+        // such assumptions in one test; they were properties of the sample
+        // wearing the clothes of properties of the protocol.
+        assert!(h.hop_start > 0, "frame {i}: hop_start of zero is unusable");
+        assert!(
+            h.hop_limit <= h.hop_start,
+            "frame {i}: hop_limit {} exceeds hop_start {} — a frame cannot have \
+             more hops left than it began with",
+            h.hop_limit, h.hop_start
+        );
         assert!(!h.via_mqtt);
-        assert_eq!(h.next_hop, 0);
+
+        // next_hop is a RULE, not a constant. This read `assert_eq!(h.next_hop, 0)`
+        // while the corpus was broadcasts only. An addressed Routing reply
+        // carries next_hop = the last byte of the destination node number,
+        // which is the documented behaviour — "Last byte of the node number...
+        // Set by the firmware internally" — observed directly for the first
+        // time when the corpus grew.
+        if h.is_broadcast() {
+            assert_eq!(h.next_hop, 0, "frame {i}: a broadcast has no next hop");
+        } else {
+            assert_eq!(
+                h.next_hop,
+                (h.to & 0xFF) as u8,
+                "frame {i}: an addressed frame carries the destination's last byte as next_hop"
+            );
+        }
 
         // And byte-exact back out again.
         assert_eq!(
@@ -902,16 +965,13 @@ fn aes128_matches_the_fips197_vector() {
 fn captured_frames_decrypt_to_the_text_that_was_transmitted() {
     let doc = fs::read_to_string(captures_dir().join("on_air_frames.json")).unwrap();
 
-    let mut raws = Vec::new();
-    let mut from = 0usize;
-    while let Some(hit) = doc[from..].find("\"raw_hex\"") {
-        let abs = from + hit;
-        if let Some(s) = json_str(&doc[abs..], "raw_hex") {
-            raws.push(s.to_string());
-        }
-        from = abs + 9;
-    }
-    assert!(raws.len() >= 3);
+    let _ = &doc;
+    let raws: Vec<String> = on_air_frames()
+        .into_iter()
+        .filter(|(pn, _)| *pn == PortNum::TEXT_MESSAGE_APP.0)
+        .map(|(_, h)| h)
+        .collect();
+    assert!(raws.len() >= 3, "expected the text frames; got {}", raws.len());
 
     let Psk::Aes128(key) = expand_psk(&[0x01]).expect("short PSK #1 must expand") else {
         panic!("the default channel key is AES-128")
@@ -989,16 +1049,13 @@ fn short_psk_indices_expand_to_the_documented_keys() {
 #[test]
 fn a_captured_frame_survives_decode_then_encode_byte_for_byte() {
     let doc = fs::read_to_string(captures_dir().join("on_air_frames.json")).unwrap();
-    let mut raws = Vec::new();
-    let mut from = 0usize;
-    while let Some(hit) = doc[from..].find("\"raw_hex\"") {
-        let abs = from + hit;
-        if let Some(s) = json_str(&doc[abs..], "raw_hex") {
-            raws.push(s.to_string());
-        }
-        from = abs + 9;
-    }
-    assert!(raws.len() >= 3);
+    let _ = &doc;
+    let raws: Vec<String> = on_air_frames()
+        .into_iter()
+        .filter(|(pn, _)| *pn == PortNum::TEXT_MESSAGE_APP.0)
+        .map(|(_, h)| h)
+        .collect();
+    assert!(raws.len() >= 3, "expected the text frames; got {}", raws.len());
 
     let Psk::Aes128(key) = expand_psk(&[0x01]).unwrap() else { panic!() };
 
@@ -2959,4 +3016,52 @@ fn emit_ack_for_the_bench() {
     let mut fb = [0u8; frame::MAX_FRAME];
     let n = frame::encode(&header, &payload[..plen], &key, 0, &mut fb).expect("frame encode");
     println!("ACK_FRAME {}", fb[..n].iter().map(|b| format!("{b:02x}")).collect::<String>());
+}
+
+/// A NodeInfo carrying `want_response`, which makes a stock node reply with its
+/// own — one of the few ways to elicit a *stock-originated* frame on demand.
+///
+/// Meshtastic nodes are deliberately quiet: their spontaneous broadcasts are
+/// minutes to hours apart, so waiting for variety does not work. Requests that
+/// compel a reply do.
+#[test]
+fn emit_nodeinfo_request_for_the_bench() {
+    const FROM: u32 = 0x7e57_0001;
+    let Ok(to_s) = std::env::var("REQ_TO") else {
+        println!("NODEINFO_REQUEST_FRAME skipped — set REQ_TO");
+        return;
+    };
+    let to = u32::from_str_radix(to_s.trim_start_matches("0x"), 16).expect("REQ_TO hex");
+    let id: u32 = std::env::var("REQ_ID").ok()
+        .and_then(|v| u32::from_str_radix(v.trim_start_matches("0x"), 16).ok())
+        .unwrap_or(0x0bad_1f00);
+
+    let Psk::Aes128(key) = expand_psk(&[0x01]).unwrap() else { panic!() };
+    let user = User {
+        id: b"!7e570001",
+        long_name: b"tethermesh",
+        short_name: b"tm",
+        macaddr: &[0, 0, 0, 0, 0, 0],
+        hw_model: 43,
+        ..User::default()
+    };
+    let mut ub = [0u8; 128];
+    let ulen = user.encode(&mut ub).expect("User encode");
+    let data = Data {
+        portnum: PortNum::NODEINFO_APP.0,
+        payload: &ub[..ulen],
+        want_response: true,     // the part that compels a reply
+        ..Data::default()
+    };
+    let mut payload = [0u8; 200];
+    let plen = data.encode(&mut payload).expect("Data encode");
+
+    let header = Header {
+        to, from: FROM, id, hop_limit: 3, hop_start: 3,
+        channel: channel_hash(b"LongFast", &key),
+        relay_node: (FROM & 0xFF) as u8, ..Header::default()
+    };
+    let mut fb = [0u8; frame::MAX_FRAME];
+    let n = frame::encode(&header, &payload[..plen], &key, 0, &mut fb).expect("frame encode");
+    println!("NODEINFO_REQUEST_FRAME {}", fb[..n].iter().map(|b| format!("{b:02x}")).collect::<String>());
 }
