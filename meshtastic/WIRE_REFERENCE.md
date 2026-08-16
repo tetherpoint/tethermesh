@@ -324,6 +324,24 @@ So items 1 and 2 were reachable by exactly three routes, and passive local captu
 
 ---
 
+## `RouteDiscovery` field 2 — DERIVED 2026-08-16
+
+From a traceroute reply already held in `tests/captures/conformance_record.json`, no new capture required. Its decrypted plaintext is `0846120312011a3502d0ad0b4800`:
+
+```
+08 46              Data.portnum = 70 (TRACEROUTE_APP)
+12 03  12 01 1a    Data.payload = RouteDiscovery
+                     └─ field 2, length 1, value 26      <- snr_towards
+35 02d0ad0b        Data.request_id = 0x0badd002
+48 00              Data.bitfield = 0
+```
+
+So **`RouteDiscovery` field 2 is `snr_towards`**, length-delimited and carrying quarter-dB values — 26 is 6.5 dB, matching the SNR the node reported for that hop by other means.
+
+**Only field 2, and only because one hop was traced.** A single-hop trace has a trivial route, so the route list itself is empty and its field number stays unestablished. A multi-hop trace would populate it.
+
+---
+
 ## `next_hop` — OBSERVED 2026-08-16
 
 The schema documents it as *"Last byte of the node number… Set by the firmware internally, clients are not supposed to set this."* Now seen directly:

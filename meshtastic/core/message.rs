@@ -348,3 +348,86 @@ const fn truncate_u32(value: u64) -> u32 {
         value as u32
     }
 }
+
+/// The status a `Routing` message carries.
+///
+/// Kept as a number rather than an enum **on purpose**. Two values have been
+/// observed on the wire: `0` on acceptance and `6` on one rejection. Naming `6`
+/// would need the schema read as specification, and this project does not
+/// promote an observed value to a named fact. A caller that must distinguish
+/// specific rejections can compare the number and say where it got it from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RoutingStatus(pub u32);
+
+impl RoutingStatus {
+    /// The accepted status, `0`.
+    pub const ACCEPTED: Self = Self(0);
+
+    /// Whether this reports success.
+    #[must_use]
+    pub const fn is_accepted(self) -> bool {
+        self.0 == 0
+    }
+}
+
+/// A `Routing` message — the payload of a `ROUTING_APP` (portnum 5) frame.
+///
+/// # Only field 3 is decoded, and that is a statement about evidence
+///
+/// Field 3 is the status, established by capturing a stock node's replies:
+/// `0` when it accepted a direct message and `6` when it rejected one. Fields 1
+/// and 2 carry route discovery, which only appears when routing actually
+/// discovers a route — something a two-node bench cannot produce. They are
+/// **not decoded**, because this project does not implement field numbers it
+/// has not established.
+///
+/// # Encoding writes the status even when it is zero
+///
+/// proto3 omits a zero varint and the rest of this module follows that rule.
+/// This one does not, because a stock node does not: its acceptance carries the
+/// two bytes `18 00` explicitly. An acknowledgement encoded the ordinary way
+/// would be empty, and on the evidence would not be recognised. The deviation
+/// is the measurement, not a mistake — see `tests/captures/routing_ack.json`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Routing {
+    /// Field 3. Zero means accepted.
+    pub status: RoutingStatus,
+}
+
+impl Routing {
+    /// A `Routing` reporting acceptance.
+    pub const ACCEPTED: Self = Self { status: RoutingStatus::ACCEPTED };
+
+    /// Decode from the payload of a `ROUTING_APP` frame.
+    ///
+    /// Unknown fields — including the undecoded route-discovery ones — are
+    /// skipped, as everywhere else in this module.
+    ///
+    /// # Errors
+    ///
+    /// [`Error`] if the payload is not well-formed protobuf.
+    pub fn decode(bytes: &[u8]) -> Result<Self, Error> {
+        let mut out = Self::default();
+        let mut reader = Reader::new(bytes);
+        while let Some(field) = reader.next_field()? {
+            if let (3, Value::Varint(v)) = (field.number, field.value) {
+                out.status = RoutingStatus(truncate_u32(v));
+            }
+        }
+        Ok(out)
+    }
+
+    /// Encode into `buf`, returning the number of bytes written.
+    ///
+    /// **Always writes field 3**, including when the status is zero. See the
+    /// type note.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::BufferTooSmall`] if `buf` cannot hold the result.
+    pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
+        let mut w = Writer::new(buf);
+        w.field(3, &Value::Varint(u64::from(self.status.0)))?;
+        Ok(w.len())
+    }
+}

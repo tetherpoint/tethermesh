@@ -60,7 +60,7 @@
 
 use crate::frame::{self, MAX_FRAME};
 use crate::header::{Header, HEADER_LEN};
-use crate::message::{Data, PortNum};
+use crate::message::{Data, PortNum, Routing, RoutingStatus};
 
 /// The `Routing` payload for a successful acknowledgement: field 3, varint 0.
 ///
@@ -308,20 +308,33 @@ pub fn acknowledgement(request_id: u32) -> Data<'static> {
     }
 }
 
-/// The packet id an incoming message acknowledges, if it is one.
+/// What an incoming acknowledgement refers to, and what it says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Acknowledgement {
+    /// The packet id being answered.
+    pub request_id: u32,
+    /// The status. **A rejection retires the pending entry exactly as an
+    /// acceptance does** — either way no further retransmission will help — so
+    /// this is for the caller to report, not for the outbox to act on.
+    pub status: RoutingStatus,
+}
+
+/// Read an incoming message as an acknowledgement, if it is one.
 ///
-/// Matching needs **only** `portnum` and `request_id`, both long since
-/// verified — no knowledge of the `Routing` message is required. Interpreting
-/// the *status* would need it, and this deliberately does not try: a
-/// rejection retires the pending entry exactly as an acceptance does, because
-/// either way no further retransmission will help.
+/// **Matching needs only `portnum` and `request_id`**, both long since
+/// verified. Reading the *status* additionally decodes [`Routing`], whose
+/// field 3 this project established by capture; a payload that fails to decode
+/// still matches, reported as accepted, because the identity of the frame
+/// being answered does not depend on the body parsing.
 #[must_use]
-pub fn acknowledges(data: &Data<'_>) -> Option<u32> {
-    if data.portnum == PortNum::ROUTING_APP.0 && data.request_id != 0 {
-        Some(data.request_id)
-    } else {
-        None
+pub fn acknowledges(data: &Data<'_>) -> Option<Acknowledgement> {
+    if data.portnum != PortNum::ROUTING_APP.0 || data.request_id == 0 {
+        return None;
     }
+    let status = Routing::decode(data.payload)
+        .map(|r| r.status)
+        .unwrap_or(RoutingStatus::ACCEPTED);
+    Some(Acknowledgement { request_id: data.request_id, status })
 }
 
 /// Whether a received frame is addressed to us and asks to be acknowledged.

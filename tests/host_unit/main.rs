@@ -21,6 +21,7 @@ use tethermesh::delivery::{
     acknowledgement, acknowledges, wants_acknowledgement, Outbox, RetryPolicy,
     Error as DeliveryError, ACK_PAYLOAD,
 };
+use tethermesh::message::{Routing, RoutingStatus};
 use tethermesh::crypto::{
     Aes256,
     ccm_decrypt_in_place, ccm_encrypt_in_place, ctr_apply, expand_psk, nonce, Aes128, CcmError,
@@ -2849,18 +2850,24 @@ fn the_acknowledgement_payload_is_the_measured_two_bytes() {
 #[test]
 fn an_acknowledgement_is_recognised_by_portnum_and_request_id_alone() {
     let ack = acknowledgement(0x1234_5678);
-    assert_eq!(acknowledges(&ack), Some(0x1234_5678));
+    let got = acknowledges(&ack).expect("must match");
+    assert_eq!(got.request_id, 0x1234_5678);
+    assert!(got.status.is_accepted(), "an empty-status Routing means accepted");
 
     // A rejection retires the entry too: no retransmission will help either way.
+    // The real rejection captured from a stock node: Routing field 3 = 6.
     let nak = Data { portnum: PortNum::ROUTING_APP.0, payload: &[0x18, 0x06],
                      request_id: 0x1234_5678, ..Data::default() };
-    assert_eq!(acknowledges(&nak), Some(0x1234_5678), "a NAK is still an answer");
+    let got = acknowledges(&nak).expect("a NAK is still an answer");
+    assert_eq!(got.request_id, 0x1234_5678);
+    assert!(!got.status.is_accepted(), "6 is a rejection");
+    assert_eq!(got.status.0, 6, "the number is reported; naming it needs the schema");
 
     let text = Data { portnum: PortNum::TEXT_MESSAGE_APP.0, request_id: 0x1234_5678,
                       ..Data::default() };
-    assert_eq!(acknowledges(&text), None, "portnum must match");
+    assert!(acknowledges(&text).is_none(), "portnum must match");
     let bare = Data { portnum: PortNum::ROUTING_APP.0, ..Data::default() };
-    assert_eq!(acknowledges(&bare), None, "request_id 0 refers to nothing");
+    assert!(acknowledges(&bare).is_none(), "request_id 0 refers to nothing");
 }
 
 /// Retransmission waits the interval, then delivers the frame **unchanged**.
@@ -3064,4 +3071,27 @@ fn emit_nodeinfo_request_for_the_bench() {
     let mut fb = [0u8; frame::MAX_FRAME];
     let n = frame::encode(&header, &payload[..plen], &key, 0, &mut fb).expect("frame encode");
     println!("NODEINFO_REQUEST_FRAME {}", fb[..n].iter().map(|b| format!("{b:02x}")).collect::<String>());
+}
+
+/// The hand-written ACK bytes and the `Routing` wrapper must agree.
+///
+/// `ACK_PAYLOAD` is a literal because a stock node encodes a zero status
+/// explicitly where proto3 would omit it. This ties the literal to the wrapper
+/// so the two cannot drift: if `Routing::encode` ever starts omitting the
+/// zero, this fails rather than acknowledgements quietly stopping working.
+#[test]
+fn the_routing_wrapper_reproduces_the_measured_ack_bytes() {
+    let mut buf = [0u8; 16];
+    let n = Routing::ACCEPTED.encode(&mut buf).expect("encode");
+    assert_eq!(&buf[..n], &ACK_PAYLOAD[..], "field 3 must be written even when zero");
+
+    // And the captured rejection round-trips.
+    let nak = Routing::decode(&[0x18, 0x06]).expect("decode");
+    assert_eq!(nak.status, RoutingStatus(6));
+    let mut out = [0u8; 16];
+    let m = nak.encode(&mut out).expect("encode");
+    assert_eq!(&out[..m], &[0x18, 0x06], "the rejection re-encodes to what was captured");
+
+    // An empty payload decodes as accepted — proto3's own default.
+    assert!(Routing::decode(&[]).expect("empty").status.is_accepted());
 }

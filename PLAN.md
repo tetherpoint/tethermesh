@@ -124,7 +124,23 @@ Two things this phase established that were not in the plan:
 
 `ChannelSettings` is wrapped as well, which closes a loop: reference bytes → PSK short index → expansion → `channel_hash` → `0x08`, the value the oracle was observed to use. That path is now a test.
 
-**Not wrapped yet**, and not needed before L2: `Position`, `Routing`, `NodeInfo`, `MeshPacket`. The pattern is mechanical and the corpus can verify the first three.
+**2026-08-16 — that list was wrong in two ways, and is corrected here.** It read *"Not wrapped yet, and not needed before L2: `Position`, `Routing`, `NodeInfo`, `MeshPacket`. The pattern is mechanical and the corpus can verify the first three."*
+
+Neither half held up:
+
+- **`NodeInfo` is not an on-air message.** Portnum 4 carries a bare `User` — confirmed by decoding a 102-byte NodeInfo broadcast captured from a stock node — and `User` has been wrapped since L3. `NodeInfo` is the *API* structure `FromRadio.node_info`, in the same category as `MeshPacket`: serial and TCP envelopes, adjacent to what `SCOPE.md` says this library is.
+- **"The corpus can verify the first three" was optimistic.** There are **zero** Position samples in it. Field numbers alone would not be enough to verify a wrapper against.
+
+The honest state of the four:
+
+| type | what it is | state |
+|---|---|---|
+| **`Routing`** | on-air, portnum 5 | **wrapped 2026-08-16.** Field 3 (status) decoded, established by capture. Fields 1–2 carry route discovery and are deliberately **not** decoded: they appear only when routing actually discovers a route, which two nodes cannot produce. |
+| **`Position`** | on-air, portnum 3 | **not wrapped, and unmotivated.** Nothing in this stack reads it. Every other wrapper exists because something drove it — `Data` is the envelope, `ChannelSettings` feeds `channel_hash`, `User` was needed to emit one. There are dozens of portnums we do not wrap for the same reason; Position is not special, it was just named. |
+| **`NodeInfo`** | API structure | miscategorised above. `User` is the on-air part and is done. |
+| **`MeshPacket`** | API structure | field numbers are verified in the wire reference, so it is wrappable whenever a consumer needs to drive a node over serial from Rust. No such consumer exists. |
+
+**Evidence needed, and what a third node would and would not help.** Position needs a node broadcasting one, which needs no GPS — a fixed position set by config produces the same bytes, and `TESTING.md` names positions as identifying data, so a synthetic coordinate is the *right* choice rather than a compromise. `Routing` fields 1–2 and richer `RouteDiscovery` routes are the only items here a third node would unblock, and they are the ones nothing currently needs.
 
 **Gate:** every message in the corpus round-trips decode→encode bit-identically. *The corpus now exists — `tests/captures/fromradio_corpus.json`, 43 messages, 9 variants — and their encoder was measured to be canonical, so the gate is reachable. This is unblocked and ready to implement against.*
 
