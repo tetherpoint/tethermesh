@@ -42,7 +42,14 @@ REQUIRED_ATTRS=(
     'deny(clippy::expect_used)'
     'deny(clippy::panic)'
     'deny(clippy::indexing_slicing)'
-    'deny(clippy::integer_arithmetic)'
+    # Was 'deny(clippy::integer_arithmetic)'. Clippy renamed that lint, and a
+    # renamed lint still enforces — so this is not a repair, it is a move off a
+    # deprecated spelling before it turns into a silent hole. Renamed is not
+    # removed: once clippy drops the old name, denying it becomes inert and
+    # arithmetic checking stops while the attribute still reads as present and
+    # this script still finds the string. Requiring the current name is what
+    # keeps the check honest.
+    'deny(clippy::arithmetic_side_effects)'
     'forbid(unsafe_op_in_unsafe_fn)'
 )
 
@@ -77,7 +84,11 @@ while IFS= read -r f; do
     base=$(basename "$f")
     # Tests may panic; that is what an assertion is.
     case "$f" in */tests/*|*/benches/*) continue ;; esac
-    grep -nE '^\s*[^/]*\ballow\(clippy::(unwrap_used|panic|indexing_slicing|integer_arithmetic)\)' "$f" 2>/dev/null \
+    # Both spellings of the arithmetic lint are listed. The crate denies the
+    # current name, but an #[allow] of either would read as intentional and
+    # neither must pass: the old name still resolves today, so allowing it
+    # would defeat the deny just as effectively.
+    grep -nE '^\s*[^/]*\ballow\(clippy::(unwrap_used|expect_used|panic|indexing_slicing|integer_arithmetic|arithmetic_side_effects)\)' "$f" 2>/dev/null \
         && fail "$base — local #[allow] defeats a crate-level deny"
     grep -nE '\bstatic\s+mut\b' "$f" 2>/dev/null \
         && fail "$base — 'static mut': mutable global state. State belongs in a caller-owned context; Send/Sync does not cross the FFI boundary."

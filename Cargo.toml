@@ -1,0 +1,54 @@
+[package]
+name = "tethermesh"
+version = "0.0.0"
+edition = "2021"
+# Pinned so "it builds" means the same thing on every machine. Raise it
+# deliberately, never incidentally.
+rust-version = "1.75"
+publish = false
+
+# NO `license` FIELD, DELIBERATELY.
+# docs/LICENSING-OPTIONS.md records that permissive licensing is settled but
+# the specific choice — Apache-2.0 vs MIT, and whether the specification
+# carries CC-BY-4.0 separately — is NOT. Writing one here would settle it by
+# accident, in metadata, which is exactly how such decisions get made without
+# anyone deciding them. Add it when that document is closed out.
+
+# NO DEPENDENCIES, AND THAT IS A REQUIREMENT RATHER THAN A CURRENT STATE.
+# DISTRIBUTION.md commits to no code-generation dependency in the build, and
+# the protobuf codec is hand-written partly so that nothing here derives from
+# a copyleft input. A dependency added later must clear both bars.
+
+[lib]
+name = "tethermesh"
+path = "meshtastic/core/lib.rs"
+# rlib ONLY, for now.
+#
+# DISTRIBUTION.md promises a prebuilt static library and a C header, which
+# means `staticlib` — but a no_std staticlib is a linkable artifact and must
+# therefore carry a #[panic_handler], and defining one emits the very
+# `rust_begin_unwind` symbol that tools/check_rust_rules.sh --binary treats as
+# evidence that some path can panic.
+#
+# That tension is real and belongs to L8, where the C ABI surface is designed.
+# It is written down here rather than resolved early, because the resolution
+# affects what the panic-free claim actually means at the artifact boundary.
+crate-type = ["rlib"]
+
+# Integration tests live where the repository layout says they live.
+# check_rust_rules.sh exempts */tests/* from the no-panic rules on purpose:
+# an assertion is a panic, and that is what an assertion is for.
+[[test]]
+name = "host_unit"
+path = "tests/host_unit/main.rs"
+
+[profile.release]
+# An aborting panic is what turns a would-be memory error into a halt rather
+# than something exploitable. The goal is that no panic path exists at all;
+# this is the backstop for having been wrong about that.
+panic = "abort"
+lto = true
+codegen-units = 1
+# DISTRIBUTION.md commits to a CI size budget. Optimising for size is the
+# default posture for a library that lands on a microcontroller.
+opt-level = "z"

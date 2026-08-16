@@ -1,5 +1,9 @@
 # Build artefacts
 build/
+# Cargo's build directory. Cargo.lock is NOT ignored: DISTRIBUTION.md commits
+# to reproducible builds, and with zero dependencies the lock file costs
+# nothing and records that fact rather than leaving it to be assumed.
+target/
 *.o
 *.elf
 *.uf2

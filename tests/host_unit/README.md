@@ -23,6 +23,55 @@ The domain red list, as it becomes implementable:
 - an unknown PortNum must be ignored, not crash
 - a node without the extension must **not** read class-B traffic while still relaying it
 
-**Captures are fixtures.** `tests/captures/` holds real on-air frames as
-`ts / rssi / snr / raw-hex`. The decoder replays them offline, so an interop bug
-becomes a regression test and stops needing bench access to fix.
+**Captures are fixtures.** `tests/captures/` holds them, and tests read them
+from there rather than from transcribed copies — a vector table copied into a
+test drifts from the capture it came from, and the drift is invisible because
+both sides still agree with themselves.
+
+What is actually in there is **not** `ts / rssi / snr / raw-hex` on-air frames,
+as this file previously said. As of 2026-08-15 there are three kinds, and they
+are not interchangeable:
+
+- **byte-exact protobuf** from the reference implementation's own encoder,
+  captured at its API — the L3 corpus, and the only byte-level material so far;
+- **field-level radio observations**, which name each header field and its
+  value but say nothing about how those fields are packed;
+- **synthetic known-answer vectors**, computed from verified functions.
+
+Raw on-air frames need a radio; see `meshtastic/WIRE_REFERENCE.md` for why no
+local route produces them.
+
+## What has been observed red
+
+Per the rule above, recorded rather than claimed:
+
+| gate | broken how | observed |
+|---|---|---|
+| crate lints | a module using `buf[0]`, `a + b` and `.unwrap()` | 3 errors, build refused |
+| `channel_hash` vectors | folded the name only, ignoring the PSK | `channel_hash("LongFast", …) = 0x0a, corpus says 0x08` |
+| `arithmetic_side_effects`, after moving off the renamed lint | a module using `a + b` | error at the use site, build refused, exit 101 |
+| `check_rust_rules.sh`'s attribute requirement | deleted the attribute from `lib.rs` | `VIOLATION: lib.rs is missing #![deny(clippy::arithmetic_side_effects)]`, exit 1 |
+| protobuf round-trip (L3 gate) | made the writer emit **non-minimal** varints | gate failed on the first message |
+| proto3 default omission | made the encoder emit a zero-valued field | `an all-default Data encoded to 2 bytes, expected 0` |
+| `User` wrapper vs reference bytes | *not deliberate* — the wrapper was missing `macaddr` | failed with a 38-byte re-encode against 46 reference bytes |
+
+The `User` row is the useful one, because nobody planted it. The wrapper was
+built from a list of field numbers extracted with a regex that matched
+`= 4;` and therefore skipped `bytes macaddr = 4 [deprecated = true];`. The
+field is deprecated as of Meshtastic 2.1.x and firmware 2.7.26 **still emits
+it**, as six zero bytes in every `User`.
+
+Two things follow. **Deprecated in the schema is not absent from the wire**,
+and byte identity is decided by the wire. And a lossy extraction of field
+numbers produces a codec that is wrong in a way no amount of self-consistent
+testing reveals — only comparison against real reference output caught it.
+
+That last one is the reason the gate is phrased as *bit-identical* rather than
+*equivalent*. A non-minimal varint decodes to exactly the same value, so a
+test comparing decoded values would have passed it. Comparing bytes is what
+catches an encoder that is correct and still emits frames the reference would
+re-encode differently.
+
+The second one is worth noting for what it also showed: the order-independence
+test **still passed** against the broken implementation. A property test that
+survives the bug is not a substitute for a vector tied to the reference.
