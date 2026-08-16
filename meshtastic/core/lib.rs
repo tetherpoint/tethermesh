@@ -55,3 +55,4 @@ pub mod message;
 pub mod packet_id;
 pub mod protobuf;
 pub mod sha256;
+pub mod x25519;

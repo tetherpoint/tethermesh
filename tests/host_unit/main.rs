@@ -23,6 +23,7 @@ use tethermesh::message::{ChannelSettings, Data, PortNum, User};
 use tethermesh::packet_id::{NextId, PacketIdSource};
 use tethermesh::protobuf::{Error as ProtoError, Reader, Value, Writer};
 use tethermesh::sha256::{sha256, Sha256};
+use tethermesh::x25519::{public_key, x25519};
 
 fn captures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/captures")
@@ -1374,4 +1375,113 @@ fn ccm_round_trips_and_rejects_short_buffers() {
         ccm_decrypt_in_place(&key, &[0u8; 12], &mut buf, CCM_TAG_LEN),
         Err(CcmError::BadNonce)
     );
+}
+
+/// RFC 7748 section 5.2 published X25519 vectors.
+#[test]
+fn x25519_matches_rfc7748_vectors() {
+    let cases = [
+        ("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4",
+         "e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c",
+         "c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552"),
+        ("4b66e9d4d1b4673c5ad22691957d6af5c11b6421e0ea01d42ca4169e7918ba0d",
+         "e5210f12786811d3f4b7959d0538ae2c31dbe7106fc03c3efc4cd549c715a493",
+         "95cbde9476e8907d7aade45cb4b873f88b595a68799fa152e6f8f7647aac7957"),
+    ];
+    for (k, u, want) in cases {
+        let mut ks = [0u8; 32];
+        ks.copy_from_slice(&hex_to_bytes(k));
+        let mut us = [0u8; 32];
+        us.copy_from_slice(&hex_to_bytes(u));
+        let got = x25519(&ks, &us).expect("non-zero result");
+        assert_eq!(got.iter().map(|b| format!("{b:02x}")).collect::<String>(), want);
+    }
+}
+
+/// The base point, and agreement in both directions.
+#[test]
+fn x25519_public_keys_agree_both_ways() {
+    let a = hex_to_bytes("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
+    let b = hex_to_bytes("5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb");
+    let (mut ka, mut kb) = ([0u8; 32], [0u8; 32]);
+    ka.copy_from_slice(&a);
+    kb.copy_from_slice(&b);
+
+    // RFC 7748 section 6.1 publishes both public keys for these scalars.
+    assert_eq!(
+        public_key(&ka).iter().map(|x| format!("{x:02x}")).collect::<String>(),
+        "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a"
+    );
+    assert_eq!(
+        public_key(&kb).iter().map(|x| format!("{x:02x}")).collect::<String>(),
+        "de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f"
+    );
+
+    let s1 = x25519(&ka, &public_key(&kb)).unwrap();
+    let s2 = x25519(&kb, &public_key(&ka)).unwrap();
+    assert_eq!(s1, s2, "both parties must derive the same secret");
+    assert_eq!(
+        s1.iter().map(|x| format!("{x:02x}")).collect::<String>(),
+        "4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742"
+    );
+}
+
+/// The exchange that actually happened on the bench.
+///
+/// A stock node encrypted a direct message to a public key we published, and
+/// this reproduces the secret behind it — closing the loop from key agreement
+/// through KDF to the decrypted text.
+#[test]
+fn x25519_reproduces_the_bench_exchange_and_decrypts_the_message() {
+    let mut our_priv = [0u8; 32];
+    our_priv.copy_from_slice(&hex_to_bytes(
+        "2085445b15f80cffb7cdd4f254d3e27826c867708b93d13960d6c09e1404be74",
+    ));
+    let mut their_pub = [0u8; 32];
+    their_pub.copy_from_slice(&hex_to_bytes(
+        "f2b087c1c61c900292a54c6237ddc5e0e168d07b3dd684892fe2589495b1f574",
+    ));
+
+    // Our published public key must be what we told them it was.
+    assert_eq!(
+        public_key(&our_priv).iter().map(|b| format!("{b:02x}")).collect::<String>(),
+        "f771ce1cc233e1e28bf8a4ad4fd8acd1ff263ef59e238d3f5f6a73372b7a9a7f"
+    );
+
+    let shared = x25519(&our_priv, &their_pub).expect("non-zero");
+    assert_eq!(
+        shared.iter().map(|b| format!("{b:02x}")).collect::<String>(),
+        "b82315ffc2c374aba1ee1b290a7d4823a1837049920f9821b34a4dfd0a8f3d60",
+        "must match the secret computed from their private key"
+    );
+
+    // ...and the whole chain, ending in the text they sent.
+    let key = sha256(&shared);
+    let doc = fs::read_to_string(captures_dir().join("pki_dm_record.json")).unwrap();
+    let frame = hex_to_bytes(json_str(&doc[doc.find("\"frame_hex\"").unwrap()..], "frame_hex").unwrap());
+    let hdr = Header::decode(&frame).unwrap();
+    let payload = &frame[HEADER_LEN..];
+    let mut nonce = [0u8; 13];
+    nonce[..4].copy_from_slice(&hdr.id.to_le_bytes());
+    nonce[4..8].copy_from_slice(&payload[payload.len() - 4..]);
+    nonce[8..12].copy_from_slice(&hdr.from.to_le_bytes());
+    let mut work = payload[..payload.len() - 4].to_vec();
+    let n = ccm_decrypt_in_place(&key, &nonce, &mut work, CCM_TAG_LEN).unwrap();
+    assert_eq!(Data::decode(&work[..n]).unwrap().payload, b"pki-probe-B");
+}
+
+/// A small-order public key drives the output to zero whatever the private
+/// key is, so accepting it agrees a secret an attacker already knows.
+#[test]
+fn small_order_public_keys_are_rejected() {
+    let priv_key = [0x11u8; 32];
+    for bad in [
+        "0000000000000000000000000000000000000000000000000000000000000000",
+        "0100000000000000000000000000000000000000000000000000000000000000",
+        "e0eb7a7c3b41b8ae1656e3faf19fc46ada098deb9c32b1fd866205165f49b800",
+    ] {
+        let mut p = [0u8; 32];
+        p.copy_from_slice(&hex_to_bytes(bad));
+        assert_eq!(x25519(&priv_key, &p), None, "small-order point {bad} must be rejected");
+    }
 }

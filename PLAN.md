@@ -182,9 +182,13 @@ SHA-256 is checked against the published FIPS 180-4 vectors first, and then agai
 
 Tamper tests matter more here than anywhere else in the crate, because **this is the one layer that can tell a forgery from a message.** Flipping any byte of ciphertext or tag, or using the wrong key, returns `Unauthentic` rather than plaintext.
 
-**Still to build:** X25519 itself. The construction above takes a shared secret; producing that secret from a keypair is the remaining piece, and the captured exchange is a known-answer vector for it.
+**X25519 is done** — `meshtastic/core/x25519.rs`, five 51-bit limbs, Montgomery ladder, fixed-chain inversion, arithmetic conditional swaps. It matches the RFC 7748 vectors, agrees in both directions, rejects small-order public keys, and reproduces the bench exchange: our published key, their key, the same shared secret, the same derived AES key, the same decrypted text.
 
-**Gate:** decrypt a captured direct message; produce one the reference accepts. *First half met; the second needs X25519 so we can key an outbound message.*
+That completes the chain in our own code, with no dependencies: **key agreement → SHA-256 KDF → AES-256-CCM → protobuf**, verified against a message a stock node actually sent.
+
+The first attempt was wrong in a way worth recording: `fe_sub` biased by p instead of 2p, and the final reduction was muddled. The result was a field implementation that is entirely self-consistent — it adds, multiplies, inverts and round-trips happily — and disagrees with the published vectors. No property test would have found it.
+
+**Gate:** decrypt a captured direct message; produce one the reference accepts. *First half met and now fully in our own code. The second half — emitting a DM they accept — needs an outbound test on the bench.*
 
 ## L7 — the extension suite
 

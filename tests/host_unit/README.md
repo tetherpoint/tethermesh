@@ -90,6 +90,20 @@ Per the rule above, recorded rather than claimed:
 | PSK expansion | treated a one-byte PSK as a literal key | captured frames failed to decrypt, and the vector test failed |
 | panic-free artifact | reintroduced a `copy_from_slice` with unprovable lengths | `references machinery outside the crate: …copy_from_slice_impl17len_mismatch_fail` |
 | panic-free check, vacuity | pointed the check at the `.rlib` | `REFUSING: only 2 symbol(s)` |
+| X25519 field arithmetic | *not deliberate* — `fe_sub` biased by p instead of 2p, and the final reduction was wrong | RFC 7748 vector returned `77b3cb27…` for `c3da5537…` |
+| panic-free artifact, again | *not deliberate* — a `u128` shift pulled in `__ashlti3` | `references machinery outside the crate: __ashlti3` |
+
+The X25519 row is the strongest argument in this table for published vectors.
+The bug was a wrong constant in `fe_sub` — biasing by p rather than 2p — plus
+a muddled final reduction. Both produce a field implementation that is
+completely self-consistent: it adds, multiplies and inverts happily, and
+agrees with itself on every round trip. Only a value computed by someone else
+reveals it. There is no property test that would have caught it.
+
+The `__ashlti3` row is worth reading too, because the check fired on something
+that was *not* a panic path: a compiler-rt intrinsic for 128-bit shifts. The
+right response was to remove the 128-bit shift rather than widen the
+allowlist, since the serialisation never needed more than 64 bits.
 
 The header rows are the ones that justify capturing real frames at all. A
 big-endian header round-trips through our own encoder perfectly — it is only
