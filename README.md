@@ -162,6 +162,14 @@ Beyond the principles above, which are enforced mechanically:
 - **A measurement nobody can re-run is a claim.** Where a figure decides something, the method is committed as a script rather than described in prose. `tools/measure_panic_symbols.sh` exists because a table of numbers with no recorded harness could not be defended or refuted when someone tried.
 - **Corrections stay visible.** Where a conclusion changed, the superseded reasoning is struck rather than deleted, and the reason it was wrong is recorded next to it. Several entries here were confidently wrong; the record of *how* is more useful than a tidy document.
 
+## How this was built
+
+tethermesh was written with **Anthropic's Claude Opus 5**, working against the bench and the pinned reference described above.
+
+That is recorded for the same reason everything else here is: so a reader can weigh the evidence. It changes nothing about what is claimed — the gates in `tools/` do not care what wrote the code, the proofs in `meshtastic/core/proofs.rs` hold or they do not, and a stock node either accepted our frames or it did not. Those checks exist precisely so that correctness rests on measurement rather than on who or what produced a line.
+
+It is worth knowing for the clean-room position specifically. The rule was enforced mechanically throughout rather than trusted: reference source was never fetched into the environment, `tools/check_cleanroom.sh` gates every run over the working tree and the vendored submodules, and the history was audited separately for material that had been committed and later removed. The instrument that measured the wire is committed in `instruments/` so the byte-level facts can be re-derived independently.
+
 ## Licence
 
 **Apache-2.0**, for the code and the specification alike. See `LICENSE` and `NOTICE`; the reasoning is in `docs/LICENSING-OPTIONS.md`.

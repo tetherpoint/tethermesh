@@ -5,7 +5,7 @@
     "captured": "2026-08-16",
     "transmitter": "Heltec V3, stock Meshtastic 2.7.26.54e0d8d, US/LongFast, tx_power 10 dBm",
     "receiver": "Heltec V3 running bench/firmware/heltec_v3_sniffer \u2014 an independently written SX1262 driver, from the SX126x datasheet's documented command set",
-    "radio": "906.875 MHz, SF11, BW 250 kHz, CR 4/5, preamble 16, sync word registers 0x24 0xB4",
+    "radio": "906.875 MHz, SF11, BW 250 kHz, preamble 16, sync word registers 0x24 0xB4. CODING RATE IS THE RECEIVER'S SETTING, NOT A MEASUREMENT -- see coding_rate_caveat.",
     "note": "Our nodes, our channel, our own text. Publishable under TESTING.md. No third-party traffic.",
     "clean_room_note": "The receiver's driver is our own work. No GPL radio library is linked or consulted; see README.md for the boundary and tools/check_cleanroom.sh for the gate that enforces it."
   },
@@ -123,5 +123,6 @@
       "plaintext_hex": "0801120d736e6966662d70726f62652d324800",
       "plaintext_note": "Data{portnum=1 TEXT_MESSAGE_APP, payload='sniff-probe-N', bitfield=0}"
     }
-  ]
+  ],
+  "coding_rate_caveat": "This file previously recorded 'CR 4/5' among the radio parameters, which read as a measured property of the transmission. It is not. It is what our receiver was configured to, and in LoRa explicit-header mode that setting is ignored: the header carries the payload's coding rate, is itself sent at a fixed 4/8, and the receiver reconfigures from it. Demonstrated 2026-08-16 -- a receiver deliberately set to 4/8 and to 4/6 decoded the same frames with crc=ok at matched SF and BW. So successful reception says nothing about the transmitter's coding rate, and LongFast's CR has never been measured by this project."
 }

@@ -197,6 +197,52 @@ static void sx_write_buffer(uint8_t offset, const uint8_t *data, uint8_t n)
  * emit. Nothing here interprets the bytes — the host builds the frame, this
  * puts it on the air verbatim, so a rejection is theirs and not an artefact
  * of a helpful modem. */
+/* Receive modulation and packet parameters, settable at runtime via MOD.
+ *
+ * WHY THIS IS RUNTIME
+ * -------------------
+ * Establishing the coding rate of a preset needs a receiver that can be put
+ * DELIBERATELY WRONG and observed failing. In LoRa's explicit-header mode that
+ * is impossible: the header carries the payload's coding rate, is itself sent
+ * at a fixed 4/8, and the receiver reconfigures from it -- so a mismatched
+ * receiver decodes anyway and the configured CR is simply ignored.
+ *
+ * Implicit-header mode is the discriminator. There the receiver uses ITS OWN
+ * coding rate and payload length, so only the correct CR yields a valid CRC.
+ * That requires knowing the length in advance, which an explicit-mode capture
+ * of the same frame supplies.
+ *
+ * Hence: MOD <sf> <bw> <cr> <hdr> <len>. Defaults are LongFast, explicit.
+ * bw is the raw SX126x index -- 0x04=125k, 0x05=250k, 0x06=500k -- passed
+ * through rather than translated, so what reaches the part is what was asked
+ * for and a typo cannot silently become a different bandwidth.
+ */
+static uint8_t rx_sf   = 11;
+static uint8_t rx_bw   = 0x05;
+static uint8_t rx_cr   = 0x01;
+static uint8_t rx_hdr  = 0x00;   /* 0 explicit, 1 implicit */
+static uint8_t rx_len  = 0xFF;
+static uint8_t rx_ldro = 0x00;
+
+static const uint8_t rxcont_[3] = { 0xFF, 0xFF, 0xFF };
+
+/* Push the current rx_* settings into the part and re-arm continuous receive. */
+static void radio_apply_rx(void)
+{
+    uint8_t sb = 0x00;
+    sx_cmd(CMD_SET_STANDBY, &sb, 1);
+    uint8_t mod[4] = { rx_sf, rx_bw, rx_cr, rx_ldro };
+    sx_cmd(CMD_SET_MODULATION_PARAMS, mod, 4);
+    uint8_t pkt[6] = { 0x00, 0x10, rx_hdr, rx_len, 0x01, 0x00 };
+    sx_cmd(CMD_SET_PACKET_PARAMS, pkt, 6);
+    uint8_t clr[2] = { 0xFF, 0xFF };
+    sx_cmd(CMD_CLR_IRQ_STATUS, clr, 2);
+    sx_cmd(CMD_SET_RX, (uint8_t *)rxcont_, 3);
+    printf("MODOK sf=%u bw=0x%02X cr=%u hdr=%u len=%u ldro=%u\n",
+           rx_sf, rx_bw, rx_cr, rx_hdr, rx_len, rx_ldro);
+    fflush(stdout);
+}
+
 /* Transmit power in dBm, settable at runtime via the PWR command.
  *
  * WHY THIS IS RUNTIME AND NOT A CONSTANT
@@ -391,6 +437,40 @@ void app_main(void)
         while (uart_read_bytes(UART_NUM_0, &ch, 1, 0) == 1) {
             if (ch == '\r' || ch == '\n') {
                 line[fill] = 0;
+                if (fill > 4 && line[0] == 'M' && line[1] == 'O' &&
+                    line[2] == 'D' && line[3] == ' ') {
+                    /* MOD <sf> <bw> <cr> <hdr> <len> -- decimal, except bw and
+                     * len which accept 0x.. as well. Missing trailing fields
+                     * keep their current value. */
+                    unsigned v[6]; int got = 0; const char *q = line + 4;
+                    while (got < 6 && *q) {
+                        while (*q == ' ') q++;
+                        if (!*q) break;
+                        unsigned base = 10;
+                        if (q[0] == '0' && (q[1] == 'x' || q[1] == 'X')) { base = 16; q += 2; }
+                        unsigned acc = 0; int digits = 0;
+                        while (*q) {
+                            int d = hexval(*q);
+                            if (d < 0 || (unsigned)d >= base) break;
+                            acc = acc * base + (unsigned)d; digits++; q++;
+                        }
+                        if (!digits) break;
+                        v[got++] = acc;
+                    }
+                    if (got >= 3) {
+                        if (v[0] >= 5 && v[0] <= 12) rx_sf = (uint8_t)v[0];
+                        rx_bw = (uint8_t)v[1];
+                        if (v[2] >= 1 && v[2] <= 4) rx_cr = (uint8_t)v[2];
+                        if (got >= 4) rx_hdr = v[3] ? 1 : 0;
+                        if (got >= 5) rx_len = (uint8_t)v[4];
+                        if (got >= 6) rx_ldro = v[5] ? 1 : 0;
+                        radio_apply_rx();
+                    } else {
+                        printf("MODBAD\n"); fflush(stdout);
+                    }
+                    fill = 0;
+                    continue;
+                }
                 if (fill > 4 && line[0] == 'P' && line[1] == 'W' &&
                     line[2] == 'R' && line[3] == ' ') {
                     /* PWR <signed dBm>. Clamped, and the ACTUAL value applied
