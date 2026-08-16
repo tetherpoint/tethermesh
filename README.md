@@ -101,7 +101,19 @@ The frame header, channel hashing, channel and PKI cryptography, the protobuf co
   | `PacketHistory<64>` | 528 |
   | `PacketHistory<400>` | 3,216 |
 
-  400 is the history depth the reference was observed using. A node carrying that plus a small outbox needs roughly **4.3 KB of state**, which exceeds a typical RTOS task stack — so **put them in a context created once at initialisation, never in task-stack locals.** This is the practical shape of "no allocation": the memory does not vanish, it becomes yours to place deliberately.
+  400 is the history depth the reference was observed using. A node carrying that plus a small outbox needs roughly **4.3 KB of state**. This is the practical shape of "no allocation": the memory does not vanish, it becomes yours to place deliberately.
+
+  **Where you place it is genuinely your call, and the stack is a legitimate answer.** "No allocation" constrains *this library* — no global allocator, no heap — and says nothing about your RTOS, which can size a task stack however it likes. These types are also task-lifetime rather than call-lifetime: a `PacketHistory` exists to persist across packets, so declaring one in a task function and holding it for the task's duration is idiomatic, not a misuse. What matters is that the RAM is *accounted* somewhere deliberate. Two ways to get that wrong: putting 4 KB of state on a default-sized task stack, and assuming a static context is free of the sharing question.
+
+  To size a stack you also need our call-depth usage, which is separate from the structs above. Measured on the Cortex-M33 object by summing frame allocations along the deepest call chain:
+
+  | chain | bytes |
+  |---|---|
+  | `ccm_decrypt_in_place` (deepest in the library) | 696 |
+  | `ccm_encrypt_in_place` | 664 |
+  | `x25519` scalar multiplication | < 500 |
+
+  The Montgomery ladder is iterative, so X25519 is not the deep one — the AES key schedules are. **Budget ~1 KB for this library's call depth**, on top of whatever state you place and your own frames. That number is reproducible from the build and will move if the code does; it is a measurement, not a guarantee.
 - **Identity, key custody, persistence.**
 
 ### The gap you must fill yourself today: delivery
