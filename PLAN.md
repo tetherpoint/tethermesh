@@ -244,7 +244,15 @@ Nothing new is needed. Make a stock node originate a `want_ack` packet and **wit
 
 That yields the retry count, the backoff shape, and whether the interval is fixed or randomised. It also settles a related question this project has assumed nothing about: **whether an overheard rebroadcast of one's own packet is treated as an implicit acknowledgement.** Withholding an explicit ack while a relay does occur separates the two.
 
-**Gate for this item:** retry count and backoff recorded in `meshtastic/WIRE_REFERENCE.md` with the capture behind them, and our policy stated as at-or-below what was measured.
+**2026-08-16 — the measurement is done.** Three attempts per message, roughly 7 s apart (6.38–7.67 s over eight samples), header byte-identical across attempts, payload re-encrypted each time. Four trials, recorded in `tests/captures/retry_behaviour.json` and summarised in the wire reference.
+
+So the ceiling is **3 attempts at ~7 s**. Our policy sits at or below that.
+
+**One thing the measurement deliberately does not claim.** Whether retry behaviour differs *per hop* is untested: the header did not change across attempts, but with two nodes there is no multi-hop path for next-hop routing to engage on, so the single-hop case may simply not exercise the documented *"flooding on the final retry"* fallback. That needs a third node, and until then the implementation should not encode a position on it.
+
+**And one deliberate deviation, with its justification.** We need not re-encrypt per attempt. Holding the encoded frame and resending it verbatim is cryptographically safe — nonce reuse only endangers *different* plaintexts — costs less state under the no-allocation rule, and is indistinguishable to a receiver, which drops the repeated `(from, id)` as a duplicate regardless.
+
+**Gate for this item:** retry count and backoff recorded in `meshtastic/WIRE_REFERENCE.md` with the capture behind them, and our policy stated as at-or-below what was measured. *Measurement met; the implementation remains to be written.*
 
 **Gate:** relay behaviour matches the reference across a topology matrix, and the relay question is answered in the wire reference either way. *Now gated on hardware, not on effort.*
 

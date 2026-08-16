@@ -1,0 +1,54 @@
+{
+  "corpus": "retry_behaviour",
+  "boundary": "a stock node's transmissions, observed on the air by our own receiver",
+  "provenance": {
+    "captured": "2026-08-16",
+    "originator": "Heltec V3, stock Meshtastic 2.7.26.54e0d8d, US/LongFast",
+    "observer": "Heltec V3 running instruments/heltec_v3_sniffer",
+    "method": "The stock node was driven over its serial API to send a want_ack direct message to node 0x7e570001, which is ours and NEVER ACKNOWLEDGES ANYTHING. Every transmission was then captured on the air with a firmware timestamp. Withholding the ack is the default here, not a special mode -- this stack sends no acknowledgements at all.",
+    "note": "Our two nodes only. Ambient third-party traffic was observed during capture and is deliberately excluded from this record per TESTING.md.",
+    "clean_room_note": "Black-box observation of transmissions. No reference source was read."
+  },
+  "measured": {
+    "trials": 4,
+    "attempts_per_message": 3,
+    "attempts_note": "One initial transmission plus two retransmissions, then it stops. Consistent across all four trials.",
+    "intervals_s": [
+      6.38,
+      6.68,
+      6.95,
+      6.97,
+      7.21,
+      7.31,
+      7.33,
+      7.67
+    ],
+    "interval_summary": {
+      "min": 6.38,
+      "max": 7.67,
+      "mean": 7.04,
+      "n": 8
+    },
+    "interval_note": "Six to eight samples around a nominal ~7 s with roughly +/-0.65 s of spread. Whether that spread is deliberate randomisation or the contention window leaking into the retry timer is NOT established by this data."
+  },
+  "findings": [
+    {
+      "claim": "The header is byte-identical across retransmissions.",
+      "detail": "flags 0x6b throughout: hop_limit stays 3, want_ack stays 1, hop_start stays 3, channel stays 0x00. No field changes between attempt 1 and attempt 3.",
+      "status": "MEASURED, single-hop only. See the limitation below."
+    },
+    {
+      "claim": "The PAYLOAD changes on every retransmission -- it is re-encrypted, not resent verbatim.",
+      "detail": "Ciphertext bytes differ between attempts while the packet id stays the same, which means a fresh extra_nonce per attempt. Observed in 3 of 3 want_ack messages.",
+      "status": "MEASURED."
+    }
+  ],
+  "limitation_hops": {
+    "what": "This does not measure whether retry behaviour differs per hop.",
+    "why": "WIRE_REFERENCE records that next-hop routing falls back 'to flooding on the final retry', which implies the ROUTING MODE changes across attempts. Nothing of the sort is visible here: the header is identical across all three. With two nodes there is no multi-hop path for next-hop routing to engage on, so the single-hop case may simply not exercise it. A third node is required to settle this, and until then no claim is made either way."
+  },
+  "consequence_for_our_implementation": {
+    "ceiling": "3 attempts, ~7 s apart. PLAN.md's rule is that upstream's policy is a CEILING and never a target, because retransmission spends shared airtime and each retry is re-flooded by every neighbour that hears it. Our policy must sit at or below this.",
+    "re_encryption": "We need NOT re-encrypt per attempt. Resending the identical frame is cryptographically safe -- same key, same nonce, same plaintext yields the same ciphertext, and nonce reuse is only dangerous across DIFFERENT plaintexts. It also costs less state, since the encoded frame can be held rather than the plaintext plus a re-encryption. A receiver cannot tell the difference: it drops the repeated (from, id) as a duplicate either way. Recorded as a deliberate deviation with its justification, per the standing rule."
+  }
+}

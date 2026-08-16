@@ -324,6 +324,25 @@ So items 1 and 2 were reachable by exactly three routes, and passive local captu
 
 ---
 
+## RETRY BEHAVIOUR — MEASURED 2026-08-16
+
+A stock node was driven to send a `want_ack` direct message to a node that **never acknowledges anything**, and every transmission was captured on the air with a firmware timestamp. Withholding the acknowledgement required no special mode: this stack sends none at all. Record in `tests/captures/retry_behaviour.json`.
+
+| what | measured |
+|---|---|
+| attempts per message | **3** — one initial plus two retransmissions, then it stops |
+| interval | **~7 s**, observed 6.38–7.67 s across eight samples |
+| header across attempts | **byte-identical** — `flags 0x6b` throughout, `hop_limit` stays 3 |
+| payload across attempts | **changes every time** — re-encrypted with a fresh extra nonce |
+
+Consistent across four trials.
+
+**The payload result is the one to notice.** The packet id is unchanged while the ciphertext differs, which means each retransmission is re-encrypted rather than resent verbatim. An implementer need not copy that: resending the identical frame is cryptographically safe, because nonce reuse is only dangerous across *different* plaintexts, and the receiver drops the repeated `(from, id)` as a duplicate either way.
+
+**What this does NOT establish: whether retry behaviour differs per hop.** This document records that next-hop routing falls back *"to flooding on the final retry"*, which implies the routing mode changes across attempts. Nothing of the kind is visible here — the header is identical across all three. **But the bench has two nodes, so there is no multi-hop path for next-hop routing to engage on**, and the single-hop case may simply not exercise it. No claim is made either way. Settling it needs a third node.
+
+---
+
 ## THE LOAD-BEARING ASSUMPTION — SETTLED 2026-08-16, ON HARDWARE
 
 **Stock nodes DO relay traffic on channels they cannot decrypt.** Measured, not inferred, on two Heltec V3s running `2.7.26.54e0d8d` about 3 m apart at 10 dBm.

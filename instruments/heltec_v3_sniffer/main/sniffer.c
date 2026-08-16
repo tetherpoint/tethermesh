@@ -573,8 +573,13 @@ void app_main(void)
                  * we are trying to learn, and a sniffer that assumes it cannot
                  * discover it. CRC state is reported so a bad frame is never
                  * mistaken for a good one. */
-                printf("RAWFRAME %lu len=%u rssi=%d snr=%d crc=%s payus=%lld hex=",
-                       (unsigned long)(++n), len, rssi, snr,
+                /* t= is milliseconds since boot, stamped in firmware rather
+                 * than by the host. Retransmission intervals are the thing
+                 * being measured, and host-side stamping would fold serial
+                 * buffering latency into exactly that number. */
+                printf("RAWFRAME %lu t=%lld len=%u rssi=%d snr=%d crc=%s payus=%lld hex=",
+                       (unsigned long)(++n), (long long)(esp_timer_get_time() / 1000),
+                       len, rssi, snr,
                        (flags & IRQ_CRC_ERR) ? "BAD" : "ok", (long long)payload_us);
                 for (int i = 0; i < len; i++) printf("%02x", buf[i]);
                 printf("\n");
