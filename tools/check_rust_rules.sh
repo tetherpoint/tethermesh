@@ -242,7 +242,20 @@ if [ "${1:-}" = "--binary" ]; then
 
     # Compiler intrinsics are the only outside references a no_std, no-alloc,
     # panic-free crate legitimately needs.
-    undef=$("$NM" -u "$LIBA" 2>/dev/null | awk '{print $NF}' | grep -vE '^(memcpy|memset|memmove|memcmp|bcmp|__aeabi_[a-z0-9_]+)$' || true)
+    # Compiler intrinsics are the only outside references a no_std, no-alloc,
+    # panic-free crate legitimately needs -- and WHICH ones depends on the
+    # target, which this list did not account for until 2026-08-16.
+    #
+    #   memcpy/memset/...   everywhere
+    #   __aeabi_*           ARM EABI helpers
+    #   __*di3, __*si3      libgcc-style 64- and 32-bit helpers. RISC-V needs
+    #                       __udivdi3 and __ashldi3 because riscv32imc has no
+    #                       hardware 64-bit divide, and airtime.rs does u64
+    #                       arithmetic. Without these the gate reports a false
+    #                       violation on that target -- found by actually
+    #                       cross-compiling rather than by reading this list.
+    undef=$("$NM" -u "$LIBA" 2>/dev/null | awk '{print $NF}' \
+        | grep -vE '^(memcpy|memset|memmove|memcmp|bcmp|__aeabi_[a-z0-9_]+|__[a-z]+[dsq]i[23]|__clz[sd]i2|__ctz[sd]i2|__popcount[sd]i2)$' || true)
     if [ -n "$undef" ]; then
         fail "$LIBA references machinery outside the crate — every one of these is a
               path that can fail, and several panic entry points are named things
