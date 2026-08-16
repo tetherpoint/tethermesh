@@ -68,6 +68,27 @@ meaningful, and tests for **undefined references outside a compiler-intrinsic
 allowlist** rather than for names containing "panic". `check_all.sh` builds a
 suitable object and runs it every time.
 
+## Coverage audit, 2026-08-16
+
+Gaps found and closed:
+
+- **AES-256 had no published vector.** It was exercised only through one
+  captured CCM message, which would have caught a broken key schedule but
+  only incidentally. Now checked against FIPS-197 Appendix C.3 directly.
+- **CCM was only checked against itself and one message.** A round trip
+  cannot catch a systematic error — an encrypt and decrypt wrong in the same
+  way agree perfectly. Now checked against vectors from a different
+  implementation.
+- **X25519 had fixed vectors only.** Now differential-tested against an
+  audited implementation across 512 random agreements per run, plus boundary
+  values. See `docs/CRYPTO-DEPENDENCY.md`.
+- **Two domain red-list items were unimplemented:** "a wrong channel hash must
+  not decrypt" and "an unknown PortNum must be ignored, not crash".
+- **`frame.rs` had no red test.** Its byte-for-byte rebuild was green-only.
+
+Still open, and honestly so: the duty limiter and the extension-suite items
+have no tests because neither exists yet.
+
 ## What has been observed red
 
 Per the rule above, recorded rather than claimed:
@@ -92,6 +113,9 @@ Per the rule above, recorded rather than claimed:
 | panic-free check, vacuity | pointed the check at the `.rlib` | `REFUSING: only 2 symbol(s)` |
 | X25519 field arithmetic | *not deliberate* — `fe_sub` biased by p instead of 2p, and the final reduction was wrong | RFC 7748 vector returned `77b3cb27…` for `c3da5537…` |
 | panic-free artifact, again | *not deliberate* — a `u128` shift pulled in `__ashlti3` | `references machinery outside the crate: __ashlti3` |
+| AES-256 key schedule | dropped the extra `SubWord` at `i % 8 == 4` | FIPS-197 vector, both CCM vector sets, and the captured DM all failed |
+| CCM flags byte | wrong tag-length field in `B0` | independent vectors and the captured DM failed |
+| whole-frame encode | wrote the payload before the header | captured frame did not rebuild |
 
 The X25519 row is the strongest argument in this table for published vectors.
 The bug was a wrong constant in `fe_sub` — biasing by p rather than 2p — plus

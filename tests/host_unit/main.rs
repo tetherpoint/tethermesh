@@ -13,6 +13,7 @@ use std::path::PathBuf;
 
 use tethermesh::channel::channel_hash;
 use tethermesh::crypto::{
+    Aes256,
     ccm_decrypt_in_place, ccm_encrypt_in_place, ctr_apply, expand_psk, nonce, Aes128, CcmError,
     Psk, CCM_TAG_LEN, DEFAULT_KEY,
 };
@@ -1484,4 +1485,198 @@ fn small_order_public_keys_are_rejected() {
         p.copy_from_slice(&hex_to_bytes(bad));
         assert_eq!(x25519(&priv_key, &p), None, "small-order point {bad} must be rejected");
     }
+}
+
+/// Differential test against an audited implementation.
+///
+/// `x25519-dalek` is a **dev-dependency only** — it is never linked into the
+/// shipped library, because doing so brings 58 panic symbols into an artifact
+/// that currently has zero undefined references. As a test oracle it costs
+/// nothing and buys a great deal.
+///
+/// Fixed vectors prove a function agrees at a handful of points. The `fe_sub`
+/// bug that shipped in the first draft of `x25519.rs` was self-consistent
+/// under every round trip and only failed against a value computed elsewhere;
+/// thousands of random agreements against audited code is the version of that
+/// check which does not depend on having picked the right handful.
+#[test]
+fn x25519_agrees_with_an_audited_implementation() {
+    use rand::RngCore;
+    let mut rng = rand::thread_rng();
+
+    for i in 0..512 {
+        let mut sk = [0u8; 32];
+        let mut pk = [0u8; 32];
+        rng.fill_bytes(&mut sk);
+        rng.fill_bytes(&mut pk);
+
+        // Public keys derived from a scalar, compared against dalek.
+        let ours_pub = public_key(&sk);
+        let theirs_pub = *x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(sk)).as_bytes();
+        assert_eq!(ours_pub, theirs_pub, "public_key disagreed on iteration {i}");
+
+        // And the agreement itself, against an arbitrary (possibly invalid)
+        // point — the case where a sloppy reduction shows up.
+        let theirs = *x25519_dalek::StaticSecret::from(sk)
+            .diffie_hellman(&x25519_dalek::PublicKey::from(pk))
+            .as_bytes();
+        match x25519(&sk, &pk) {
+            Some(ours) => assert_eq!(ours, theirs, "shared secret disagreed on iteration {i}"),
+            None => assert_eq!(theirs, [0u8; 32], "we rejected a point dalek accepted, iteration {i}"),
+        }
+    }
+}
+
+/// Edge-case scalars and points, where reductions are most likely to be wrong.
+#[test]
+fn x25519_agrees_with_the_oracle_on_boundary_values() {
+    let interesting: [[u8; 32]; 6] = [
+        [0x00; 32],
+        [0xFF; 32],
+        {
+            // p - 1
+            let mut v = [0xFFu8; 32];
+            v[0] = 0xEC;
+            v[31] = 0x7F;
+            v
+        },
+        {
+            // p itself, which must reduce to zero
+            let mut v = [0xFFu8; 32];
+            v[0] = 0xED;
+            v[31] = 0x7F;
+            v
+        },
+        {
+            let mut v = [0u8; 32];
+            v[0] = 9;
+            v
+        },
+        {
+            let mut v = [0u8; 32];
+            v[31] = 0x80;
+            v
+        },
+    ];
+    for (i, sk) in interesting.iter().enumerate() {
+        for (j, pk) in interesting.iter().enumerate() {
+            let theirs = *x25519_dalek::StaticSecret::from(*sk)
+                .diffie_hellman(&x25519_dalek::PublicKey::from(*pk))
+                .as_bytes();
+            match x25519(sk, pk) {
+                Some(ours) => assert_eq!(ours, theirs, "disagreed at ({i},{j})"),
+                None => assert_eq!(theirs, [0u8; 32], "rejected a point dalek accepted at ({i},{j})"),
+            }
+        }
+    }
+}
+
+/// FIPS-197 Appendix C.3 — the published AES-256 vector.
+///
+/// AES-256 was previously exercised only through one captured CCM message.
+/// That would have caught a broken key schedule, but only because the tag
+/// happened to fail; a primitive with a published vector should be checked
+/// against it directly.
+#[test]
+fn aes256_matches_the_fips197_vector() {
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&hex_to_bytes(
+        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    ));
+    let mut block = [0u8; 16];
+    block.copy_from_slice(&hex_to_bytes("00112233445566778899aabbccddeeff"));
+    Aes256::new(&key).encrypt_block(&mut block);
+    assert_eq!(
+        block.iter().map(|b| format!("{b:02x}")).collect::<String>(),
+        "8ea2b7ca516745bfeafc49904b496089"
+    );
+}
+
+/// AES-256-CCM against vectors from a different implementation.
+///
+/// Our CCM was checked against one captured message and against its own
+/// round trip. The round trip cannot catch a systematic error — an encrypt
+/// and decrypt that are wrong in the same way agree perfectly. These come
+/// from elsewhere.
+#[test]
+fn ccm_matches_an_independent_implementation() {
+    let cases: &[(&str, &str, &str, &str)] = &[
+        ("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+         "a0a1a2a3a4a5a6a7a8a9aaabac", "", "b2fc18597a74bf1b"),
+        ("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+         "a0a1a2a3a4a5a6a7a8a9aaabac", "01", "52baa6a959b7378917"),
+        ("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+         "a0a1a2a3a4a5a6a7a8a9aaabac", "020f1c293643505d6a7784919eabb8c5",
+         "51dffecc320c275794e231ac6e13b70a685092a72f67da13"),
+        ("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+         "a0a1a2a3a4a5a6a7a8a9aaabac", "03101d2a3744515e6b7885929facb9c6d3",
+         "50c0ffcf330b265495ed30af6f14b609a888d6ba19e212bc89"),
+        ("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+         "a0a1a2a3a4a5a6a7a8a9aaabac",
+         "04111e2b3845525f6c798693a0adbac7d4e1eefb0815222f3c495663707d8a97a4b1becbd8e5f2ff",
+         "57c1fcce3c0a255592ec33ae5015b508af836cc9dea279c4cee9c9ee2b19f4d9c906d59aacdb66a02d71d12cb00b52f3"),
+    ];
+    for (k, n, pt, want) in cases {
+        let mut key = [0u8; 32];
+        key.copy_from_slice(&hex_to_bytes(k));
+        let nonce = hex_to_bytes(n);
+        let plain = hex_to_bytes(pt);
+
+        let mut buf = vec![0u8; plain.len() + CCM_TAG_LEN];
+        buf[..plain.len()].copy_from_slice(&plain);
+        let total = ccm_encrypt_in_place(&key, &nonce, &mut buf, plain.len(), CCM_TAG_LEN).unwrap();
+        assert_eq!(
+            buf[..total].iter().map(|b| format!("{b:02x}")).collect::<String>(),
+            *want,
+            "encrypting {pt:?} disagreed with the reference"
+        );
+
+        // And back, so the decrypt path is checked against the same vector.
+        let n2 = ccm_decrypt_in_place(&key, &nonce, &mut buf[..total], CCM_TAG_LEN).unwrap();
+        assert_eq!(&buf[..n2], &plain[..]);
+    }
+}
+
+/// The domain red list requires that a wrong channel hash must not decrypt.
+///
+/// Worth stating precisely, because the hash is not what protects anything:
+/// it selects a key, and the wrong key yields garbage rather than an error.
+/// Channel traffic has no tag, so **nothing here can tell you the frame was
+/// not for you** — only that the bytes make no sense. That is the property
+/// the extension suite's AEAD exists to supply.
+#[test]
+fn a_frame_from_another_channel_does_not_yield_its_plaintext() {
+    let doc = fs::read_to_string(captures_dir().join("on_air_frames.json")).unwrap();
+    let hex = json_str(&doc[doc.find("\"raw_hex\"").unwrap()..], "raw_hex").unwrap();
+    let frame = hex_to_bytes(hex);
+    let hdr = Header::decode(&frame).unwrap();
+
+    // A different channel: same name, a PSK we invented.
+    let Psk::Aes128(wrong) = expand_psk(&[0u8; 16]).unwrap() else { panic!() };
+    assert_ne!(channel_hash(b"LongFast", &wrong), hdr.channel, "must be a different channel");
+
+    let mut body = frame[HEADER_LEN..].to_vec();
+    ctr_apply(&wrong, &nonce(hdr.id, hdr.from, 0), &mut body);
+    assert!(
+        !body.windows(11).any(|w| w == b"sniff-probe"),
+        "the wrong key must not recover the plaintext"
+    );
+    // And the header still parses — routing works without the key, by design.
+    assert_eq!(frame::peek_header(&frame).unwrap().hop_limit, 3);
+}
+
+/// The domain red list requires that an unknown PortNum is ignored, not fatal.
+#[test]
+fn an_unknown_portnum_is_carried_not_rejected() {
+    let mut buf = [0u8; 64];
+    let d = Data { portnum: 511, payload: b"future", ..Data::default() };
+    let n = d.encode(&mut buf).expect("encoding an unknown port must work");
+    let back = Data::decode(&buf[..n]).expect("decoding an unknown port must not fail");
+    assert_eq!(back.portnum, 511, "PRIVATE_APP range must survive");
+    assert_eq!(back.payload, b"future");
+
+    // And a port number beyond anything defined today.
+    let d2 = Data { portnum: 0x7FFF_FFFF, ..Data::default() };
+    let n2 = d2.encode(&mut buf).unwrap();
+    assert_eq!(Data::decode(&buf[..n2]).unwrap().portnum, 0x7FFF_FFFF);
 }

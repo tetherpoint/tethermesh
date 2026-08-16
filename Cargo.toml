@@ -14,10 +14,35 @@ publish = false
 # accident, in metadata, which is exactly how such decisions get made without
 # anyone deciding them. Add it when that document is closed out.
 
-# NO DEPENDENCIES, AND THAT IS A REQUIREMENT RATHER THAN A CURRENT STATE.
-# DISTRIBUTION.md commits to no code-generation dependency in the build, and
-# the protobuf codec is hand-written partly so that nothing here derives from
-# a copyleft input. A dependency added later must clear both bars.
+# NO DEPENDENCIES IN THE SHIPPED LIBRARY, AND THAT IS A REQUIREMENT RATHER
+# THAN A CURRENT STATE. DISTRIBUTION.md commits to no code-generation
+# dependency in the build, and the protobuf codec is hand-written partly so
+# that nothing here derives from a copyleft input. A dependency added later
+# must clear both bars.
+#
+# There is a third bar, discovered by measurement on 2026-08-16: the
+# panic-free artifact guarantee. Linking x25519-dalek — permissively licensed,
+# audited, and by every other measure the better choice for a curve
+# implementation — brings 58 panic symbols into the linked artifact, including
+# core::panicking::assert_failed and rust_begin_unwind. Ours currently has zero
+# undefined references of any kind. A dependency must clear that bar too, and
+# a cryptography crate is unlikely to.
+#
+# DEV-DEPENDENCIES ARE A DIFFERENT QUESTION and are used deliberately. A vetted
+# implementation is enormously valuable as a TEST ORACLE, and a test binary is
+# not the artifact: nothing here is linked into the library, and
+# check_rust_rules.sh inspects the library object alone. So the audited code
+# checks ours on every run without shipping in it.
+
+[dev-dependencies]
+# The reference X25519 for differential testing ONLY. BSD-3-Clause, audited,
+# and never linked into the shipped library — see the note above. Hand-written
+# crypto that agrees with an audited implementation across thousands of random
+# inputs is a far stronger claim than one that merely passes fixed vectors,
+# and the fe_sub bug found on 2026-08-16 was exactly the kind a fixed vector
+# catches only by luck.
+x25519-dalek = { version = "2", default-features = false, features = ["static_secrets"] }
+rand = "0.8"
 
 [lib]
 name = "tethermesh"
