@@ -1,0 +1,232 @@
+{
+  "observations": [
+    {
+      "channel_hashes": {
+        "0": 8
+      },
+      "firmware": "2.7.26.54e0d8d",
+      "frames": [
+        {
+          "ch": 8,
+          "enc_len": 70,
+          "event": "enqueuing for send",
+          "frm": 2000282779,
+          "hop_limit": 3,
+          "hop_start": 3,
+          "id": 1508016476,
+          "mod": "NodeInfo",
+          "relay": 155,
+          "to": 4294967295,
+          "transport": 0,
+          "want_ack": 0
+        },
+        {
+          "ch": 8,
+          "enc_len": 70,
+          "event": "Start low level send",
+          "frm": 2000282779,
+          "hop_limit": 3,
+          "hop_start": 3,
+          "id": 1508016476,
+          "mod": "SimRadio",
+          "relay": 155,
+          "to": 4294967295,
+          "transport": 0,
+          "tx_ms": 755,
+          "want_ack": 0
+        },
+        {
+          "ch": 8,
+          "enc_len": 70,
+          "event": "Completed sending",
+          "frm": 2000282779,
+          "hop_limit": 3,
+          "hop_start": 3,
+          "id": 1508016476,
+          "mod": "SimRadio",
+          "relay": 155,
+          "to": 4294967295,
+          "transport": 0,
+          "want_ack": 0
+        }
+      ],
+      "key_alg": "AES128",
+      "log": "nodeA.log",
+      "nodenum": 2000282779,
+      "packet_ids": [
+        187612506,
+        893783387,
+        1508016476
+      ],
+      "platform": "native",
+      "psk_expansions": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "radio": {
+        "bitrate_bytes_per_sec": 118.39431,
+        "cfg": "0",
+        "ch": "19",
+        "frequency_mhz": 906.875,
+        "name": "LongFast",
+        "preamble_ms": 131,
+        "pwr": "30",
+        "region": "UNSET",
+        "slot_ms": 28
+      }
+    },
+    {
+      "channel_hashes": {
+        "0": 8
+      },
+      "firmware": "2.7.26.54e0d8d",
+      "frames": [
+        {
+          "ch": 8,
+          "enc_len": 70,
+          "event": "enqueuing for send",
+          "frm": 430085489,
+          "hop_limit": 3,
+          "hop_start": 3,
+          "id": 109923214,
+          "mod": "NodeInfo",
+          "relay": 113,
+          "to": 4294967295,
+          "transport": 0,
+          "want_ack": 0
+        },
+        {
+          "ch": 8,
+          "enc_len": 70,
+          "event": "Start low level send",
+          "frm": 430085489,
+          "hop_limit": 3,
+          "hop_start": 3,
+          "id": 109923214,
+          "mod": "SimRadio",
+          "relay": 113,
+          "to": 4294967295,
+          "transport": 0,
+          "tx_ms": 755,
+          "want_ack": 0
+        },
+        {
+          "ch": 8,
+          "enc_len": 70,
+          "event": "Completed sending",
+          "frm": 430085489,
+          "hop_limit": 3,
+          "hop_start": 3,
+          "id": 109923214,
+          "mod": "SimRadio",
+          "relay": 113,
+          "to": 4294967295,
+          "transport": 0,
+          "want_ack": 0
+        }
+      ],
+      "key_alg": "AES128",
+      "log": "nodeB.log",
+      "nodenum": 430085489,
+      "packet_ids": [
+        1211424652,
+        3774461837,
+        109923214
+      ],
+      "platform": "native",
+      "psk_expansions": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "radio": {
+        "bitrate_bytes_per_sec": 118.39431,
+        "cfg": "0",
+        "ch": "19",
+        "frequency_mhz": 906.875,
+        "name": "LongFast",
+        "preamble_ms": 131,
+        "pwr": "30",
+        "region": "UNSET",
+        "slot_ms": 28
+      }
+    },
+    {
+      "channel_hashes": {
+        "0": 12
+      },
+      "firmware": "2.7.26.54e0d8d",
+      "frames": [
+        {
+          "ch": 12,
+          "enc_len": 70,
+          "event": "enqueuing for send",
+          "frm": 2115042966,
+          "hop_limit": 3,
+          "hop_start": 3,
+          "id": 1983457568,
+          "mod": "NodeInfo",
+          "relay": 150,
+          "to": 4294967295,
+          "transport": 0,
+          "want_ack": 0
+        },
+        {
+          "ch": 12,
+          "enc_len": 70,
+          "event": "Start low level send",
+          "frm": 2115042966,
+          "hop_limit": 3,
+          "hop_start": 3,
+          "id": 1983457568,
+          "mod": "SimRadio",
+          "relay": 150,
+          "to": 4294967295,
+          "transport": 0,
+          "tx_ms": 755,
+          "want_ack": 0
+        },
+        {
+          "ch": 12,
+          "enc_len": 70,
+          "event": "Completed sending",
+          "frm": 2115042966,
+          "hop_limit": 3,
+          "hop_start": 3,
+          "id": 1983457568,
+          "mod": "SimRadio",
+          "relay": 150,
+          "to": 4294967295,
+          "transport": 0,
+          "want_ack": 0
+        }
+      ],
+      "key_alg": "AES128",
+      "log": "nodeC.log",
+      "nodenum": 2115042966,
+      "packet_ids": [
+        701507870,
+        2308352287,
+        1983457568
+      ],
+      "platform": "native",
+      "psk_expansions": [
+        1
+      ],
+      "radio": {
+        "bitrate_bytes_per_sec": 118.39431,
+        "cfg": "0",
+        "ch": "73",
+        "frequency_mhz": 920.375,
+        "name": "TetherTest",
+        "preamble_ms": 131,
+        "pwr": "30",
+        "region": "UNSET",
+        "slot_ms": 28
+      }
+    }
+  ]
+}

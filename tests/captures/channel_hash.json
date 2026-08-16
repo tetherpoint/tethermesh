@@ -1,0 +1,55 @@
+{
+  "vector_set": "channel_hash",
+  "function": "channel_hash(name, psk) = xor_fold(name_bytes) ^ xor_fold(psk_bytes)",
+  "returns": "one byte, carried in the unencrypted header",
+  "provenance": {
+    "oracle": "meshtastic/meshtasticd@sha256:23e92b1331a3a471eaef0c63cbca4365ca40b3111a9781cfdbe5a5114e5773d4",
+    "oracle_tag": "2.7.26.54e0d8d",
+    "captured": "2026-08-15",
+    "note": "The two oracle-observed rows are from OUR nodes on OUR channels, so they are publishable under TESTING.md. The synthetic rows are computed from the verified function, per TESTING.md: public fixtures are synthetic."
+  },
+  "vectors": [
+    {
+      "name": "LongFast",
+      "psk_hex": "d4f1bb3a20290759f0bcffabcf4e6901",
+      "expected_hash": 8,
+      "kind": "oracle-observed",
+      "note": "meshtasticd 2.7.26.54e0d8d default primary channel; log line: 'Use channel 0 (hash 0x8)'"
+    },
+    {
+      "name": "TetherTest",
+      "psk_hex": "000102030405060708090a0b0c0d0e0f",
+      "expected_hash": 12,
+      "kind": "oracle-observed",
+      "note": "hand-written ChannelFile loaded by the oracle; log line: 'Use channel 0 (hash 0xc)'"
+    },
+    {
+      "name": "",
+      "psk_hex": "d4f1bb3a20290759f0bcffabcf4e6901",
+      "expected_hash": 2,
+      "kind": "synthetic",
+      "note": "empty name isolates the PSK term"
+    },
+    {
+      "name": "A",
+      "psk_hex": "00000000000000000000000000000000",
+      "expected_hash": 65,
+      "kind": "synthetic",
+      "note": "all-zero PSK isolates the name term"
+    },
+    {
+      "name": "LongSlow",
+      "psk_hex": "d4f1bb3a20290759f0bcffabcf4e6901",
+      "expected_hash": 15,
+      "kind": "synthetic",
+      "note": "name differing from LongFast in one term"
+    },
+    {
+      "name": "admin",
+      "psk_hex": "ffffffffffffffffffffffffffffffff",
+      "expected_hash": 111,
+      "kind": "synthetic",
+      "note": "all-ones PSK; XOR-fold of an even count is 0x00"
+    }
+  ]
+}

@@ -1,0 +1,547 @@
+{
+  "corpus": "fromradio_api_stream",
+  "boundary": "meshtasticd TCP API (ToRadio/FromRadio), stream framing 0x94 0xC3 <len:be16>",
+  "note": "Bytes produced by THEIR encoder. L3's gate is that each of these round-trips decode->encode bit-identically through ours.",
+  "message_count": 43,
+  "variant_counts": {
+    "my_info": 1,
+    "deviceuiConfig": 1,
+    "node_info": 1,
+    "metadata": 1,
+    "channel": 8,
+    "config": 10,
+    "moduleConfig": 16,
+    "fileInfo": 4,
+    "config_complete_id": 1
+  },
+  "messages": [
+    {
+      "variant_field": 3,
+      "variant": "my_info",
+      "len": 21,
+      "hex": "1a1308dd83fa1058f8eb016a066e61746976657801",
+      "top_level_fields": [
+        {
+          "field": 3,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 17,
+      "variant": "deviceuiConfig",
+      "len": 8,
+      "hex": "8a0105109901181e",
+      "top_level_fields": [
+        {
+          "field": 17,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 4,
+      "variant": "node_info",
+      "len": 59,
+      "hex": "223908dd83fa10122e0a09213032316538316464120f4d65736874617374696320383164641a04383164642206000000000000282548001a005001",
+      "top_level_fields": [
+        {
+          "field": 4,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 13,
+      "variant": "metadata",
+      "len": 32,
+      "hex": "6a1e0a0e322e372e32362e353465306438641018200140ab064825580160806a",
+      "top_level_fields": [
+        {
+          "field": 13,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 10,
+      "variant": "channel",
+      "len": 13,
+      "hex": "520b12071201013a02080d1801",
+      "top_level_fields": [
+        {
+          "field": 10,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 10,
+      "variant": "channel",
+      "len": 6,
+      "hex": "520408011200",
+      "top_level_fields": [
+        {
+          "field": 10,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 10,
+      "variant": "channel",
+      "len": 6,
+      "hex": "520408021200",
+      "top_level_fields": [
+        {
+          "field": 10,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 10,
+      "variant": "channel",
+      "len": 6,
+      "hex": "520408031200",
+      "top_level_fields": [
+        {
+          "field": 10,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 10,
+      "variant": "channel",
+      "len": 6,
+      "hex": "520408041200",
+      "top_level_fields": [
+        {
+          "field": 10,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 10,
+      "variant": "channel",
+      "len": 6,
+      "hex": "520408051200",
+      "top_level_fields": [
+        {
+          "field": 10,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 10,
+      "variant": "channel",
+      "len": 6,
+      "hex": "520408061200",
+      "top_level_fields": [
+        {
+          "field": 10,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 10,
+      "variant": "channel",
+      "len": 6,
+      "hex": "520408071200",
+      "top_level_fields": [
+        {
+          "field": 10,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 5,
+      "variant": "config",
+      "len": 7,
+      "hex": "2a050a0338b054",
+      "top_level_fields": [
+        {
+          "field": 5,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 5,
+      "variant": "config",
+      "len": 21,
+      "hex": "2a13121108901c1001287838ab06506458ac026802",
+      "top_level_fields": [
+        {
+          "field": 5,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 5,
+      "variant": "config",
+      "len": 17,
+      "hex": "2a0f1a0d203c30ffffffff0f38ac02400a",
+      "top_level_fields": [
+        {
+          "field": 5,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 5,
+      "variant": "config",
+      "len": 29,
+      "hex": "2a1b22192a176d6573687461737469632e706f6f6c2e6e74702e6f7267",
+      "top_level_fields": [
+        {
+          "field": 5,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 5,
+      "variant": "config",
+      "len": 7,
+      "hex": "2a052a0308d804",
+      "top_level_fields": [
+        {
+          "field": 5,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 5,
+      "variant": "config",
+      "len": 22,
+      "hex": "2a143212080118fa01200b40034801501e6801d00602",
+      "top_level_fields": [
+        {
+          "field": 5,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 5,
+      "variant": "config",
+      "len": 12,
+      "hex": "2a0a3a080801100118c0c407",
+      "top_level_fields": [
+        {
+          "field": 5,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 5,
+      "variant": "config",
+      "len": 6,
+      "hex": "2a0442022801",
+      "top_level_fields": [
+        {
+          "field": 5,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 5,
+      "variant": "config",
+      "len": 4,
+      "hex": "2a024a00",
+      "top_level_fields": [
+        {
+          "field": 5,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 5,
+      "variant": "config",
+      "len": 4,
+      "hex": "2a025200",
+      "top_level_fields": [
+        {
+          "field": 5,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 9,
+      "variant": "moduleConfig",
+      "len": 53,
+      "hex": "4a330a3112136d7174742e6d6573687461737469632e6f72671a076d657368646576220a6c617267653463617473280142036d7368",
+      "top_level_fields": [
+        {
+          "field": 9,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 9,
+      "variant": "moduleConfig",
+      "len": 4,
+      "hex": "4a021200",
+      "top_level_fields": [
+        {
+          "field": 9,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 9,
+      "variant": "moduleConfig",
+      "len": 4,
+      "hex": "4a021a00",
+      "top_level_fields": [
+        {
+          "field": 9,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 9,
+      "variant": "moduleConfig",
+      "len": 4,
+      "hex": "4a022200",
+      "top_level_fields": [
+        {
+          "field": 9,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 9,
+      "variant": "moduleConfig",
+      "len": 4,
+      "hex": "4a022a00",
+      "top_level_fields": [
+        {
+          "field": 9,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 9,
+      "variant": "moduleConfig",
+      "len": 10,
+      "hex": "4a08320608ffffffff07",
+      "top_level_fields": [
+        {
+          "field": 9,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 9,
+      "variant": "moduleConfig",
+      "len": 6,
+      "hex": "4a043a024801",
+      "top_level_fields": [
+        {
+          "field": 9,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 9,
+      "variant": "moduleConfig",
+      "len": 4,
+      "hex": "4a024200",
+      "top_level_fields": [
+        {
+          "field": 9,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 9,
+      "variant": "moduleConfig",
+      "len": 4,
+      "hex": "4a024a00",
+      "top_level_fields": [
+        {
+          "field": 9,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 9,
+      "variant": "moduleConfig",
+      "len": 4,
+      "hex": "4a025200",
+      "top_level_fields": [
+        {
+          "field": 9,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 9,
+      "variant": "moduleConfig",
+      "len": 14,
+      "hex": "4a0c5a0a100a181e20810128dd01",
+      "top_level_fields": [
+        {
+          "field": 9,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 9,
+      "variant": "moduleConfig",
+      "len": 8,
+      "hex": "4a066204102d3801",
+      "top_level_fields": [
+        {
+          "field": 9,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 9,
+      "variant": "moduleConfig",
+      "len": 4,
+      "hex": "4a026a00",
+      "top_level_fields": [
+        {
+          "field": 9,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 9,
+      "variant": "moduleConfig",
+      "len": 2,
+      "hex": "4a00",
+      "top_level_fields": [
+        {
+          "field": 9,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 9,
+      "variant": "moduleConfig",
+      "len": 2,
+      "hex": "4a00",
+      "top_level_fields": [
+        {
+          "field": 9,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 9,
+      "variant": "moduleConfig",
+      "len": 2,
+      "hex": "4a00",
+      "top_level_fields": [
+        {
+          "field": 9,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 15,
+      "variant": "fileInfo",
+      "len": 25,
+      "hex": "7a170a122f70726566732f6e6f6465732e70726f746f10bc03",
+      "top_level_fields": [
+        {
+          "field": 15,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 15,
+      "variant": "fileInfo",
+      "len": 27,
+      "hex": "7a190a152f70726566732f6368616e6e656c732e70726f746f1039",
+      "top_level_fields": [
+        {
+          "field": 15,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 15,
+      "variant": "fileInfo",
+      "len": 25,
+      "hex": "7a170a132f70726566732f6465766963652e70726f746f103d",
+      "top_level_fields": [
+        {
+          "field": 15,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 15,
+      "variant": "fileInfo",
+      "len": 33,
+      "hex": "7a1f0a1b2f70726566732f7472616e736d69745f686973746f72792e646174100d",
+      "top_level_fields": [
+        {
+          "field": 15,
+          "wire_type": 2
+        }
+      ]
+    },
+    {
+      "variant_field": 7,
+      "variant": "config_complete_id",
+      "len": 5,
+      "hex": "38aad4a801",
+      "top_level_fields": [
+        {
+          "field": 7,
+          "wire_type": 0
+        }
+      ]
+    }
+  ],
+  "provenance": {
+    "oracle": "meshtastic/meshtasticd@sha256:23e92b1331a3a471eaef0c63cbca4365ca40b3111a9781cfdbe5a5114e5773d4",
+    "oracle_tag": "2.7.26.54e0d8d",
+    "captured": "2026-08-15",
+    "schema_pin": "meshtastic/protobufs @ 84bfb0fdb3b853ea18abc4535497fa41a1b09546",
+    "note": "Our node, our channel, local simulation, no radio. Publishable under TESTING.md. No third-party traffic."
+  },
+  "verified_properties": {
+    "top_level_round_trip_bit_identical": "43/43",
+    "fields_in_ascending_order": "43/43",
+    "implication": "Their encoder emits minimal varints with ascending field numbers. A bit-identical re-encode is therefore achievable, so L3's gate is a real requirement rather than an unreachable one."
+  }
+}

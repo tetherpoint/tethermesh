@@ -1,0 +1,137 @@
+{
+  "corpus": "udp_over_mesh",
+  "group": "224.0.0.69:4403",
+  "boundary": "protobuf MeshPacket over UDP multicast \u2014 NOT the packed LoRa frame",
+  "datagram_count": 2,
+  "datagrams": [
+    {
+      "from": "10.88.0.2",
+      "len": 76,
+      "hex": "0d2bbc6c2615ffffffff18082a34dc014dda5f3f5c26473b527f0bc14a3960c3c867a85828abacc5326ff6298971805adb643466ff223ea6b2ece398f252e0312d1035cc1cc816580a98012b",
+      "top_level_fields": [
+        {
+          "field": 1,
+          "wire_type": 5,
+          "value": "2bbc6c26",
+          "name": "from",
+          "value_le_u32": 644660267
+        },
+        {
+          "field": 2,
+          "wire_type": 5,
+          "value": "ffffffff",
+          "name": "to",
+          "value_le_u32": 4294967295
+        },
+        {
+          "field": 3,
+          "wire_type": 0,
+          "value": 8,
+          "name": "channel"
+        },
+        {
+          "field": 5,
+          "wire_type": 2,
+          "value": "dc014dda5f3f5c26473b527f0bc14a3960c3c867a85828abacc5326ff6298971805adb643466ff223ea6b2ece398f252e0312d10",
+          "name": "encrypted"
+        },
+        {
+          "field": 6,
+          "wire_type": 5,
+          "value": "cc1cc816",
+          "name": "id",
+          "value_le_u32": 382213324
+        },
+        {
+          "field": 11,
+          "wire_type": 0,
+          "value": 10,
+          "name": "priority"
+        },
+        {
+          "field": 19,
+          "wire_type": 0,
+          "value": 43,
+          "name": "relay_node"
+        }
+      ],
+      "absent_notable": [
+        "hop_limit",
+        "hop_start",
+        "decoded"
+      ]
+    },
+    {
+      "from": "10.88.0.2",
+      "len": 77,
+      "hex": "0ddc907f2f15ffffffff18082a34cfb64b6dff731c8943c8da76e5cd1f0dd244cfc1ba7a4249711728b789f881bc0be5e53d23aaf645517cf9e9049049431623137f35ce9f0b4b580a9801dc01",
+      "top_level_fields": [
+        {
+          "field": 1,
+          "wire_type": 5,
+          "value": "dc907f2f",
+          "name": "from",
+          "value_le_u32": 796889308
+        },
+        {
+          "field": 2,
+          "wire_type": 5,
+          "value": "ffffffff",
+          "name": "to",
+          "value_le_u32": 4294967295
+        },
+        {
+          "field": 3,
+          "wire_type": 0,
+          "value": 8,
+          "name": "channel"
+        },
+        {
+          "field": 5,
+          "wire_type": 2,
+          "value": "cfb64b6dff731c8943c8da76e5cd1f0dd244cfc1ba7a4249711728b789f881bc0be5e53d23aaf645517cf9e9049049431623137f",
+          "name": "encrypted"
+        },
+        {
+          "field": 6,
+          "wire_type": 5,
+          "value": "ce9f0b4b",
+          "name": "id",
+          "value_le_u32": 1259053006
+        },
+        {
+          "field": 11,
+          "wire_type": 0,
+          "value": 10,
+          "name": "priority"
+        },
+        {
+          "field": 19,
+          "wire_type": 0,
+          "value": 220,
+          "name": "relay_node"
+        }
+      ],
+      "absent_notable": [
+        "hop_limit",
+        "hop_start",
+        "decoded"
+      ]
+    }
+  ],
+  "provenance": {
+    "oracle": "meshtastic/meshtasticd@sha256:23e92b1331a3a471eaef0c63cbca4365ca40b3111a9781cfdbe5a5114e5773d4",
+    "oracle_tag": "2.7.26.54e0d8d",
+    "captured": "2026-08-15",
+    "schema_pin": "meshtastic/protobufs @ 84bfb0fdb3b853ea18abc4535497fa41a1b09546",
+    "setup": "Two local meshtasticd instances with network.enabled_protocols = UDP_BROADCAST (0x0001), hand-written LocalConfig, default LongFast channel.",
+    "note": "Our nodes, our channel, local only, no radio. Publishable under TESTING.md."
+  },
+  "findings": [
+    "UDP over mesh DOES link two local meshtasticd instances: each node's DB independently listed the other. Over the process-local SimRadio they cannot hear each other at all.",
+    "relay_node is the low byte of the sender's node number \u2014 confirmed here twice more (0x266cbc2b -> 0x2b, 0x2f7f90dc -> 0xdc), independently of the earlier log-based observation.",
+    "The channel field carries the one-byte channel hash (8 = LongFast with the default PSK), consistent with the verified xor_fold(name) ^ xor_fold(psk).",
+    "hop_limit and hop_start are ABSENT, i.e. zero. These datagrams are therefore not relayable, so this transport does not exercise the managed-flooding rebroadcast decision.",
+    "The payload is the protobuf MeshPacket, not the packed LoRa frame. Nothing here settles wire layout."
+  ]
+}
