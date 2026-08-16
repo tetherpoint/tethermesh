@@ -137,7 +137,14 @@ One behaviour worth carrying forward: a repeated `(from, id)` is silently droppe
 
 Fixed, it failed immediately: `frame::encode` had a live panic path through `copy_from_slice`. Every such call is now an iterator zip, and the artifact has **no undefined references at all** — not even `memcpy`. The check refuses bitcode and refuses artifacts too bare to be meaningful, `check_all.sh` runs it on every invocation, and both the panic path and the vacuity were observed red.
 
-**Gate:** both directions clean across the corpus, plus fuzzing that reaches the panic-free requirement — `tools/check_rust_rules.sh --binary` showing no panic machinery linked. That is the evidence for the safety claim; fuzzing alone only shows nothing crashed today. *Panic-free half met and continuously enforced; conformance and fuzzing outstanding.*
+**Gate:** both directions clean across the corpus, plus fuzzing that reaches the panic-free requirement — `tools/check_rust_rules.sh --binary` showing no panic machinery linked. That is the evidence for the safety claim; fuzzing alone only shows nothing crashed today.
+
+*Status, stated precisely, because "ACHIEVED" above and "outstanding" here have read as a contradiction:*
+
+- *their encoder → our decoder* — **met across the corpus**, 43/43 bit-identical (L3).
+- *our encoder → their decoder* — **demonstrated, not yet corpus-wide.** A stock node accepted our text frame, our `User`, and answered our traceroute. That is three constructed frames, not a systematic sweep of every corpus message back at them.
+- *panic-free artifact* — **met and continuously enforced** by `check_all.sh`.
+- *fuzzing* — **outstanding.**
 
 ## L5 — routing
 
@@ -149,9 +156,13 @@ This is the assumption the whole extension suite rests on, so L7 is no longer co
 
 **2026-08-16 — duplicate suppression is done**, ahead of the rest of L5, because it needs no header layout: it takes two numbers and answers whether they have been seen. `meshtastic/core/history.rs`, a fixed-capacity age-evicting ring, default 400 entries to match what the reference was observed to use.
 
-Deliberately **not** included: a `should_relay`. Suppression is one input to the rebroadcast decision; the others are the hop limit, the contention window, duty budget — and whether a node relays on channels it cannot decrypt, which is still PLAUSIBLE, UNPROVEN. Writing that function today would mean taking a position on the open question in code, which is how an assumption stops looking like one.
+Deliberately **not** included at the time: a `should_relay`. Suppression is one input to the rebroadcast decision; the others are the hop limit, the contention window and the duty budget — and, then, whether a node relays on channels it cannot decrypt. Writing that function while the last one was open would have meant taking a position on an open question in code, which is how an assumption stops looking like one.
 
-**And the assumption everything else rests on.** Whether nodes relay traffic on channels they cannot decrypt is currently PLAUSIBLE, UNPROVEN. Settle it here: several instances, controlled topology, inject a frame on a channel none of them holds, observe whether it is repeated. ~~In simulation topology is a coordinate rather than a hardware problem.~~
+**That reason has since expired.** The relay question was settled the same day, by measurement, in the paragraph above. `should_relay` is now blocked only on the contention window and duty-cycle accounting — ordinary remaining work, not an open question.
+
+~~**And the assumption everything else rests on.** Whether nodes relay traffic on channels they cannot decrypt is currently PLAUSIBLE, UNPROVEN. Settle it here: several instances, controlled topology, inject a frame on a channel none of them holds, observe whether it is repeated. In simulation topology is a coordinate rather than a hardware problem.~~ **Struck 2026-08-16 — answered, and the answer is yes.** Kept struck rather than deleted because the two paragraphs above only make sense against it.
+
+**A note on how this contradiction survived**, since it is the same failure the 2026-08-16 audit chased through three other documents: the settling measurement was appended at the top of the section, and the two paragraphs stating the opposite were left in place below it. Nothing was edited to become false — a true statement was added and its predecessors were not retired. `tools/check_docs.sh` cannot catch this; a document that contradicts *itself* in prose is exactly the residue that gate does not cover.
 
 **2026-08-15 — the simulation route was tried and does not work.** Two local instances can be made to form a mesh, by enabling `UDP_BROADCAST`; the process-local SimRadio alone will not do it. But captured UDP traffic carries `hop_limit = 0`, so those packets are never candidates for rebroadcast and the managed-flooding decision is never reached. A local UDP mesh produces traffic that looks like a mesh and cannot answer this question. Settling it needs two real radios. Detail in `meshtastic/WIRE_REFERENCE.md`.
 
@@ -208,9 +219,11 @@ The C ABI surface, `cbindgen` header, and the artifact discipline `DISTRIBUTION.
 
 ## What stays open
 
-**The physical layer.** The sync-word register value and per-preset modulation parameters cannot be established without real silicon, and simulation will not reveal them.
+**The physical layer — mostly closed, and by exactly the route predicted.** The claim here was that the sync word and per-preset modulation parameters could not be established without real silicon. That held, and silicon settled them: the sync word is resolved (`0x0740=0x24`, `0x0741=0xB4`, confirmed by decoding real traffic) and LongFast's parameters with it. **Sixteen presets remain** — bounded, mechanical, same method.
 
-**The interoperability gate.** A physical, unmodified device must show our node, render our text, accept a direct message, and list us in a route trace. Simulation green is not interoperability green, and treating it as such is the most likely way this project fools itself.
+**The interoperability gate — three and a half of four.** A physical, unmodified device must show our node, render our text, accept a direct message, and list us in a route trace. As of 2026-08-16 a stock Heltec on `2.7.26.54e0d8d` shows us as a peer, renders our text, and answers an addressed traceroute. The fourth is done **for channel encryption only**: an addressed, non-broadcast packet was accepted and answered. **The PKI direct-message path is the remaining half**, and it is L6's open gate.
+
+Simulation green is not interoperability green, and treating it as such is the most likely way this project fools itself. That warning is retained deliberately — the items above were closed on hardware, which is the only reason they may be marked closed.
 
 ## Sequence
 
