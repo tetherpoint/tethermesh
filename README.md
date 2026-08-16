@@ -28,6 +28,21 @@ These are enforced by `tools/check_all.sh` on every run, not left to discipline.
 - **Green and red, with red proven.** Every guard has been observed to fire. A test that has never failed is not yet a test.
 - **Measure, don't assume.** Where a figure could be derived or observed, it is observed. Two claims written from documentation alone turned out wrong on contact with hardware, and both were caught this way rather than by review.
 
+## Enforcement
+
+One entry point, `tools/check_all.sh`, runs every applicable check and exits non-zero if any fails. Nothing here is advisory.
+
+- **`check_all.sh`** — the single gate. Also `--pending`, which lists checks that cannot run yet and why, so a gap is visible rather than forgotten.
+- **`check_spdx.sh`** — every file declares its licence, inline or via `REUSE.toml`. Prevents a file arriving later with no header and inheriting nothing.
+- **`check_cleanroom.sh`** — the GPL boundary. Refuses vendored `.proto`, generated `*.pb.*`, GPL licence headers and radio-library references; sweeps the vendored submodules' working trees too, since `git ls-files` reports a submodule as one gitlink and would otherwise never see the code that actually compiles.
+- **`gpl-patterns.txt`** — the forbidden strings, as data rather than code. A scanner that defines its own blacklist cannot check itself, so this file is the only thing exempt; deleting or emptying it makes the gate refuse rather than silently pass.
+- **`check_rust_rules.sh`** — no panics, no allocation, no mutable global state, no `unsafe`. Checks the crate attributes, then the **built object** for panic machinery and undefined references — which is what caught a live panic path source review had missed. Also enforces that field values reach `fiat-crypto` only through its bounds-typed wrappers.
+- **`check_docs.sh`** — documentation cross-references must resolve: named tests must exist, the proof table must match the harnesses in both directions, `DEPS.md`'s pinned commits must match the actual submodules, cited tooling must be present.
+- **`measure_panic_symbols.sh`** — reproduces the dependency measurements the crypto decision rests on. Committed because a measurement nobody can re-run is a claim.
+- **`cargo kani`** — machine-checked proofs over the parse path in `meshtastic/core/proofs.rs`, covering every possible input rather than the ones a test happened to try.
+
+Every one of these has been observed to fire against a deliberately introduced fault. Several were found to be vacuous when first tested — passing while proving nothing — and that is recorded in their headers rather than quietly fixed.
+
 ## Cryptography: verified where it counts, and offloadable
 
 **The X25519 field arithmetic is formally verified and is not ours.** Multiplication, squaring, addition, subtraction, carrying, the 121666 scalar multiply, serialisation and the constant-time select all come from [`fiat-crypto`](https://github.com/mit-plv/fiat-crypto), generated from **Coq proofs** by MIT PLV — the same pipeline BoringSSL uses — and called unmodified from an in-tree pinned submodule.
