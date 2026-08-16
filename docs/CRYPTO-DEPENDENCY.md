@@ -115,6 +115,29 @@ suite cross-checks ours against both on every run. Agreement with two
 independent implementations — one audited, one formally verified — is a
 stronger claim than agreement with either.
 
+## The submodule was tried, not just discussed
+
+`third_party/libcrux` is a real pinned submodule (`9ea7743c`, sparse, 744 KB)
+and the curve code was linked into the crate and measured. It builds. It is
+not shippable, for two reasons found by doing it:
+
+1. **It reintroduces panic paths.** `+3` above baseline in the linked
+   artifact, from `len_mismatch_fail`, `panic_bounds_check` and
+   `slice_index_fail`. The rule that no panics and no allocation may be
+   violated is not negotiable, so that ends it.
+2. **Downstream consumers cannot resolve it.** `hacl-rs`'s manifest inherits
+   workspace keys; parsing it from outside the libcrux workspace fails, so any
+   crate depending on tethermesh fails to build.
+
+The cause of (1) is narrow and fixable upstream — see
+`docs/UPSTREAM-HACL-PANIC-FREEDOM.md`, which is written to be usable as an
+issue against cryspen/libcrux. The fix is extracting fixed-size array types
+where lengths are static, which belongs in the extraction backend rather than
+in a patch to generated files.
+
+The submodule is kept because it is the basis for that analysis, and because
+if upstream takes the change, linking becomes possible without a fork.
+
 ## When to revisit
 
 - If a panic-free, audited X25519 appears, prefer it.

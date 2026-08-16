@@ -54,7 +54,13 @@ REQUIRED_ATTRS=(
     'forbid(unsafe_op_in_unsafe_fn)'
 )
 
-rs_files=$(find "$ROOT" -name '*.rs' -not -path '*/target/*' 2>/dev/null || true)
+# third_party/ holds pinned upstream code, and OUR source rules do not govern
+# it — we did not write it and may not edit it without voiding its provenance.
+# What governs it is the artifact check below: whatever it does to the linked
+# object is measured there, which is the property that actually matters. A
+# source rule applied to somebody else's code would only ever produce a
+# violation we would have to suppress.
+rs_files=$(find "$ROOT" -name '*.rs' -not -path '*/target/*' -not -path '*/third_party/*' 2>/dev/null || true)
 
 if [ -z "$rs_files" ]; then
     # No silent no-op: a checker that passes because there is nothing to check

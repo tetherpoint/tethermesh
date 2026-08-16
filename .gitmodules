@@ -1,0 +1,3 @@
+[submodule "third_party/libcrux"]
+	path = third_party/libcrux
+	url = https://github.com/cryspen/libcrux

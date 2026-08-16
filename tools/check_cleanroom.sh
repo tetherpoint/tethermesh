@@ -77,6 +77,10 @@ while IFS= read -r f; do
     # that explain the rule, or the rule cannot be written down.
     case "$f" in
         tools/check_cleanroom.sh|PLAN.md|README.md|docs/*|meshtastic/WIRE_REFERENCE.md) continue ;;
+        # Pinned upstream code, licence recorded in DEPS.md. It is scanned for
+        # GPL contamination below like anything else, but it is not held to
+        # rules about how WE write code.
+        third_party/*) continue ;;
     esac
 
     case "$f" in

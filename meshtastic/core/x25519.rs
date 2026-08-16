@@ -368,6 +368,7 @@ pub const BASE_POINT: [u8; KEY_LEN] = {
 };
 
 /// Derive the public key for a private key.
+///
 #[must_use]
 pub fn public_key(private: &[u8; KEY_LEN]) -> [u8; KEY_LEN] {
     scalarmult(private, &BASE_POINT)
