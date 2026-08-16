@@ -76,14 +76,35 @@ if [ -z "$rs_files" ]; then
     exit 3
 fi
 
+# In --binary mode the SOURCE pass is skipped: tools/check_all.sh runs it once
+# up front, and repeating it per inspected crate printed every violation N
+# times. Noise that scales with crate count trains people to skim output, which
+# is how a real violation gets missed.
+if [ "${1:-}" != "--binary" ]; then
+
 # ── crate-level attributes present? ────────────────────────────────────────
-LIB=$(echo "$rs_files" | grep -E '/lib\.rs$' | head -1 || true)
-if [ -z "$LIB" ]; then
+# EVERY crate root, not the first one found.
+#
+# This read `head -1` until 2026-08-16, which was correct while there was one
+# crate and would have gone silently wrong the moment there were two: the
+# second crate's attributes would never have been checked and this would still
+# have printed "crate rules hold". The extension suite is planned as one crate
+# per bundle, so that day was coming. A gate that narrows silently is the
+# failure this file's own header records being bitten by three times over.
+libs=$(echo "$rs_files" | grep -E '/lib\.rs$' || true)
+if [ -z "$libs" ]; then
     fail "no lib.rs found — cannot verify crate-level attributes"
 else
-    for a in "${REQUIRED_ATTRS[@]}"; do
-        grep -qF "#![$a]" "$LIB" || fail "lib.rs is missing #![$a]"
-    done
+    n_libs=0
+    while IFS= read -r LIB; do
+        [ -n "$LIB" ] || continue
+        n_libs=$((n_libs+1))
+        rel="${LIB#"$ROOT"/}"
+        for a in "${REQUIRED_ATTRS[@]}"; do
+            grep -qF "#![$a]" "$LIB" || fail "$rel is missing #![$a]"
+        done
+    done <<< "$libs"
+    say "crate roots checked: $n_libs"
 fi
 
 # ── forbidden constructs in source ─────────────────────────────────────────
@@ -165,6 +186,8 @@ while IFS= read -r f; do
         fi
     done < <(grep -nE '\.0\b' "$f" 2>/dev/null || true)
 done <<< "$fiat_files"
+
+fi   # end of source pass
 
 # ── binary check: no panic path may survive into the artifact ──────────────
 # THIS CHECK WAS SILENTLY VACUOUS UNTIL 2026-08-16, IN THREE SEPARATE WAYS.

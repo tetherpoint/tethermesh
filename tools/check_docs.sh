@@ -80,11 +80,18 @@ done < <(grep -rhoE '[a-zA-Z0-9_/]+\.rs::[a-z0-9_]+' --include='*.md' . 2>/dev/n
 # document that says what "verified" means in this project, so a harness it
 # does not list is assurance nobody knows exists, and a row with no harness is
 # assurance that is not actually running.
-PROOFS="meshtastic/core/proofs.rs"
+# EVERY file carrying harnesses, not one hardcoded path. This named
+# meshtastic/core/proofs.rs alone until 2026-08-16; with the extension suite
+# planned as one crate per bundle, a second crate's proofs would have gone
+# undocumented and unnoticed. Found by content rather than by filename, so a
+# harness in an unexpected place is still covered.
 FV="docs/FORMAL-VERIFICATION.md"
-if [ -f "$PROOFS" ] && [ -f "$FV" ]; then
+proof_files=$(grep -rl 'kani::proof' --include='*.rs' . 2>/dev/null \
+              | grep -v '^./target' | grep -v '^./third_party' | sort)
+if [ -n "$proof_files" ] && [ -f "$FV" ]; then
     # Harness = the fn immediately following a #[kani::proof] attribute.
-    actual=$(awk '/#\[kani::proof\]/{p=1;next} p&&/^ *fn /{gsub(/^ *fn +/,"");sub(/\(.*/,"");print;p=0}' "$PROOFS" | sort -u)
+    # shellcheck disable=SC2086
+    actual=$(awk '/#\[kani::proof\]/{p=1;next} p&&/^ *fn /{gsub(/^ *fn +/,"");sub(/\(.*/,"");print;p=0}' $proof_files | sort -u)
     # Table rows name the harness in the first backticked cell.
     documented=$(grep -oE '^\| *`[a-z0-9_]+` *\|' "$FV" | tr -d '|` ' | sort -u)
 
@@ -92,7 +99,7 @@ if [ -f "$PROOFS" ] && [ -f "$FV" ]; then
         [ -n "$h" ] || continue
         checked=$((checked+1))
         printf '%s\n' "$documented" | grep -qx "$h" \
-            || fail "$PROOFS has harness '$h' with no row in $FV.
+            || fail "harness '$h' has no row in $FV.
               A proof nobody documented is assurance nobody knows they have."
     done <<< "$actual"
 
@@ -100,7 +107,7 @@ if [ -f "$PROOFS" ] && [ -f "$FV" ]; then
         [ -n "$h" ] || continue
         checked=$((checked+1))
         printf '%s\n' "$actual" | grep -qx "$h" \
-            || fail "$FV documents harness '$h', which does not exist in $PROOFS.
+            || fail "$FV documents harness '$h', which exists in no proof file.
               The document claims a property is machine-checked and it is not."
     done <<< "$documented"
 fi

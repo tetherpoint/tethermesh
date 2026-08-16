@@ -93,27 +93,63 @@ head "panic-free artifact (no path can fail on hostile input)"
 # somebody's job to remember. LTO must be off or the emitted artifact is
 # bitcode, which reads as an empty symbol table and passes without inspecting
 # anything — see the note in check_rust_rules.sh.
+# EVERY crate with a library target, not just the default one.
+#
+# This built a single `--lib` until 2026-08-16. With the extension suite planned
+# as one crate per bundle, a second crate's panic paths would simply never have
+# been inspected -- and the panic-free artifact guarantee is the claim
+# DISTRIBUTION.md leads with. Enumerated from cargo metadata rather than
+# guessed, so a crate added later is covered without anyone remembering to.
 if command -v cargo >/dev/null 2>&1 && [ -f "$ROOT/Cargo.toml" ]; then
-    objdir="$ROOT/target/objcheck"
-    rm -rf "$objdir"; mkdir -p "$objdir"
-    if ( cd "$ROOT" && CARGO_PROFILE_RELEASE_LTO=false \
-            cargo rustc --release --lib -- --emit=obj -o "$objdir/tm.o" ) >/dev/null 2>&1; then
+    pkgs=$( cd "$ROOT" && cargo metadata --no-deps --format-version 1 2>/dev/null \
+        | python3 -c 'import json,sys
+try:
+    m=json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for p in m.get("packages", []):
+    # third_party/ is pinned upstream source. check_rust_rules.sh excludes it
+    # from OUR source rules -- "we did not write it and may not edit it without
+    # voiding its provenance" -- so holding it to our artifact rule separately
+    # would be inconsistent, and would attribute a failure to the wrong place.
+    # What it does to the linked object is still measured, because it is linked
+    # INTO ours and inspected there.
+    if "/third_party/" in p.get("manifest_path", ""):
+        continue
+    if any(t.get("crate_types") and set(t["crate_types"]) & {"lib","rlib","staticlib","cdylib"}
+           for t in p.get("targets", [])):
+        print(p["name"])' )
+    [ -n "$pkgs" ] || pkgs="$(basename "$ROOT")"
+    say "library crates to inspect: $(echo "$pkgs" | tr '\n' ' ')"
+
+    rc_obj=0
+    while IFS= read -r pkg; do
+        [ -n "$pkg" ] || continue
+        objdir="$ROOT/target/objcheck/$pkg"
+        rm -rf "$objdir"; mkdir -p "$objdir"
+        if ( cd "$ROOT" && CARGO_PROFILE_RELEASE_LTO=false \
+                cargo rustc --release -p "$pkg" --lib -- --emit=obj -o "$objdir/tm.o" ) >/dev/null 2>&1; then
         # A glob, not `ls | head -1`: this script defines its own `head`
         # function for section headings, so piping into head calls THAT,
         # discards stdin and kills the pipeline with SIGPIPE under pipefail.
-        obj=""
-        for f in "$objdir"/*.o; do
-            [ -f "$f" ] || continue
-            obj="$f"; break
-        done
-        if [ -n "$obj" ]; then
-            "$ROOT/tools/check_rust_rules.sh" --binary "$obj" || rc=1
+            obj=""
+            for f in "$objdir"/*.o; do
+                [ -f "$f" ] || continue
+                obj="$f"; break
+            done
+            if [ -n "$obj" ]; then
+                printf '\033[36m[check]\033[0m %s\n' "inspecting $pkg"
+                "$ROOT/tools/check_rust_rules.sh" --binary "$obj" || rc_obj=1
+            else
+                printf '\033[31m[check] %s: object emit produced nothing\033[0m\n' "$pkg" >&2
+                rc_obj=1
+            fi
         else
-            printf '\033[31m[check] object emit produced nothing\033[0m\n' >&2; rc=1
+            printf '\033[31m[check] %s: could not build an object to inspect\033[0m\n' "$pkg" >&2
+            rc_obj=1
         fi
-    else
-        printf '\033[31m[check] could not build an object to inspect\033[0m\n' >&2; rc=1
-    fi
+    done <<< "$pkgs"
+    [ "$rc_obj" = 0 ] || rc=1
 else
     printf '\033[33m[check] cargo not available — panic-free artifact NOT verified\033[0m\n' >&2
 fi

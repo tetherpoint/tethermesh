@@ -44,6 +44,18 @@ It qualifies on all four counts, and a future instrument must qualify on all fou
 
 **The bench tooling exclusion below still stands in full.** Build and flash scripts, device discovery, probe identification, hardware inventories and test runners remain outside this repository, because they drive the reference implementation's binaries. The distinction is not "hardware versus not" — it is **does it interact with their material**.
 
+## Adding an extension bundle as a crate
+
+The suite is planned as **one crate per bundle** — groups in one, ranging in another — so a consumer takes the core plus only the bundles they want. Two things must hold, and both were verified on 2026-08-16 against a throwaway second crate rather than assumed:
+
+**Every crate is gated, not just the first.** Three checks silently assumed a single crate and were fixed before any bundle existed: `check_rust_rules.sh` took the first `lib.rs` it found, `check_all.sh` inspected one `--lib` object, and `check_docs.sh` read one hardcoded `proofs.rs`. All three would have **passed while proving less** the moment a second crate arrived — the failure mode `check_rust_rules.sh`'s own header records being caught by three times. They now cover every crate root, every library artifact, and every file carrying harnesses.
+
+A bundle crate therefore inherits the whole regime: the crate-level `deny` attributes, the panic-free artifact check, SPDX, clean-room, and the proof table. A crate too small to produce a meaningful object is **refused**, not waved through — *"a check that passes because there is nothing to look at is not a check."*
+
+**Declare workspace keys, never inherit them.** `DEPS.md` records why: libcrux could not be used as a path dependency because *"`hacl-rs`'s manifest inherits workspace keys that cannot be parsed from outside its workspace"*, which broke resolution for downstream consumers. `fiat-rust` works precisely because it inherits nothing. A bundle crate that inherits `[workspace.package]` keys would reproduce that failure for our own consumers, and it would show up in *their* build rather than ours. Verify by building an external crate against it, as was done for fiat.
+
+`third_party/` is excluded from the per-crate artifact sweep for the same reason it is excluded from the source rules: it is not ours to hold to them. What it does to the linked object is still measured, because it is linked into ours and inspected there.
+
 ## Two categories that leak most easily
 
 **Commit messages.** They are published with the code and cannot be edited after a push. A message explaining that a change exists "because our transport does X" discloses that a transport exists and what it does. Write commit messages that explain the change in terms of the protocol.
