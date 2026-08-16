@@ -99,9 +99,20 @@ Two things this phase established that were not in the plan:
 The layer that actually proves compatibility:
 
 - *their encoder → our decoder* — we read what they write
-- *our encoder → their decoder* — **they read what we write**
+- *our encoder → their decoder* — **they read what we write** — **ACHIEVED 2026-08-16**
 
 The second is the direction that fails in the field, and the one a lenient decoder hides.
+
+**2026-08-16 — an unmodified stock node accepted a frame built entirely by our encoder.** Our SX1262 transmitter put the bytes on the air verbatim; the stock Heltec running `2.7.26.54e0d8d` logged:
+
+```
+[Router] Received text msg from=0x7e570001, id=0xbadc0de, msg=tethermesh-conformance-1
+[Router] Rebroadcast received message coming from 1
+```
+
+It decrypted, decoded, displayed the text and **relayed it** — treating us as a peer on the mesh. One line validates the whole stack simultaneously: header layout and endianness, flag packing, channel hash, PSK expansion, AES key schedule, CTR keystream, nonce byte order, protobuf encoding with proto3 default omission, frame assembly, sync word and modem parameters. Any one of them wrong and there is no log line at all. Record in `tests/captures/conformance_record.json`.
+
+Still outstanding for the interoperability gate: appearing in their node list (NodeInfo), direct messages under PKI, and a route trace.
 
 **2026-08-16 — the panic-free half of this gate is met, and the check that was supposed to prove it turned out to prove nothing.** `check_rust_rules.sh --binary` was vacuous three ways over: an `.rlib` exposes almost no symbols, `--emit=obj` under LTO produces bitcode that reads as an empty symbol table, and the patterns matched legacy mangling while the toolchain emits v0 — where panic paths appear as names like `len_mismatch_fail` containing no form of the word "panic".
 

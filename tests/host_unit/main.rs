@@ -1056,3 +1056,53 @@ fn frame_size_limits_are_enforced_not_assumed() {
         assert_eq!(frame::peek_header(&short), Err(frame::Error::TooShort));
     }
 }
+
+/// Emit a frame built entirely by OUR encoder, for the bench to transmit.
+///
+/// Run with `--nocapture`; the bench harness greps the `CONFORMANCE_FRAME`
+/// line and puts those exact bytes on the air. This is the direction
+/// `TESTING.md` says fails in the field — a decoder that is merely lenient
+/// passes every inbound test while emitting frames nobody accepts — so the
+/// bytes must come from the real encoder rather than from a script that
+/// happens to agree with it.
+#[test]
+fn emit_conformance_frame_for_the_bench() {
+    // A node number that is obviously ours, so anything that receives it
+    // cannot be confused with real bench traffic.
+    const FROM: u32 = 0x7e57_0001;
+    const ID: u32 = 0x0bad_c0de;
+    const TEXT: &[u8] = b"tethermesh-conformance-1";
+
+    let Psk::Aes128(key) = expand_psk(&[0x01]).unwrap() else { panic!() };
+
+    let data = Data {
+        portnum: PortNum::TEXT_MESSAGE_APP.0,
+        payload: TEXT,
+        ..Data::default()
+    };
+    let mut payload = [0u8; 64];
+    let plen = data.encode(&mut payload).expect("Data encode failed");
+
+    let header = Header {
+        to: 0xFFFF_FFFF,
+        from: FROM,
+        id: ID,
+        hop_limit: 3,
+        hop_start: 3,
+        channel: channel_hash(b"LongFast", &key),
+        next_hop: 0,
+        relay_node: (FROM & 0xFF) as u8,
+        ..Header::default()
+    };
+    assert_eq!(header.channel, 0x08, "must land on the default channel to be heard");
+
+    let mut frame_buf = [0u8; frame::MAX_FRAME];
+    let n = frame::encode(&header, &payload[..plen], &key, 0, &mut frame_buf)
+        .expect("frame encode failed");
+
+    println!(
+        "CONFORMANCE_FRAME {}",
+        frame_buf[..n].iter().map(|b| format!("{b:02x}")).collect::<String>()
+    );
+    println!("CONFORMANCE_TEXT {}", core::str::from_utf8(TEXT).unwrap());
+}

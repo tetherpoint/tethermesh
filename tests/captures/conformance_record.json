@@ -1,0 +1,48 @@
+{
+  "record": "conformance_our_encoder_their_decoder",
+  "date": "2026-08-16",
+  "question": "Does an unmodified stock node accept a frame built entirely by our encoder?",
+  "why_this_direction": "TESTING.md: a decoder that is merely lenient passes every inbound test while emitting frames nobody accepts. This is the direction that fails in the field, and the only one that proves interoperability.",
+  "setup": {
+    "transmitter": "Heltec V3 running our own SX1262 driver; the host supplied the frame bytes verbatim, the firmware interprets nothing",
+    "frame_built_by": "tethermesh: header::encode, channel::channel_hash, crypto::expand_psk + ctr_apply + nonce, message::Data::encode, frame::encode",
+    "judge": "Heltec V3, unmodified Meshtastic 2.7.26.54e0d8d, US/LongFast, default channel"
+  },
+  "frame_hex": "ffffffff0100577edec0ad0b63080001fe77f67a52212cd450d3c094d63c2afc1416701947c562aabb7b9ef1",
+  "frame_fields": {
+    "to": "0xffffffff",
+    "from": "0x7e570001",
+    "id": "0x0badc0de",
+    "hop_limit": 3,
+    "hop_start": 3,
+    "channel_hash": "0x08",
+    "next_hop": 0,
+    "relay_node": "0x01",
+    "payload": "Data{portnum=1, payload='tethermesh-conformance-1'}"
+  },
+  "stock_node_log": [
+    "[RadioIf] Lora RX (id=0x0badc0de fr=0x7e570001 to=0xffffffff, HopLim=3 Ch=0x8 encrypted len=44 rxSNR=6.25)",
+    "[Router] Use channel 0 (hash 0x8)",
+    "[Router] decoded message (id=0x0badc0de fr=0x7e570001 Portnum=1)",
+    "[Router] handleReceived(REMOTE)",
+    "[Router] Received text msg from=0x7e570001, id=0xbadc0de, msg=tethermesh-conformance-1",
+    "[Router] Rebroadcast received message coming from 1"
+  ],
+  "verdict": "ACCEPTED",
+  "what_this_proves_simultaneously": [
+    "16-byte header layout, field order and little-endian encoding",
+    "flag bit packing for hop_limit and hop_start",
+    "channel hash function and its use of the modem preset name",
+    "PSK short-index expansion to the default channel key",
+    "AES-128 key schedule and the CTR keystream",
+    "the nonce construction and its byte order",
+    "protobuf Data encoding, including proto3 default omission",
+    "frame assembly and the header/ciphertext boundary",
+    "sync word and LongFast modem parameters on the transmit side"
+  ],
+  "not_yet_proven": [
+    "NodeInfo, so we appear in their node list",
+    "direct messages under PKI",
+    "appearing in a route trace"
+  ]
+}
