@@ -41,3 +41,9 @@ RESUME.md
 # oracle directory, and it is working guidance rather than a published
 # artifact. Tracking and loading are independent — this still loads.
 CLAUDE.md
+
+# ESP-IDF build output for instruments/. Source and sdkconfig.defaults are
+# tracked; everything the toolchain generates is not.
+instruments/**/build/
+instruments/**/sdkconfig
+instruments/**/sdkconfig.old

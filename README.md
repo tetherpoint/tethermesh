@@ -38,6 +38,8 @@ One entry point, `tools/check_all.sh`, runs every applicable check and exits non
 - **`gpl-patterns.txt`** — the forbidden strings, as data rather than code. A scanner that defines its own blacklist cannot check itself, so this file is the only thing exempt; deleting or emptying it makes the gate refuse rather than silently pass.
 - **`check_rust_rules.sh`** — no panics, no allocation, no mutable global state, no `unsafe`. Checks the crate attributes, then the **built object** for panic machinery and undefined references — which is what caught a live panic path source review had missed. Also enforces that field values reach `fiat-crypto` only through its bounds-typed wrappers.
 - **`check_docs.sh`** — documentation cross-references must resolve: named tests must exist, the proof table must match the harnesses in both directions, `DEPS.md`'s pinned commits must match the actual submodules, cited tooling must be present.
+- **`REUSE.toml`** — bulk licence annotation for files that cannot carry a comment header: JSON fixtures, `Cargo.lock`, `.gitkeep`. An exception here is deliberate and visible rather than a silent gap.
+- **crate-level `deny` attributes** in `meshtastic/core/lib.rs` — `unwrap_used`, `expect_used`, `panic`, `indexing_slicing`, `arithmetic_side_effects`, `unsafe_code`, `missing_docs`. The compiler is the first line of enforcement; `check_rust_rules.sh` verifies the attributes are present *and* separately greps for local `#[allow]`, because a local allow silently defeats a crate-level deny and is invisible to review.
 - **`measure_panic_symbols.sh`** — reproduces the dependency measurements the crypto decision rests on. Committed because a measurement nobody can re-run is a claim.
 - **`cargo kani`** — machine-checked proofs over the parse path in `meshtastic/core/proofs.rs`, covering every possible input rather than the ones a test happened to try.
 
@@ -130,6 +132,9 @@ meshtastic/WIRE_REFERENCE.md   the on-air facts, every claim sourced
 meshtastic/core/              header · channel hash · AES-CTR · protobuf codec
 meshtastic/routing/           managed flood · dedup · hop limit · duty accounting
 suite/                        the extension suite and its specification
+instruments/                  test instrumentation — the SX1262 receiver the
+                              wire reference was measured with. Not a driver
+                              for the stack, and not linked into anything.
 tests/host_unit/              algorithmic tests, green and red
 tests/captures/               replay fixtures, synthetic-equivalent
 DEPS.md                       what every result was obtained against
@@ -138,7 +143,9 @@ tools/check_cleanroom.sh      the GPL gate
 
 Nothing here needs them to be verified: every fixture the tests read is committed under `tests/captures/`, so the full suite, the proofs and `tools/check_all.sh` run against a bare clone with no oracle, no network and no hardware. The reference implementation, the harness that drives it and the tools that fetch it are **not** in this tree. They live in a sibling directory alongside the hardware bench's copy, untracked — see `TESTING.md` and that directory's own `RULE.md`. What stays here is the provenance of our claims and fixtures that are ours to publish.
 
-Portable `no_std` Rust with no hardware dependency, exported over a C ABI. A radio driver is deliberately not included — implementers have their own, and tying the stack to one part would narrow it for no benefit.
+Portable `no_std` Rust with no hardware dependency, exported over a C ABI. **A radio driver is deliberately not included** — implementers have their own, and tying the stack to one part would narrow it for no benefit.
+
+`instruments/` does not contradict that. It holds the SX1262 receiver used to *measure* the wire reference: written from the vendor datasheet, it prints raw PHY payloads verbatim and parses nothing, so a layout claim is decided by inspection afterwards rather than by whatever the receiver assumed. It is committed because it **is the evidence** for the clean-room claim and the instrument behind every byte-level fact — a claim of that kind whose evidence is absent is worth nothing. It is not linked into the crate and not shipped. See `instruments/README.md`.
 
 ## Read this first
 

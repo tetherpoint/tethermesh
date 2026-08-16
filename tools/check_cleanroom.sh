@@ -126,11 +126,23 @@ while IFS= read -r f; do
         # from. Note it passed this gate before being committed and failed
         # immediately after -- `git ls-files` does not see untracked files, so
         # a new file is unscanned until it is staged. Use --staged pre-commit.
-        # check_cleanroom.sh is now SCANNED rather than skipped -- it no longer
-        # contains the GPL header strings, which moved to the data file. It
-        # still names the forbidden radio library in its own error message and
-        # in the comment explaining the rule, so it needs this and only this.
-        PLAN.md|README.md|NOTICE|suite/README.md|docs/*|meshtastic/WIRE_REFERENCE.md|tools/check_cleanroom.sh) may_name_it=1 ;;
+        # THE PRINCIPLE, written down because this list has grown four times
+        # and each addition looked reasonable in isolation:
+        #
+        #   A file may NAME the forbidden library when stating that it does not
+        #   derive from it -- and for no other reason.
+        #
+        # That covers the documents that explain the rule, the notice that
+        # makes the non-derivation claim to adopters, this scanner's own error
+        # message, and instrument source that records the same constraint in
+        # its header. It does NOT cover implementation code, and a new entry
+        # should be tested against that sentence rather than against whether it
+        # is currently inconvenient.
+        #
+        # check_cleanroom.sh is SCANNED rather than skipped -- it no longer
+        # holds the GPL header strings, which moved to tools/gpl-patterns.txt.
+        # It needs this and only this.
+        PLAN.md|README.md|NOTICE|suite/README.md|docs/*|meshtastic/WIRE_REFERENCE.md|tools/check_cleanroom.sh|instruments/*) may_name_it=1 ;;
         # Pinned upstream code, licence recorded in DEPS.md. Not held to rules
         # about how WE write code, but it IS scanned for GPL contamination --
         # see the submodule sweep after this loop, which is where the real
