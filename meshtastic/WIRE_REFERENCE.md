@@ -129,6 +129,15 @@ A side effect worth recording: the oracle **loaded a `ChannelFile` we hand-encod
 
 **Packet identifiers are 32-bit and re-randomised per packet** — the node logs `Initial packet id`, then `Partially randomized packet id` for each transmission. Relevant to the L2 packet-id discipline: under CTR a repeated `(packet_id, sender)` pair leaks the XOR of two plaintexts.
 
+**The simulator and real silicon disagree on airtime, by about 1.2%.** Same firmware version (`2.7.26.54e0d8d`), same preset, same region UNSET, same 104 × 250 kHz, same 906.875 MHz, same 28 ms slot and 131 ms preamble — and different computed bitrates:
+
+| build | reported bitrate |
+|---|---|
+| `meshtasticd`, portduino (`S:B:37,…,native,…`) | 118.394310 bytes/sec |
+| Heltec V3, real SX1262 (`S:B:43,…,heltec-v3,…`) | 116.967873 bytes/sec |
+
+Small, and it matters where it lands: duty-cycle accounting and the contention window in L5 are computed from airtime, so a figure taken from the simulator is roughly 1.2% optimistic against hardware. **Use the hardware figure for anything that budgets airtime.** Recorded because a discrepancy this size is exactly the kind that gets attributed to measurement noise once it shows up downstream.
+
 **Default LongFast radio parameters, as computed by the reference at runtime** — region UNSET on a 902–928 MHz band: 104 channels × 250 kHz, channel number 20, frequency 906.875 MHz, slot time 28 ms, preamble 131 ms, bitrate 118.394 bytes/sec. A 70-byte encrypted NodeInfo reported `Packet TX: 755ms`. These are the *simulator's* numbers and are consistent with the ~805 ms figure used for planning; they are **not** a substitute for measuring real silicon.
 
 ---
