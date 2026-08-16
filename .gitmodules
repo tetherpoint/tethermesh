@@ -1,3 +1,6 @@
 [submodule "third_party/libcrux"]
 	path = third_party/libcrux
 	url = https://github.com/cryspen/libcrux
+[submodule "third_party/fiat-crypto"]
+	path = third_party/fiat-crypto
+	url = https://github.com/mit-plv/fiat-crypto

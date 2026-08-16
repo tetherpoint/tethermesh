@@ -34,6 +34,31 @@ Read at that commit, never vendored, never run through a code generator. Field n
 
 **Known coverage hole.** XEdDSA packet signing lands in firmware 2.8.x (`meshtastic/WIRE_REFERENCE.md`). A 2.7.26 oracle cannot exercise it. Revisit when 2.8.0 releases.
 
+## Pinned third-party source, in tree
+
+Both are git submodules, sparse-checked-out, so the exact source that compiles
+is present in the working tree and auditable offline. Clone with
+`--recurse-submodules`.
+
+| submodule | commit | checked out | role |
+|---|---|---|---|
+| `third_party/fiat-crypto` | `a6ddbd4e89e1714cb825437a401505b9c76537cf` | `fiat-rust/` only, 4.9 MB | **linked.** Coq-verified curve25519 field arithmetic, MIT/Apache-2.0/BSD-1-Clause |
+| `third_party/libcrux` | `9ea7743c201ae861625dccb171f7c42d6b831927` | `crates/utils/` only, 744 KB | **not linked.** Basis for `docs/UPSTREAM-HACL-PANIC-FREEDOM.md` |
+
+**Why a submodule rather than a registry pull.** A registry dependency is
+pinned by checksum in `Cargo.lock`, which is a real pin — but the source lives
+in `~/.cargo/registry`, so nobody reviewing this repository can see what is
+actually compiled without fetching it. A submodule puts it in the tree at a
+named commit. For the one dependency that performs cryptography, that is worth
+a few megabytes.
+
+It also works, which was not a foregone conclusion: `fiat-rust` inherits no
+workspace keys and has no dependencies of its own, so a path dependency on it
+resolves for **downstream** consumers too. That was verified by building an
+external crate against this one. The same approach with `libcrux` fails at
+exactly that step, because `hacl-rs`'s manifest inherits workspace keys that
+cannot be parsed from outside its workspace.
+
 ## Toolchain
 
 | what | value |
