@@ -2913,3 +2913,50 @@ fn send_once_never_retransmits() {
     assert!(ob.next_due(u64::from(u32::MAX), 100_000, &mut duty).is_none());
     assert_eq!(ob.reap(u64::from(u32::MAX)), Some((0x7e57_0001, 0xAA00_0007)));
 }
+
+/// Build an acknowledgement frame for the bench, through the shipped code path.
+///
+/// This deliberately calls `delivery::acknowledgement` rather than assembling
+/// the bytes here: the point of the exercise is to prove the function we ship
+/// produces something a stock node accepts, and a reimplementation in the test
+/// would prove only that two of our own things agree.
+///
+/// Channel-encrypted, because measurement showed the reply travels on the
+/// channel even when acknowledging a PKI message. `want_ack` is left unset —
+/// our deliberate deviation from upstream, which does set it.
+#[test]
+fn emit_ack_for_the_bench() {
+    const FROM: u32 = 0x7e57_0001;
+    let (Ok(to_s), Ok(req_s)) = (std::env::var("ACK_TO"), std::env::var("ACK_REQUEST_ID")) else {
+        println!("ACK_FRAME skipped — set ACK_TO and ACK_REQUEST_ID");
+        return;
+    };
+    let to = u32::from_str_radix(to_s.trim_start_matches("0x"), 16).expect("ACK_TO hex");
+    let request_id =
+        u32::from_str_radix(req_s.trim_start_matches("0x"), 16).expect("ACK_REQUEST_ID hex");
+    let id: u32 = std::env::var("ACK_ID").ok()
+        .and_then(|v| u32::from_str_radix(v.trim_start_matches("0x"), 16).ok())
+        .unwrap_or(0x0bad_ac10);
+
+    let ack = acknowledgement(request_id);
+    assert_eq!(ack.payload, &[0x18, 0x00], "the measured bytes, not a generated zero");
+
+    let mut payload = [0u8; 64];
+    let plen = ack.encode(&mut payload).expect("ack encode");
+
+    let Psk::Aes128(key) = expand_psk(&[0x01]).unwrap() else { panic!() };
+    let header = Header {
+        to,
+        from: FROM,
+        id,
+        hop_limit: 3,
+        hop_start: 3,
+        want_ack: false,
+        channel: channel_hash(b"LongFast", &key),
+        relay_node: (FROM & 0xFF) as u8,
+        ..Header::default()
+    };
+    let mut fb = [0u8; frame::MAX_FRAME];
+    let n = frame::encode(&header, &payload[..plen], &key, 0, &mut fb).expect("frame encode");
+    println!("ACK_FRAME {}", fb[..n].iter().map(|b| format!("{b:02x}")).collect::<String>());
+}

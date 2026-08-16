@@ -49,5 +49,32 @@
     "matching": "Match an incoming Data with portnum 5 on request_id against the pending queue. No knowledge of the Routing message is needed to match -- only to interpret status.",
     "generation": "Emit Data{portnum:5, request_id:<their id>} with payload Routing{field 3 = 0}, encoded EXPLICITLY as the two bytes 18 00, on the channel rather than PKI.",
     "do_not_copy": "Setting want_ack on our own acknowledgements would mean retransmitting them when nobody acks an ack, spending shared airtime for no delivery benefit. Observed upstream; deliberately not adopted."
+  },
+  "outbound_validation": {
+    "captured": "2026-08-16",
+    "what": "An acknowledgement built by meshtastic/core/delivery.rs was transmitted to a stock node and ACCEPTED: its retransmission ladder stopped.",
+    "why_this_is_the_test_that_counts": "PLAN.md's position is that a decoder reading their traffic proves half of compatibility, and the half that fails in the field is the other one. Everything before this validated that we can READ an acknowledgement. This validates that we can WRITE one they accept.",
+    "method": "A stock node was driven to send a want_ack direct message to us. In the control trial we sent nothing. In the test trial we emitted an acknowledgement through the shipped delivery::acknowledgement path -- not a reimplementation in the test, which would have proved only that two of our own things agree -- and transmitted it 1.4 s after their first send. Same session, same nodes, same message type; the only variable was whether we acknowledged.",
+    "control": {
+      "acknowledged": false,
+      "transmissions": 3,
+      "intervals_s": [
+        7.08,
+        7.34
+      ]
+    },
+    "test": {
+      "acknowledged": true,
+      "transmissions": 1,
+      "intervals_s": [],
+      "ack_frame_bytes": 27,
+      "ack_sent_after_s": 1.4
+    },
+    "what_it_confirms": [
+      "The measured ACK_PAYLOAD of 18 00 is right. Had it been the empty payload proto3 would generate, the ladder would have continued and the failure would have looked like a radio problem rather than an encoding one.",
+      "Matching on Data.request_id is correct from THEIR side too, not only ours.",
+      "Our deliberate deviation of NOT setting want_ack on our own acknowledgements does not affect acceptance. Upstream sets it; we do not, and they accept ours regardless."
+    ],
+    "note": "Our two nodes only. No third-party traffic recorded."
   }
 }

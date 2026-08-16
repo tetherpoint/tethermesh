@@ -258,6 +258,8 @@ The shape follows the crate's existing seams rather than inventing new ones: `no
 
 **Gate for this item:** retry count and backoff recorded in `meshtastic/WIRE_REFERENCE.md` with the capture behind them, and our policy stated as at-or-below what was measured. ***Met.***
 
+**2026-08-16 — validated on hardware, with a control.** A stock node sent a `want_ack` direct message twice: unacknowledged it retransmitted three times, acknowledged it sent once. The acknowledgement was built by `delivery::acknowledgement` rather than reassembled in the test, so what was validated is the shipped path. Record in `tests/captures/routing_ack.json`.
+
 **Still not implemented, deliberately:** emitting an acknowledgement requires framing and encrypting it, and measurement showed the reply travels *channel-encrypted even when acknowledging a PKI message*. That is a caller decision about which key to use, so `delivery::acknowledgement` returns the `Data` and stops there.
 
 **Gate:** relay behaviour matches the reference across a topology matrix, and the relay question is answered in the wire reference either way. *Now gated on hardware, not on effort.*

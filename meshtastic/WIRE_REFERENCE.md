@@ -344,6 +344,10 @@ Three further observations, recorded as observed rather than explained:
 - **The positive acknowledgement itself sets `want_ack`**, and was therefore retransmitted three times on the ~7 s ladder, because this stack never acknowledges anything. The rejection did **not** set `want_ack` and was sent once. The asymmetry is observed; no explanation is claimed.
 - `hop_limit` on both replies was 2 with `hop_start` 2, against the probe's 3.
 
+**Our acknowledgement is accepted — validated 2026-08-16, with a control.** A stock node was driven to send a `want_ack` direct message twice. Unacknowledged it transmitted **three** times at 7.08 and 7.34 s. Acknowledged — with a frame built by `meshtastic/core/delivery.rs`, sent 1.4 s after their first — it transmitted **once**. Same session, same nodes; the only variable was whether we replied.
+
+That is the direction that matters. Everything before it proved we can *read* an acknowledgement; this proves we can *write* one they accept. It also confirms the `18 00` payload is right: had it been the empty payload proto3 would generate, the ladder would have continued and the failure would have looked like a radio problem.
+
 **The enum name for status 6 is not established here.** Naming it needs the schema read as specification. The plausible cause — the destination holds our public key and expects PKI for direct messages, and the probe was channel-encrypted — is inference and is not claimed.
 
 ---
