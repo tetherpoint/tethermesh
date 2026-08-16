@@ -176,7 +176,11 @@ This is the assumption the whole extension suite rests on, so L7 is no longer co
 
 Deliberately **not** included at the time: a `should_relay`. Suppression is one input to the rebroadcast decision; the others are the hop limit, the contention window and the duty budget — and, then, whether a node relays on channels it cannot decrypt. Writing that function while the last one was open would have meant taking a position on an open question in code, which is how an assumption stops looking like one.
 
-**That reason has since expired, and the work is now done.** The relay question was settled the same day by measurement, and `should_relay` landed on 2026-08-16 in `meshtastic/core/routing.rs`, together with the contention window and duty-cycle accounting it was waiting on.
+**That reason expired almost immediately, and the stale text outlived it by the whole project.** The relay question was not settled late — it was one of the *first* things hardware established. Bench work began at 01:44 on 2026-08-16 with the airtime comparison; the relay finding landed at **02:20** (`7bae50c`), the third hardware commit, **before the 16-byte header layout was known** (02:40), before AES-CTR (02:44), before any of the three conformance results (03:23–03:30), and before L6 decrypted anything (04:00).
+
+So the two paragraphs above stood falsified from the very beginning of the hardware phase and were carried through every result that followed. **`should_relay` was then deliberately withheld for the project's entire productive life on a justification that had expired thirty-six minutes into using the radios.** That is the cost of stale prose, stated concretely: not an inaccuracy in a document, a design decision frozen by one.
+
+`should_relay` landed 2026-08-16 in `meshtastic/core/routing.rs`, with the contention window and duty-cycle accounting it was genuinely waiting on.
 
 **2026-08-16 — the rest of L5 is implemented.** Three pieces:
 
