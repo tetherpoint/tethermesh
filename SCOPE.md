@@ -21,14 +21,28 @@ Everything in this repository should make sense to someone who has never heard o
 - `WIRE_REFERENCE.md`: on-air facts with sources, verified separated from unverified.
 - Host-side tests and on-air capture fixtures.
 - Tooling that operates on the above without hardware — for example the clean-room checker.
+- **Measuring instruments, and only as evidence.** `instruments/` holds the SX1262 receiver the wire reference was measured with. See the carve-out below, which is narrow and was written *after* the fact rather than before.
 
 ## Out of scope — must not be committed
 
-- **Any radio driver, board bring-up, or hardware abstraction.** This stack is portable by design; a driver would both narrow it and pull in code that is not ours to publish.
+- **Any radio driver, board bring-up, or hardware abstraction *in the shipped stack*.** This library is portable by design; a driver in it would narrow it to one part for no benefit. Nothing in `meshtastic/core/` may touch hardware.
 - **Any product integration** — application layers, transport shims, backends, host interfaces, or the names and internal structure of systems that consume this library.
 - **Bench and laboratory tooling**: build and flash scripts, device discovery, port and probe identification, hardware test runners, hardware inventories.
 - **Anything describing a consuming product's architecture, security design, key management, roadmap, or implementation status.** This is the category most likely to arrive by accident, because it usually arrives inside otherwise reasonable prose — a rationale paragraph, a comparison table, a commit message explaining *why*.
 - **GPL-derived material of any kind.** Separate concern, separately enforced; see `README.md` and `tools/check_cleanroom.sh`.
+
+## The instrument carve-out, and why it is narrow
+
+`instruments/heltec_v3_sniffer` is an SX1262 driver, and the exclusion above says no radio drivers. **That exclusion is about the shipped stack, and this is not in it.** The carve-out is stated explicitly because the repository otherwise contradicts its own scope document — which it did, briefly, until this paragraph was written.
+
+It qualifies on all four counts, and a future instrument must qualify on all four too:
+
+1. **Not linked, not shipped.** It is a separate ESP-IDF application. `check_rust_rules.sh` inspects the crate object and never sees it.
+2. **It is evidence.** `README.md` claims the byte-level facts were obtained with a receiver written from the vendor datasheet rather than an existing library. A claim of that kind whose evidence is absent is worth nothing.
+3. **It is the instrument of record.** Every byte-level entry in `WIRE_REFERENCE.md` was measured through it. If it is wrong, they are wrong, and a reader auditing them must be able to see how the bytes were captured.
+4. **It is entirely ours**, and was verified so before being moved: no GPL headers, no radio library, includes limited to ESP-IDF and libc, no third-party component.
+
+**The bench tooling exclusion below still stands in full.** Build and flash scripts, device discovery, probe identification, hardware inventories and test runners remain outside this repository, because they drive the reference implementation's binaries. The distinction is not "hardware versus not" — it is **does it interact with their material**.
 
 ## Two categories that leak most easily
 

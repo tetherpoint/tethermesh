@@ -201,6 +201,45 @@ So the two paragraphs above stood falsified from the very beginning of the hardw
 
 **2026-08-15 — the simulation route was tried and does not work.** Two local instances can be made to form a mesh, by enabling `UDP_BROADCAST`; the process-local SimRadio alone will not do it. But captured UDP traffic carries `hop_limit = 0`, so those packets are never candidates for rebroadcast and the managed-flooding decision is never reached. A local UDP mesh produces traffic that looks like a mesh and cannot answer this question. Settling it needs two real radios. Detail in `meshtastic/WIRE_REFERENCE.md`.
 
+### The gap this phase did not scope: acknowledgement and retransmission
+
+**Recorded 2026-08-16.** L5 was scoped as hop-limit handling, duplicate suppression, the contention window and duty accounting. It never mentioned delivery, so the phase reads as complete while a load-bearing part of the protocol is absent. That omission was not deliberate — it was unstated, which is worse.
+
+**This belongs here, not above.** `want_ack` is a header flag this crate already parses and encodes; `ROUTING` is portnum 5 and carries the responses; upstream's documented routing falls back *"to flooding on the final retry"*. And nothing below supplies it: LoRa has forward error correction and a CRC, but **no ARQ at all**. A frame lost beyond FEC's reach is lost silently. Flood redundancy raises the odds of arrival and is not delivery confirmation.
+
+**What is missing, concretely:** emitting a routing acknowledgement for a `want_ack` packet addressed to us; matching an incoming acknowledgement to a pending transmission; a retransmission policy; and the pending-transmission queue.
+
+#### Design constraints, which the crate rules already fix
+
+- **No clock in here.** A deadline arrives as `now_us`, exactly as `DutyCycle` takes it. A hidden clock would be untestable and unportable.
+- **No allocation.** The pending queue is caller-provided and fixed-capacity, like `PacketHistory`.
+- **No global state.** It is owned by the caller.
+- **Retransmission is airtime**, so it must be charged through `DutyCycle` like any other transmission. A retry policy that can outrun the duty budget is a bug, not a tuning choice.
+
+#### Match upstream, or design it properly?
+
+The question splits, and the halves have different answers.
+
+**The wire format must match exactly, and is not a design space.** What an acknowledgement *is* — portnum 5, the `request_id` echo, the flag bit — is the protocol. An acknowledgement a stock node does not recognise is not an acknowledgement.
+
+**The policy — how many retries, what backoff, when to stop — is local behaviour, but it is not free to choose.** Retransmission spends a *shared* resource, and on a flood mesh each retry is re-broadcast by every neighbour that hears it, so the cost multiplies by the local node count. A policy more aggressive than upstream's would take more than its share of a common channel and degrade the mesh for stock nodes that have no say in it.
+
+So: **measure upstream's policy first and treat it as a ceiling, never a target.** Being less aggressive is always safe for the network and costs only our own delivery odds. Being more aggressive is antisocial, and being *differently* aggressive makes field failures hard to attribute — the same reasoning behind the instrument rule.
+
+Where measurement shows upstream's policy is genuinely poor — synchronised retry storms from a fixed backoff, say — deviate **downward**, and write down both what they do and what we do instead. That is the wire reference's standing instruction for a mismatch, applied to behaviour rather than bytes.
+
+**The extension suite is the opposite case.** L7 defines new portnums with no compatibility constraint, so there the answer is to design it correctly from the start rather than inherit anything.
+
+**This project has now twice invented a parameter and been badly wrong** — the contention window's scale, off by more than an order of magnitude, and a part credited with a crypto accelerator it does not have. Both were caught by measuring. That is the argument for measuring retry behaviour before choosing a policy, rather than after.
+
+#### How to measure it, with the bench that exists
+
+Nothing new is needed. Make a stock node originate a `want_ack` packet and **withhold the acknowledgement** — our receiver sends none, so this is the default. Then count retransmissions and time the intervals from the sniffer's `RAWFRAME` output, which already timestamps and prints every frame verbatim.
+
+That yields the retry count, the backoff shape, and whether the interval is fixed or randomised. It also settles a related question this project has assumed nothing about: **whether an overheard rebroadcast of one's own packet is treated as an implicit acknowledgement.** Withholding an explicit ack while a relay does occur separates the two.
+
+**Gate for this item:** retry count and backoff recorded in `meshtastic/WIRE_REFERENCE.md` with the capture behind them, and our policy stated as at-or-below what was measured.
+
 **Gate:** relay behaviour matches the reference across a topology matrix, and the relay question is answered in the wire reference either way. *Now gated on hardware, not on effort.*
 
 ## L6 — PKI direct messages

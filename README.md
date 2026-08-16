@@ -70,6 +70,40 @@ That second point is the structural fact the design rests on: Meshtastic's flood
 
 The extension boundary is precise. Everything new lives in the payload and the channel/PortNum space; the 16-byte header and the modem preset are fixed, because changing either stops stock nodes relaying.
 
+## What this library is, and what has to sit around it
+
+This is a **protocol layer**. It is not a node. An implementer supplies a radio driver below and a scheduler above, and needs to know exactly where the seam falls — including one capability the protocol requires that this library does **not** currently provide.
+
+### Below — yours, and deliberately not ours
+
+The radio driver: the part's command set, SPI, interrupts, and programming the modulation. From it you get, at the physical layer:
+
+- **Forward error correction** (the coding rate) and a **CRC**. FEC repairs some corrupted symbols; the CRC detects what it cannot.
+- **Nothing else.** In particular there is **no retransmission below this library.** LoRa has no ARQ, no link-layer acknowledgement, no MAC-level retry. A frame that arrives corrupted beyond FEC's reach is simply lost, silently, and the physical layer neither knows nor cares.
+
+`meshtastic/core/backend.rs` is the seam for routing cryptographic primitives onto hardware, if the part has it. A *radio* driver is not included at all — implementers have their own, and tying the stack to one part would narrow it for no benefit.
+
+### Here — the protocol
+
+The frame header, channel hashing, channel and PKI cryptography, the protobuf codec, and the routing decision: hop-limit handling, duplicate suppression, the SNR-scaled contention window and duty-cycle accounting.
+
+### Above — yours, because this library holds no state it does not have to
+
+- **The clock.** There is none in here. Anything time-dependent takes `now_us` as an argument — `DutyCycle` does exactly this — because a `no_std` library cannot portably know the time and a hidden one would be untestable.
+- **The scheduler and the radio itself.** We return *"wait a backoff drawn from this window, then transmit if nobody else did"*. Waiting, drawing, and arbitrating access to the radio are yours.
+- **Buffers.** Nothing here allocates.
+- **Identity, key custody, persistence.**
+
+### The gap you must fill yourself today: delivery
+
+**There is no acknowledgement or retransmission in this library, and the protocol has one.** `want_ack` is a header flag that we parse and encode (`header.rs`), `ROUTING` is portnum 5 and carries the responses, and upstream's own documented routing falls back *"to flooding on the final retry"*. So this is not a layer above the protocol — it is **part of it**, and it is missing here.
+
+Concretely, a caller wanting reliable delivery must currently implement: emitting a routing acknowledgement for a `want_ack` packet addressed to it, matching an incoming acknowledgement to a pending transmission, a retransmission policy, and the pending-transmission queue itself.
+
+Flood routing gives *redundancy* — several neighbours may relay the same frame — which raises the odds of arrival. **It is not delivery confirmation**, and treating it as one is the mistake this section exists to prevent.
+
+See `PLAN.md` § L5 for the design constraints this has to satisfy and what about upstream's retry behaviour is still unmeasured.
+
 ## Clean-room, and why it is enforced rather than encouraged
 
 Meshtastic's firmware and its protobuf definitions are **both GPL-3.0**. This project derives from neither. It is built from the `.proto` files read as *specification*, from published protocol documentation, and from our own on-air captures.
