@@ -11,6 +11,7 @@
 use std::fs;
 use std::path::PathBuf;
 
+use tethermesh::backend::{Crypto as Backend, Error as BackendError, SecretKey, Software};
 use tethermesh::channel::channel_hash;
 use tethermesh::crypto::{
     Aes256,
@@ -1719,4 +1720,147 @@ fn x25519_agrees_with_a_formally_verified_implementation() {
         libcrux_curve25519::secret_to_public(&mut theirs_pub, &sk);
         assert_eq!(public_key(&sk), theirs_pub, "public_key disagreed, iteration {i}");
     }
+}
+
+// ===========================================================================
+// The hardware-accelerator seam.
+//
+// `backend.rs` had no callers and no tests until these were written, which is
+// how two defects survived in it: no way for a fallible part to report
+// failure, and no way to name a key it holds but will not surrender. Both are
+// invisible to a test that only ever exercises software.
+//
+// So these do not test AES or SHA — those are covered elsewhere against
+// published vectors. They test the *seam*: that a partial override falls
+// through, that failure is reportable, and that the three ways an operation
+// can fail stay distinguishable.
+// ===========================================================================
+
+/// A backend that accelerates exactly one primitive. `backend.rs` claims this
+/// is "a short `impl` with one method"; this is that claim, compiled.
+struct OnlySha;
+
+impl Backend for OnlySha {
+    fn sha256(&self, _data: &[u8]) -> Result<[u8; 32], BackendError> {
+        Ok([0xA5; 32])
+    }
+}
+
+/// A backend whose silicon is unhappy. The old seam could not express this at
+/// all: `sha256` returned `[u8; 32]`, so a part that failed had to invent a
+/// digest or panic.
+struct Wedged;
+
+impl Backend for Wedged {
+    fn sha256(&self, _data: &[u8]) -> Result<[u8; 32], BackendError> {
+        Err(BackendError::Hardware)
+    }
+}
+
+#[test]
+fn the_software_backend_agrees_with_the_bare_function() {
+    let a = [7u8; 32];
+    let b = [9u8; 32];
+    let (pa, pb) = (public_key(&a), public_key(&b));
+
+    let sw = Software;
+    let ours = sw.x25519(SecretKey::Bytes(&a), &pb).expect("agreement");
+    let theirs = sw.x25519(SecretKey::Bytes(&b), &pa).expect("agreement");
+
+    assert_eq!(ours, theirs, "the two sides did not agree");
+    assert_eq!(
+        ours,
+        x25519(&a, &pb).expect("bare agreement"),
+        "routing through the seam changed the answer"
+    );
+    assert_eq!(
+        sw.public_key(SecretKey::Bytes(&a)).expect("public key"),
+        pa,
+        "seam public_key disagreed with the bare one"
+    );
+}
+
+#[test]
+fn software_refuses_a_key_it_cannot_hold() {
+    // Key custody is the whole reason `SecretKey` exists. Software has none,
+    // and the failure that matters is the quiet one: accepting a slot number
+    // and agreeing a secret with some *other* key would be far worse than
+    // refusing.
+    let sw = Software;
+    let peer = public_key(&[3u8; 32]);
+
+    assert_eq!(
+        sw.x25519(SecretKey::Slot(2), &peer),
+        Err(BackendError::Unsupported),
+        "software claimed a key slot it does not have"
+    );
+    assert_eq!(
+        sw.public_key(SecretKey::Slot(2)),
+        Err(BackendError::Unsupported),
+        "software produced a public key for a slot it does not have"
+    );
+}
+
+#[test]
+fn a_small_order_peer_is_not_a_hardware_fault() {
+    // These were the same value once: `x25519` returned `Option`, so a
+    // backend reporting an I2C timeout was indistinguishable from one
+    // reporting an active attack. One is retryable; the other must never be.
+    let sw = Software;
+    let err = sw.x25519(SecretKey::Bytes(&[1u8; 32]), &[0u8; 32]).unwrap_err();
+
+    assert_eq!(err, BackendError::SmallOrderPeer, "small-order peer misreported");
+    assert_ne!(err, BackendError::Hardware, "an attack was reported as a retryable fault");
+}
+
+#[test]
+fn overriding_one_primitive_leaves_the_others_alone() {
+    let acc = OnlySha;
+    let sw = Software;
+
+    assert_eq!(acc.sha256(b"anything").expect("digest"), [0xA5; 32], "override did not take");
+
+    // ...and the primitive it did *not* override still works, identically to
+    // software. This is the fall-through the per-primitive design promises.
+    let key = [0x11u8; 16];
+    let iv = [0x22u8; 16];
+    let (mut via_acc, mut via_sw) = ([0u8; 40], [0u8; 40]);
+
+    acc.aes_ctr(&key, &iv, &mut via_acc).expect("ctr via partial backend");
+    sw.aes_ctr(&key, &iv, &mut via_sw).expect("ctr via software");
+
+    assert_eq!(via_acc, via_sw, "inherited default diverged from software");
+    assert_ne!(via_acc, [0u8; 40], "keystream was all zeros — nothing happened");
+}
+
+#[test]
+fn a_backend_can_report_that_its_hardware_failed() {
+    assert_eq!(
+        Wedged.sha256(b"anything"),
+        Err(BackendError::Hardware),
+        "hardware failure was not reportable"
+    );
+    // And it did not have to invent a digest to say so.
+    assert!(Wedged.sha256(b"anything").is_err(), "a wedged part returned an answer");
+}
+
+#[test]
+fn a_bad_tag_is_never_reported_as_a_hardware_fault() {
+    // Conflating these would let a caller retry its way past authentication.
+    let key = [0x44u8; 32];
+    let nonce = [0x55u8; 13];
+    let sw = Software;
+
+    let mut buf = [0u8; 16 + CCM_TAG_LEN];
+    for (i, b) in buf.iter_mut().take(16).enumerate() {
+        *b = i as u8;
+    }
+    let n = sw.ccm_seal(&key, &nonce, &mut buf, 16, CCM_TAG_LEN).expect("seal");
+
+    // Flip a bit in the tag.
+    buf[n - 1] ^= 0x01;
+
+    let err = sw.ccm_open(&key, &nonce, &mut buf[..n], CCM_TAG_LEN).unwrap_err();
+    assert_eq!(err, BackendError::Ccm(CcmError::Unauthentic), "forgery misreported");
+    assert_ne!(err, BackendError::Hardware, "a forgery was reported as retryable");
 }

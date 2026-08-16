@@ -68,6 +68,11 @@ Stated plainly, because the gap is real:
   branches, but Rust cannot express "do not turn this into a branch" and no
   tool here verifies the emitted code. This is a strong expectation, not a
   guarantee, and it is not a defence against physical side-channel attack.
+  Hardware can close this gap where software cannot: of the parts surveyed in
+  `docs/HARDWARE-BACKENDS.md`, only the nRF54LM20's CRACEN accelerates
+  Curve25519, and Nordic documents extended side-channel countermeasures for
+  Montgomery curve multiplication on some SoCs. `meshtastic/core/backend.rs`
+  is the seam that lets an implementer take it.
 - **The ladder.** The field operations under it are proven; that the
   Montgomery ladder composes them into the right group operation is supported
   by RFC 7748 vectors and agreement with two independent implementations, not
