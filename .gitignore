@@ -32,3 +32,9 @@ oracle/
 # in a repository that publishes as clean-room. It is also exactly the kind of
 # file that would need the check_cleanroom.sh exemption list widened for it.
 RESUME.md
+
+# Session instructions, auto-loaded from disk by the assistant. Untracked for
+# the same reason RESUME.md is: it points at bench paths and an out-of-tree
+# oracle directory, and it is working guidance rather than a published
+# artifact. Tracking and loading are independent — this still loads.
+CLAUDE.md
