@@ -34,13 +34,19 @@ The correction: **the raw frame does not appear at the simulated-radio boundary.
 | 3 channel hash | resolved by observation, two data points |
 | 4 PKI/DM scheme | resolved by capturing and decrypting a real direct message |
 | 5 sync word | resolved — `0x0740=0x24`, `0x0741=0xB4`, confirmed by decoding real traffic |
-| 6 modem parameters | **resolved 2026-08-16** — SF and BW measured for all nine valid presets; CR outstanding |
+| 6 modem parameters | **fully resolved 2026-08-16** — SF, BW **and CR** measured for all nine valid presets |
 
 **2026-08-16 — item 6 is now measured, and the estimate in it was wrong.** Writing each preset to a stock node and reading back what it programmed gives spreading factor and bandwidth for **all nine valid presets**, committed as `tests/captures/modem_presets.json` and cross-checked against `meshtastic/core/airtime.rs` by a test that would fail if the symbol-time formula were accidentally right at only one spreading factor.
 
 **There were never sixteen presets to find — there are eight.** Presets 2 and 10–16 report `name=Invalid` and **silently serve LongFast parameters**, so a node set to an out-of-range preset does not fail, it quietly runs LongFast. That is worth more than the table it corrects, because a mismatch under those settings would otherwise be attributed to almost anything else.
 
-**Coding rate is the one part still open**, and deliberately left `null` rather than inferred. The node never reports it, and the reported bitrate will not invert to it — the ratio of bitrate to `SF·BW/2^SF` drifts with spreading factor, so that figure carries overhead of a shape we have not pinned. LongFast's CR4/5 is known from on-air capture and remains the only one. Settling the rest needs a receiver configured to the wrong coding rate so that failure to decode is the signal — a differential test rather than a log read.
+**Coding rate is now measured too, and L0 is complete.** Every valid preset is **4/5** — so the table varies spreading factor and bandwidth only.
+
+Getting there needed a correction first: **reception cannot reveal the coding rate.** Explicit-header mode carries the CR in the header and the receiver adopts it, so a deliberately mismatched receiver decodes anyway — demonstrated at 4/8 and 4/6. That also meant LongFast's "CR 4/5" had never been measured either; it was our receiver's *setting*, recorded next to measured values and inheriting their credibility.
+
+**Timing settled it.** `header-valid` to `rx-done` is the payload airtime, and the difference between a 91-byte and a 44-byte relay cancels the constant offset of where `header-valid` fires. Residuals 0.2–4.3 ms against 4/5, all inside the 10 ms poll quantisation, with 4/6 between 27 and 328 ms away.
+
+**One new protocol fact fell out:** the carrier moves with the preset, 902.688 to 926.750 MHz, because the channel slot depends on the bandwidth. The first sweep lost eight of nine presets to that — it matched SF and BW and stayed on LongFast's frequency, where "nothing received" looks exactly like "wrong parameters".
 
 **Gate:** every item either verified with a source, or explicitly still open. No item silently promoted from "commonly asserted" to "fact". *Met.*
 

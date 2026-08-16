@@ -13,7 +13,8 @@
     "preamble_symbols": 16,
     "spreading_factor": "SF = log2((preamble_ms/1000/16) * bandwidth_hz). Bandwidth is reported outright; SF is not, and falls out of the preamble time.",
     "validated_against": "LongFast, whose SF11/BW250/CR4-5 was independently established by on-air capture. One preset with two independent derivations is what licenses the derivation for the rest.",
-    "coding_rate": "NOT REPORTED by the node and deliberately left null. The reported bitrate cannot invert to a coding rate: the ratio of reported bitrate to SF*BW/2^SF varies with SF (0.697 at SF11, 0.725 at SF7), so that figure carries packet overhead of an unknown shape. Inferring CR from it would mean assuming a formula in order to derive a fact."
+    "coding_rate": "MEASURED 2026-08-16 by timing, after establishing that reception cannot reveal it. In LoRa explicit-header mode the header carries the payload's coding rate and the receiver reconfigures from it, so a deliberately mismatched receiver decodes anyway -- demonstrated. Instead the receiver timestamps header-valid against rx-done, which is the payload airtime, and airtime is a function of the coding rate. The CR is read from the DIFFERENCE between a 91-byte and a 44-byte relay, which cancels the constant offset of where header-valid fires. Validated on LongFast, measured three times independently at 366.7, 360.0 and 370.0 ms against a 368.6 ms prediction for 4/5.",
+    "frequency": "THE CARRIER MOVES WITH THE PRESET. The reference derives the channel slot from the channel name and the number of slots available at the configured bandwidth, so each preset lands on a different frequency -- 902.688 to 926.750 MHz across the nine. A receiver that matches spreading factor and bandwidth but not frequency hears nothing, and the first attempt at this measurement lost eight of nine presets to exactly that."
   },
   "findings": {
     "valid_presets": 9,
@@ -28,7 +29,9 @@
       16
     ],
     "invalid_behaviour": "Reported as name=Invalid and silently served LongFast parameters. Preset 2 is the deprecated VERY_LONG_SLOW; 10-16 are beyond the enum.",
-    "correction": "PLAN.md previously recorded 'sixteen presets remain'. There are eight further VALID presets beyond LongFast, not sixteen."
+    "correction": "PLAN.md previously recorded 'sixteen presets remain'. There are eight further VALID presets beyond LongFast, not sixteen.",
+    "coding_rate": "ALL NINE VALID PRESETS USE CR 4/5. The preset table therefore varies only spreading factor and bandwidth; coding rate is constant. Residuals against the 4/5 prediction ranged 0.2 to 4.3 ms, all within the receiver's 10 ms polling quantisation, while the nearest alternative (4/6) was between 27 ms and 328 ms away depending on preset.",
+    "bitrate_ratio_explained": "This retroactively explains a drift recorded when CR was still unknown: the ratio of the node's reported bitrate to SF*BW/2^SF varies with spreading factor, 0.697 at SF11 against 0.725 at SF7. With coding rate now known to be constant, that drift can only be the packet-overhead term. The earlier refusal to invert the bitrate to recover CR was correct, and for the right reason."
   },
   "presets": [
     {
@@ -38,12 +41,27 @@
       "bandwidth_khz": 250.0,
       "spreading_factor": 11,
       "spreading_factor_raw": 10.9992,
-      "coding_rate": null,
+      "coding_rate": "4/5",
       "preamble_ms": 131,
       "slot_ms": 28,
       "bitrate_bytes_per_sec": 116.967873,
       "channel_num": 19,
-      "freq_mhz": 906.875
+      "freq_mhz": 906.875,
+      "coding_rate_measurement": {
+        "observed_diff_ms": 370.0,
+        "lengths_bytes": [
+          44,
+          91
+        ],
+        "predicted_ms": {
+          "4/5": 368.6,
+          "4/6": 442.4,
+          "4/7": 516.1,
+          "4/8": 589.8
+        },
+        "residual_ms": 1.4,
+        "ldro": 0
+      }
     },
     {
       "preset": 1,
@@ -52,12 +70,27 @@
       "bandwidth_khz": 125.0,
       "spreading_factor": 12,
       "spreading_factor_raw": 11.9992,
-      "coding_rate": null,
+      "coding_rate": "4/5",
       "preamble_ms": 524,
       "slot_ms": 89,
       "bitrate_bytes_per_sec": 27.01136,
       "channel_num": 26,
-      "freq_mhz": 905.312
+      "freq_mhz": 905.312,
+      "coding_rate_measurement": {
+        "observed_diff_ms": 1640.0,
+        "lengths_bytes": [
+          44,
+          91
+        ],
+        "predicted_ms": {
+          "4/5": 1638.4,
+          "4/6": 1966.1,
+          "4/7": 2293.8,
+          "4/8": 2621.4
+        },
+        "residual_ms": 1.6,
+        "ldro": 1
+      }
     },
     {
       "preset": 2,
@@ -80,12 +113,27 @@
       "bandwidth_khz": 250.0,
       "spreading_factor": 10,
       "spreading_factor_raw": 9.9882,
-      "coding_rate": null,
+      "coding_rate": "4/5",
       "preamble_ms": 65,
       "slot_ms": 17,
       "bitrate_bytes_per_sec": 216.141006,
       "channel_num": 51,
-      "freq_mhz": 914.875
+      "freq_mhz": 914.875,
+      "coding_rate_measurement": {
+        "observed_diff_ms": 205.0,
+        "lengths_bytes": [
+          44,
+          91
+        ],
+        "predicted_ms": {
+          "4/5": 204.8,
+          "4/6": 245.8,
+          "4/7": 286.7,
+          "4/8": 327.7
+        },
+        "residual_ms": 0.2,
+        "ldro": 0
+      }
     },
     {
       "preset": 4,
@@ -94,12 +142,27 @@
       "bandwidth_khz": 250.0,
       "spreading_factor": 9,
       "spreading_factor_raw": 8.9658,
-      "coding_rate": null,
+      "coding_rate": "4/5",
       "preamble_ms": 32,
       "slot_ms": 12,
       "bitrate_bytes_per_sec": 394.915253,
       "channel_num": 44,
-      "freq_mhz": 913.125
+      "freq_mhz": 913.125,
+      "coding_rate_measurement": {
+        "observed_diff_ms": 140.0,
+        "lengths_bytes": [
+          44,
+          103
+        ],
+        "predicted_ms": {
+          "4/5": 143.4,
+          "4/6": 172.0,
+          "4/7": 200.7,
+          "4/8": 229.4
+        },
+        "residual_ms": 3.4,
+        "ldro": 0
+      }
     },
     {
       "preset": 5,
@@ -108,12 +171,27 @@
       "bandwidth_khz": 250.0,
       "spreading_factor": 8,
       "spreading_factor_raw": 7.9658,
-      "coding_rate": null,
+      "coding_rate": "4/5",
       "preamble_ms": 16,
       "slot_ms": 10,
       "bitrate_bytes_per_sec": 703.92749,
       "channel_num": 74,
-      "freq_mhz": 920.625
+      "freq_mhz": 920.625,
+      "coding_rate_measurement": {
+        "observed_diff_ms": 65.0,
+        "lengths_bytes": [
+          44,
+          91
+        ],
+        "predicted_ms": {
+          "4/5": 61.4,
+          "4/6": 73.7,
+          "4/7": 86.0,
+          "4/8": 98.3
+        },
+        "residual_ms": 3.6,
+        "ldro": 0
+      }
     },
     {
       "preset": 6,
@@ -122,12 +200,27 @@
       "bandwidth_khz": 250.0,
       "spreading_factor": 7,
       "spreading_factor_raw": 6.9658,
-      "coding_rate": null,
+      "coding_rate": "4/5",
       "preamble_ms": 8,
       "slot_ms": 8,
       "bitrate_bytes_per_sec": 1239.361694,
       "channel_num": 67,
-      "freq_mhz": 918.875
+      "freq_mhz": 918.875,
+      "coding_rate_measurement": {
+        "observed_diff_ms": 35.0,
+        "lengths_bytes": [
+          44,
+          91
+        ],
+        "predicted_ms": {
+          "4/5": 33.3,
+          "4/6": 39.9,
+          "4/7": 46.6,
+          "4/8": 53.2
+        },
+        "residual_ms": 1.7,
+        "ldro": 0
+      }
     },
     {
       "preset": 7,
@@ -136,12 +229,27 @@
       "bandwidth_khz": 125.0,
       "spreading_factor": 11,
       "spreading_factor_raw": 10.9992,
-      "coding_rate": null,
+      "coding_rate": "4/5",
       "preamble_ms": 262,
       "slot_ms": 48,
       "bitrate_bytes_per_sec": 49.343502,
       "channel_num": 5,
-      "freq_mhz": 902.688
+      "freq_mhz": 902.688,
+      "coding_rate_measurement": {
+        "observed_diff_ms": 905.0,
+        "lengths_bytes": [
+          44,
+          91
+        ],
+        "predicted_ms": {
+          "4/5": 901.1,
+          "4/6": 1081.3,
+          "4/7": 1261.6,
+          "4/8": 1441.8
+        },
+        "residual_ms": 3.9,
+        "ldro": 1
+      }
     },
     {
       "preset": 8,
@@ -150,12 +258,27 @@
       "bandwidth_khz": 500.0,
       "spreading_factor": 7,
       "spreading_factor_raw": 6.9658,
-      "coding_rate": null,
+      "coding_rate": "4/5",
       "preamble_ms": 4,
       "slot_ms": 8,
       "bitrate_bytes_per_sec": 2478.723389,
       "channel_num": 49,
-      "freq_mhz": 926.75
+      "freq_mhz": 926.75,
+      "coding_rate_measurement": {
+        "observed_diff_ms": 15.0,
+        "lengths_bytes": [
+          44,
+          91
+        ],
+        "predicted_ms": {
+          "4/5": 16.6,
+          "4/6": 20.0,
+          "4/7": 23.3,
+          "4/8": 26.6
+        },
+        "residual_ms": 1.6,
+        "ldro": 0
+      }
     },
     {
       "preset": 9,
@@ -164,12 +287,27 @@
       "bandwidth_khz": 500.0,
       "spreading_factor": 11,
       "spreading_factor_raw": 10.9882,
-      "coding_rate": null,
+      "coding_rate": "4/5",
       "preamble_ms": 65,
       "slot_ms": 17,
       "bitrate_bytes_per_sec": 233.935745,
       "channel_num": 13,
-      "freq_mhz": 908.75
+      "freq_mhz": 908.75,
+      "coding_rate_measurement": {
+        "observed_diff_ms": 180.0,
+        "lengths_bytes": [
+          44,
+          91
+        ],
+        "predicted_ms": {
+          "4/5": 184.3,
+          "4/6": 221.2,
+          "4/7": 258.0,
+          "4/8": 294.9
+        },
+        "residual_ms": 4.3,
+        "ldro": 0
+      }
     },
     {
       "preset": 10,

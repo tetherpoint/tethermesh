@@ -1084,8 +1084,15 @@ fn emit_conformance_frame_for_the_bench() {
     // A node number that is obviously ours, so anything that receives it
     // cannot be confused with real bench traffic.
     const FROM: u32 = 0x7e57_0001;
-    const ID: u32 = 0x0bad_c0de;
     const TEXT: &[u8] = b"tethermesh-conformance-1";
+    // Overridable, like NI_ID / TR_ID / DM_ID. This emitter was the only one
+    // without an override, which made it single-use: a repeated (from, id) is
+    // silently dropped by their duplicate suppression, and a resend with a
+    // stale id is indistinguishable from a frame that never arrived. That has
+    // cost this project two debugging cycles on the other emitters.
+    let id: u32 = std::env::var("CONF_ID").ok()
+        .and_then(|v| u32::from_str_radix(v.trim_start_matches("0x"), 16).ok())
+        .unwrap_or(0x0bad_c0de);
 
     let Psk::Aes128(key) = expand_psk(&[0x01]).unwrap() else { panic!() };
 
@@ -1100,7 +1107,7 @@ fn emit_conformance_frame_for_the_bench() {
     let header = Header {
         to: 0xFFFF_FFFF,
         from: FROM,
-        id: ID,
+        id,
         hop_limit: 3,
         hop_start: 3,
         channel: channel_hash(b"LongFast", &key),
@@ -2561,6 +2568,21 @@ fn every_measured_modem_preset_agrees_with_our_airtime_model() {
         // Airtime must be computable and sane at the largest legal payload.
         let at = params.airtime_us(frame::MAX_PAYLOAD as u16).expect("airtime");
         assert!(at > modelled_pre_us, "airtime must exceed its own preamble");
+
+        // Coding rate, measured 2026-08-16 by timing rather than assumed. Every
+        // valid preset came back 4/5, so the preset table varies spreading
+        // factor and bandwidth only. If a future capture ever shows otherwise
+        // this must fail rather than quietly average out.
+        assert!(
+            block.contains("\"coding_rate\": \"4/5\""),
+            "SF{sf} BW{bw_khz}kHz: fixture no longer records CR 4/5. Every preset \
+             measured 4/5; a different value is a finding to adjudicate, not a \
+             constant to update"
+        );
+        assert_eq!(
+            ModemParams::LONGFAST.coding_rate, 1,
+            "LONGFAST must stay at the measured 4/5 (coding_rate index 1)"
+        );
         checked += 1;
     }
 

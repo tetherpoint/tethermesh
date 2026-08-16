@@ -57,6 +57,7 @@
 #include "driver/uart.h"
 #include "driver/uart_vfs.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -106,6 +107,12 @@ static const char *TAG = "sniff";
 #define IRQ_TIMEOUT   (1u << 9)
 #define IRQ_HDR_ERR   (1u << 5)
 #define IRQ_TX_DONE   (1u << 0)
+/* Header-valid fires PART WAY THROUGH a packet, once the LoRa header has been
+ * decoded. The interval from there to rx-done is the payload airtime, and
+ * payload airtime is a function of the coding rate -- which is otherwise
+ * unobservable, because in explicit-header mode the header carries the CR and
+ * the receiver silently adopts it. Timing is the only route left. */
+#define IRQ_HDR_VALID (1u << 4)
 
 static spi_device_handle_t spi;
 
@@ -223,6 +230,14 @@ static uint8_t rx_cr   = 0x01;
 static uint8_t rx_hdr  = 0x00;   /* 0 explicit, 1 implicit */
 static uint8_t rx_len  = 0xFF;
 static uint8_t rx_ldro = 0x00;
+/* Operating frequency in Hz. NOT a constant, because it is not constant: the
+ * reference derives the channel slot from the channel name AND the number of
+ * slots available at the configured bandwidth, so CHANGING THE MODEM PRESET
+ * MOVES THE FREQUENCY. Measured across the nine valid presets it ranges from
+ * 902.688 to 926.750 MHz. A receiver that sets spreading factor and bandwidth
+ * but leaves the frequency alone hears nothing, and "nothing received" looks
+ * identical to "the parameters are wrong" -- which cost one sweep. */
+static uint32_t rx_freq_hz = 906875000u;
 
 static const uint8_t rxcont_[3] = { 0xFF, 0xFF, 0xFF };
 
@@ -231,6 +246,12 @@ static void radio_apply_rx(void)
 {
     uint8_t sb = 0x00;
     sx_cmd(CMD_SET_STANDBY, &sb, 1);
+    /* 2^25 / 32 MHz = 1.048576 steps per Hz, per the SX126x datasheet. */
+    uint32_t frf = (uint32_t)(((uint64_t)rx_freq_hz << 25) / 32000000ull);
+    uint8_t fb[4] = { (uint8_t)(frf >> 24), (uint8_t)(frf >> 16),
+                      (uint8_t)(frf >> 8),  (uint8_t)frf };
+    sx_cmd(CMD_SET_RF_FREQUENCY, fb, 4);
+
     uint8_t mod[4] = { rx_sf, rx_bw, rx_cr, rx_ldro };
     sx_cmd(CMD_SET_MODULATION_PARAMS, mod, 4);
     uint8_t pkt[6] = { 0x00, 0x10, rx_hdr, rx_len, 0x01, 0x00 };
@@ -238,8 +259,9 @@ static void radio_apply_rx(void)
     uint8_t clr[2] = { 0xFF, 0xFF };
     sx_cmd(CMD_CLR_IRQ_STATUS, clr, 2);
     sx_cmd(CMD_SET_RX, (uint8_t *)rxcont_, 3);
-    printf("MODOK sf=%u bw=0x%02X cr=%u hdr=%u len=%u ldro=%u\n",
-           rx_sf, rx_bw, rx_cr, rx_hdr, rx_len, rx_ldro);
+    printf("MODOK sf=%u bw=0x%02X cr=%u hdr=%u len=%u ldro=%u freq=%lu\n",
+           rx_sf, rx_bw, rx_cr, rx_hdr, rx_len, rx_ldro,
+           (unsigned long)rx_freq_hz);
     fflush(stdout);
 }
 
@@ -411,7 +433,8 @@ void app_main(void)
     /* TX_DONE must be in the mask too. SetDioIrqParams' first field ENABLES
      * events; an event outside the mask never latches in the IRQ status
      * register, so a transmit completes silently and reads as a failure. */
-    uint16_t mask = IRQ_RX_DONE | IRQ_CRC_ERR | IRQ_TIMEOUT | IRQ_HDR_ERR | IRQ_TX_DONE;
+    uint16_t mask = IRQ_RX_DONE | IRQ_CRC_ERR | IRQ_TIMEOUT | IRQ_HDR_ERR | IRQ_TX_DONE
+                  | IRQ_HDR_VALID;
     uint8_t irq[8] = { (uint8_t)(mask >> 8), (uint8_t)mask,
                        (uint8_t)(mask >> 8), (uint8_t)mask, 0, 0, 0, 0 };
     sx_cmd(CMD_SET_DIO_IRQ_PARAMS, irq, 8);
@@ -442,8 +465,8 @@ void app_main(void)
                     /* MOD <sf> <bw> <cr> <hdr> <len> -- decimal, except bw and
                      * len which accept 0x.. as well. Missing trailing fields
                      * keep their current value. */
-                    unsigned v[6]; int got = 0; const char *q = line + 4;
-                    while (got < 6 && *q) {
+                    unsigned v[7]; int got = 0; const char *q = line + 4;
+                    while (got < 7 && *q) {
                         while (*q == ' ') q++;
                         if (!*q) break;
                         unsigned base = 10;
@@ -464,6 +487,7 @@ void app_main(void)
                         if (got >= 4) rx_hdr = v[3] ? 1 : 0;
                         if (got >= 5) rx_len = (uint8_t)v[4];
                         if (got >= 6) rx_ldro = v[5] ? 1 : 0;
+                        if (got >= 7 && v[6] > 100000000u) rx_freq_hz = v[6];
                         radio_apply_rx();
                     } else {
                         printf("MODBAD\n"); fflush(stdout);
@@ -522,7 +546,17 @@ void app_main(void)
             uint8_t clr[2] = { s[0], s[1] };
             sx_cmd(CMD_CLR_IRQ_STATUS, clr, 2);
 
+            /* Stamp the header, but DO NOT re-arm on it: header-valid arrives
+             * mid-packet, and SET_RX here would abort the reception that is
+             * still in progress and lose the frame. Only a completed packet
+             * re-arms, below. Clearing the IRQ status is safe -- it does not
+             * touch the receiver state machine. */
+            static int64_t hdr_us = 0;
+            if (flags & IRQ_HDR_VALID) hdr_us = esp_timer_get_time();
+
             if (flags & IRQ_RX_DONE) {
+                int64_t payload_us = hdr_us ? (esp_timer_get_time() - hdr_us) : -1;
+                hdr_us = 0;
                 uint8_t bs[2] = {0};
                 sx_read(CMD_GET_RX_BUFFER_STATUS, bs, 2);
                 uint8_t len = bs[0], off = bs[1];
@@ -539,16 +573,19 @@ void app_main(void)
                  * we are trying to learn, and a sniffer that assumes it cannot
                  * discover it. CRC state is reported so a bad frame is never
                  * mistaken for a good one. */
-                printf("RAWFRAME %lu len=%u rssi=%d snr=%d crc=%s hex=",
+                printf("RAWFRAME %lu len=%u rssi=%d snr=%d crc=%s payus=%lld hex=",
                        (unsigned long)(++n), len, rssi, snr,
-                       (flags & IRQ_CRC_ERR) ? "BAD" : "ok");
+                       (flags & IRQ_CRC_ERR) ? "BAD" : "ok", (long long)payload_us);
                 for (int i = 0; i < len; i++) printf("%02x", buf[i]);
                 printf("\n");
                 fflush(stdout);
             } else if (flags & (IRQ_HDR_ERR | IRQ_CRC_ERR)) {
                 ESP_LOGW(TAG, "irq=%04X (header or CRC error)", flags);
+                hdr_us = 0;
             }
-            sx_cmd(CMD_SET_RX, rxcont, 3);     /* re-arm */
+            if (flags & (IRQ_RX_DONE | IRQ_HDR_ERR | IRQ_CRC_ERR | IRQ_TIMEOUT)) {
+                sx_cmd(CMD_SET_RX, rxcont, 3);     /* re-arm, packet finished */
+            }
         }
         /* One TICK, not pdMS_TO_TICKS(5). At the default 100 Hz tick rate
          * pdMS_TO_TICKS(5) rounds to ZERO, and vTaskDelay(0) does not yield —

@@ -266,7 +266,28 @@ These are commonly asserted in secondary descriptions and are **not** confirmed 
 
 **Method, and why SF is trustworthy when the node never reports it.** Bandwidth is stated outright at boot. SF is not — it falls out of the preamble time, since sixteen preamble symbols give `T_sym = preamble_ms / 16` and `2^SF = T_sym × BW`. At LongFast that yields SF11, which **on-air capture had already established independently**. One preset with two independent derivations is what licenses the derivation for the other eight. All nine are cross-checked against `meshtastic/core/airtime.rs` by a committed test.
 
-**Coding rate is still unmeasured, and is recorded as `null` rather than guessed.** The node does not report it, and the reported bitrate cannot be inverted to recover it: the ratio of bitrate to `SF·BW/2^SF` drifts with spreading factor — 0.697 at SF11, 0.725 at SF7 — so that figure carries packet overhead of a shape this project has not established. Inferring CR from it would mean assuming a formula in order to manufacture a fact, which is the error this document exists to prevent. **LongFast's CR4/5 is known from on-air capture and is the only one.** Settling the rest needs a receiver deliberately configured to the wrong coding rate, since it will fail to decode — a differential test, not a log read.
+**Coding rate — MEASURED 2026-08-16, and it is `4/5` on every valid preset.** So the preset table varies **spreading factor and bandwidth only**; coding rate is constant across all nine.
+
+| | LongFast | LongSlow | MedSlow | MedFast | ShortSlow | ShortFast | LongMod | ShortTurbo | LongTurbo |
+|---|---|---|---|---|---|---|---|---|---|
+| CR | 4/5 | 4/5 | 4/5 | 4/5 | 4/5 | 4/5 | 4/5 | 4/5 | 4/5 |
+| residual | 1.4 | 1.6 | 0.2 | 3.4 | 3.6 | 1.7 | 3.9 | 1.6 | 4.3 ms |
+
+**Reception cannot reveal the coding rate, and the earlier record wrongly implied it had.** In explicit-header mode the header carries the payload's CR, is itself sent at a fixed 4/8, and the receiver reconfigures from it. Demonstrated: a receiver deliberately set to 4/8 and to 4/6 decoded the same frames `crc=ok` at matched SF and BW. So `on_air_frames.json`'s "CR 4/5" was our *receiver's setting*, not a measurement — corrected in that file.
+
+**What worked was timing.** The receiver timestamps `header-valid` against `rx-done`, which is the payload airtime, and airtime is a function of the coding rate. The CR is read from the **difference between a 91-byte and a 44-byte relay**, which cancels the constant offset of wherever `header-valid` fires. Residuals against the 4/5 prediction ran 0.2–4.3 ms — all inside the receiver's 10 ms polling quantisation — while the nearest alternative, 4/6, sat between 27 ms and 328 ms away depending on preset. LongFast was measured three times independently (366.7, 360.0, 370.0 ms against 368.6 predicted).
+
+**This settles a drift recorded while CR was unknown.** The ratio of the node's reported bitrate to `SF·BW/2^SF` varies with spreading factor — 0.697 at SF11, 0.725 at SF7. With CR now known to be constant, that drift can only be the packet-overhead term. The earlier refusal to invert the bitrate to recover CR was correct, and for the right reason.
+
+**And a fact that was not previously recorded at all: THE CARRIER MOVES WITH THE PRESET.** The channel slot derives from the channel name *and the number of slots available at the configured bandwidth*, so each preset lands on a different frequency — 902.688 MHz (LongMod) to 926.750 MHz (ShortTurbo). A receiver matching spreading factor and bandwidth but not frequency hears nothing, and "nothing received" is indistinguishable from "wrong parameters". The first attempt at this measurement lost eight of nine presets to exactly that.
+
+| preset | freq MHz | | preset | freq MHz |
+|---|---|---|---|---|
+| LongFast | 906.875 | | ShortFast | 918.875 |
+| LongSlow | 905.312 | | LongMod | 902.688 |
+| MediumSlow | 914.875 | | ShortTurbo | 926.750 |
+| MediumFast | 913.125 | | LongTurbo | 908.750 |
+| ShortSlow | 920.625 | | | |
 7. **Contention window** — **PARTIALLY RESOLVED 2026-08-16.** Three properties measured, one still open. Record in `tests/captures/contention_window.json`; 33 relays observed off a stock node.
 
    **Settled:**
