@@ -1,0 +1,127 @@
+{
+  "corpus": "on_air_frames",
+  "boundary": "raw LoRa PHY payload, captured by our own SX1262 receiver",
+  "provenance": {
+    "captured": "2026-08-16",
+    "transmitter": "Heltec V3, stock Meshtastic 2.7.26.54e0d8d, US/LongFast, tx_power 10 dBm",
+    "receiver": "Heltec V3 running bench/firmware/heltec_v3_sniffer \u2014 an independently written SX1262 driver, from the SX126x datasheet's documented command set",
+    "radio": "906.875 MHz, SF11, BW 250 kHz, CR 4/5, preamble 16, sync word registers 0x24 0xB4",
+    "note": "Our nodes, our channel, our own text. Publishable under TESTING.md. No third-party traffic.",
+    "clean_room_note": "The receiver's driver is our own work. No GPL radio library is linked or consulted; see README.md for the boundary and tools/check_cleanroom.sh for the gate that enforces it."
+  },
+  "header_layout": {
+    "size": 16,
+    "fields": [
+      {
+        "offset": 0,
+        "size": 4,
+        "name": "to",
+        "encoding": "u32 little-endian"
+      },
+      {
+        "offset": 4,
+        "size": 4,
+        "name": "from",
+        "encoding": "u32 little-endian"
+      },
+      {
+        "offset": 8,
+        "size": 4,
+        "name": "id",
+        "encoding": "u32 little-endian"
+      },
+      {
+        "offset": 12,
+        "size": 1,
+        "name": "flags",
+        "encoding": "bits 0-2 hop_limit, bit 3 want_ack, bit 4 via_mqtt, bits 5-7 hop_start"
+      },
+      {
+        "offset": 13,
+        "size": 1,
+        "name": "channel",
+        "encoding": "one-byte channel hash"
+      },
+      {
+        "offset": 14,
+        "size": 1,
+        "name": "next_hop",
+        "encoding": "low byte of node number, 0 = none"
+      },
+      {
+        "offset": 15,
+        "size": 1,
+        "name": "relay_node",
+        "encoding": "low byte of relaying node number"
+      }
+    ]
+  },
+  "crypto": {
+    "cipher": "AES-128-CTR",
+    "key": "expanded PSK; default channel uses d4f1bb3a20290759f0bcffabcf4e6901",
+    "nonce": "packet_id (u64 little-endian) || from (u32 little-endian) || extra_nonce (u32 little-endian)",
+    "counter": "the 16-byte nonce is the initial CTR block, incremented as a 128-bit big-endian integer"
+  },
+  "frames": [
+    {
+      "raw_hex": "ffffffff64e76933432397ea63080064b430ebeecaa9adc2077085ba93c0f1035eea57",
+      "len": 35,
+      "header": {
+        "to": 4294967295,
+        "from": 862578532,
+        "id": 3935773507,
+        "flags": 99,
+        "hop_limit": 3,
+        "want_ack": false,
+        "via_mqtt": false,
+        "hop_start": 3,
+        "channel": 8,
+        "next_hop": 0,
+        "relay_node": 100
+      },
+      "ciphertext_hex": "b430ebeecaa9adc2077085ba93c0f1035eea57",
+      "plaintext_hex": "0801120d736e6966662d70726f62652d304800",
+      "plaintext_note": "Data{portnum=1 TEXT_MESSAGE_APP, payload='sniff-probe-N', bitfield=0}"
+    },
+    {
+      "raw_hex": "ffffffff64e7693344bf3bb2630800644a7e017e592fe266c6ba7b3a3a1740e701a1b8",
+      "len": 35,
+      "header": {
+        "to": 4294967295,
+        "from": 862578532,
+        "id": 2990260036,
+        "flags": 99,
+        "hop_limit": 3,
+        "want_ack": false,
+        "via_mqtt": false,
+        "hop_start": 3,
+        "channel": 8,
+        "next_hop": 0,
+        "relay_node": 100
+      },
+      "ciphertext_hex": "4a7e017e592fe266c6ba7b3a3a1740e701a1b8",
+      "plaintext_hex": "0801120d736e6966662d70726f62652d314800",
+      "plaintext_note": "Data{portnum=1 TEXT_MESSAGE_APP, payload='sniff-probe-N', bitfield=0}"
+    },
+    {
+      "raw_hex": "ffffffff64e769334537c29a63080064dfbe442faa198cbb7e1ea6bbb84ea7ecd49812",
+      "len": 35,
+      "header": {
+        "to": 4294967295,
+        "from": 862578532,
+        "id": 2596419397,
+        "flags": 99,
+        "hop_limit": 3,
+        "want_ack": false,
+        "via_mqtt": false,
+        "hop_start": 3,
+        "channel": 8,
+        "next_hop": 0,
+        "relay_node": 100
+      },
+      "ciphertext_hex": "dfbe442faa198cbb7e1ea6bbb84ea7ecd49812",
+      "plaintext_hex": "0801120d736e6966662d70726f62652d324800",
+      "plaintext_note": "Data{portnum=1 TEXT_MESSAGE_APP, payload='sniff-probe-N', bitfield=0}"
+    }
+  ]
+}

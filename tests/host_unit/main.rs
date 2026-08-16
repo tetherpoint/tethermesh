@@ -12,6 +12,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use tethermesh::channel::channel_hash;
+use tethermesh::header::{Header, HEADER_LEN};
 use tethermesh::history::{PacketHistory, Seen};
 use tethermesh::message::{ChannelSettings, Data, PortNum, User};
 use tethermesh::packet_id::{NextId, PacketIdSource};
@@ -749,4 +750,104 @@ fn repeats_do_not_keep_an_entry_alive() {
         h.observe(2, id);
     }
     assert!(!h.contains(1, 0), "a repeated entry outlived its age");
+}
+
+/// The header codec against REAL captured frames.
+///
+/// These bytes came off the air from a stock Meshtastic node, so this is the
+/// one test in the suite that can catch an endianness or bit-position error.
+/// A round-trip against our own encoder cannot: it would agree with itself
+/// perfectly while being wrong on the wire.
+#[test]
+fn header_decodes_and_re_encodes_real_captured_frames() {
+    let doc = fs::read_to_string(captures_dir().join("on_air_frames.json"))
+        .expect("cannot read on_air_frames.json");
+    let raws: Vec<&str> = {
+        let mut v = Vec::new();
+        let mut from = 0usize;
+        while let Some(hit) = doc[from..].find("\"raw_hex\"") {
+            let abs = from + hit;
+            if let Some(s) = json_str(&doc[abs..], "raw_hex") {
+                v.push(s);
+            }
+            from = abs + 9;
+        }
+        v
+    };
+    assert!(raws.len() >= 3, "expected at least 3 captured frames, found {}", raws.len());
+
+    for (i, hex) in raws.iter().enumerate() {
+        let frame = hex_to_bytes(hex);
+        assert!(frame.len() > HEADER_LEN, "frame {i} is shorter than a header");
+
+        let h = Header::decode(&frame).expect("failed to decode a real frame");
+
+        // Cross-checks against facts established by other means entirely.
+        assert!(h.is_broadcast(), "frame {i}: captured frames were broadcasts");
+        assert_eq!(h.from, 0x3369_e764, "frame {i}: sender does not match the transmitting board");
+        assert_eq!(h.channel, 0x08, "frame {i}: channel hash should be LongFast's verified 0x08");
+        assert_eq!(
+            h.relay_node,
+            (h.from & 0xFF) as u8,
+            "frame {i}: relay_node must be the low byte of the sender"
+        );
+        assert_eq!(h.hop_limit, 3, "frame {i}: hop_limit was set to 3 when transmitting");
+        assert_eq!(h.hop_start, 3, "frame {i}: hop_start should match the original hop_limit");
+        assert!(!h.want_ack);
+        assert!(!h.via_mqtt);
+        assert_eq!(h.next_hop, 0);
+
+        // And byte-exact back out again.
+        assert_eq!(
+            h.encode()[..],
+            frame[..HEADER_LEN],
+            "frame {i} did not re-encode to the captured bytes"
+        );
+    }
+}
+
+/// Endianness is the error this catches, so state it as its own assertion.
+#[test]
+fn multibyte_header_fields_are_little_endian() {
+    let frame = hex_to_bytes("ffffffff64e76933432397ea63080064");
+    let h = Header::decode(&frame).unwrap();
+    assert_eq!(h.from, 0x3369_e764, "from is little-endian on the wire");
+    assert_eq!(h.id, 0xea97_2343, "id is little-endian on the wire");
+    // Big-endian would have produced these, and they are what a plausible
+    // wrong implementation returns.
+    assert_ne!(h.from, 0x64e7_6933);
+    assert_ne!(h.id, 0x4323_97ea);
+}
+
+#[test]
+fn relaying_spends_one_hop_and_preserves_the_originators_channel() {
+    let frame = hex_to_bytes("ffffffff64e76933432397ea63080064");
+    let h = Header::decode(&frame).unwrap();
+
+    let relayed = h.relayed_by(0x336a_0d28).expect("3 hops left, should relay");
+    assert_eq!(relayed.hop_limit, 2, "one hop should have been spent");
+    assert_eq!(relayed.hop_start, 3, "hop_start must not change on relay");
+    assert_eq!(relayed.relay_node, 0x28, "relay_node becomes OUR low byte");
+    assert_eq!(
+        relayed.channel, 0x08,
+        "the ORIGINATOR's channel hash must survive relay — observed behaviour, \
+         and what carriage of foreign traffic depends on"
+    );
+    assert_eq!(relayed.from, h.from, "from must not become the relay");
+    assert_eq!(relayed.id, h.id);
+}
+
+#[test]
+fn a_spent_packet_is_not_relayed() {
+    let mut h = Header::decode(&hex_to_bytes("ffffffff64e76933432397ea63080064")).unwrap();
+    h.hop_limit = 0;
+    assert!(h.relayed_by(0x336a_0d28).is_none(), "hop_limit 0 must not be forwarded");
+}
+
+#[test]
+fn a_short_frame_is_rejected_rather_than_read_past() {
+    for n in 0..HEADER_LEN {
+        assert!(Header::decode(&vec![0u8; n]).is_none(), "accepted a {n}-byte header");
+    }
+    assert!(Header::decode(&[0u8; HEADER_LEN]).is_some());
 }

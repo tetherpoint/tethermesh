@@ -1,6 +1,6 @@
 # WIRE_REFERENCE — Meshtastic on-air facts
 
-**Status: v2, 2026-08-15. P0 deliverable, partially complete — read the UNVERIFIED section before writing any codec.** v2 adds a section of facts verified by observing a pinned local oracle, resolves the channel hash, and corrects an assumption about what a local oracle can show.
+**Status: v3, 2026-08-16. P0 deliverable, partially complete — read the UNVERIFIED section before writing any codec.** v3 adds on-air capture from real hardware: the 16-byte header layout, the AES-CTR nonce, the sync word and LongFast's modem parameters are all resolved, and the load-bearing relay assumption is settled. **Only the PKI/DM details remain open.**
 
 This is the single source of truth for what tethermesh puts on and takes off the air. Every claim is sourced. Where this document disagrees with any secondary description of the Meshtastic protocol — including widely repeated ones — this document wins, because those descriptions were checked and several were stale.
 
@@ -148,16 +148,78 @@ Small, and it matters where it lands: duty-cycle accounting and the contention w
 
 ---
 
+## VERIFIED — from on-air capture, 2026-08-16
+
+**Items 1, 2, 5 and 6 are resolved.** A Heltec V3 running stock Meshtastic `2.7.26.54e0d8d` transmitted; a second Heltec ran our own SX1262 receiver — written from the datasheet, not RadioLib — and printed the PHY payload verbatim. Frames and decodes in `tests/captures/on_air_frames.json`.
+
+That the frames arrived at all resolves two items by construction: **nothing decodes without the right sync word and the right modem parameters.**
+
+### Item 5 — sync word
+
+**Registers `0x0740 = 0x24`, `0x0741 = 0xB4`.** This is the expansion of the commonly quoted API-level `0x2B`, and it is now confirmed on air rather than assumed: a receiver programmed with these values decodes stock traffic.
+
+### Item 6 — modem parameters, for LongFast
+
+**SF 11, BW 250 kHz, CR 4/5, preamble 16 symbols, explicit header, CRC on, standard IQ**, at 906.875 MHz. Confirmed twice over: the firmware reported them through `get_config`, and a receiver configured with them decodes real frames. Still one preset of seventeen.
+
+### Item 1 — the 16-byte header
+
+```
+offset  size  field       encoding
+   0     4    to          u32 little-endian
+   4     4    from        u32 little-endian
+   8     4    id          u32 little-endian
+  12     1    flags       bits 0-2 hop_limit, bit 3 want_ack,
+                          bit 4 via_mqtt, bits 5-7 hop_start
+  13     1    channel     one-byte channel hash
+  14     1    next_hop    low byte of node number, 0 = none
+  15     1    relay_node  low byte of the relaying node's number
+```
+
+A captured frame, split at the boundary:
+
+```
+ffffffff 64e76933 432397ea 63 08 00 64 | b430ebee...
+   to      from      id     ^  ^  ^  ^
+                           flags |  | relay_node 0x64
+                              channel hash 0x08
+                                     next_hop 0
+```
+
+Every field cross-checks against something established independently. `to` is the broadcast address. `from` little-endian is `0x3369e764`, the transmitting node. `0x08` is the channel hash the verified `xor_fold` function predicts for LongFast with the default PSK. `0x64` is the low byte of `0x3369e764`, matching the `relay_node` rule. And `flags = 0x63` is `hop_limit = 3` in bits 0-2 with `hop_start = 3` in bits 5-7 — exactly the three-bits-each the proto comments describe, and exactly the `hop_limit` that was requested.
+
+**All multi-byte fields are little-endian.** Note this is the opposite of the protobuf `fixed32` byte order intuition some readers bring, and it is the single most likely thing to get silently wrong.
+
+### Item 2 — the AES-CTR nonce
+
+```
+nonce = packet_id (u64 little-endian) || from (u32 little-endian) || extra_nonce (u32 little-endian)
+```
+
+Sixteen bytes, used as the **initial CTR block and incremented as a 128-bit big-endian integer**. The draft's layout was right; the byte order and the counter semantics were not established until now.
+
+Proof is direct rather than plausible: the captured ciphertext decrypts under the default channel key to
+
+```
+0801 120d 736e6966662d70726f62652d30 4800
+```
+
+which is `Data{portnum = 1 (TEXT_MESSAGE_APP), payload = "sniff-probe-0", bitfield = 0}` — the exact text that was transmitted. Three frames, each 19 bytes of ciphertext, so the decryption spans two AES blocks and confirms the counter increment as well as the first block.
+
+**The security consequence is now concrete.** `extra_nonce` was zero in every frame observed, so the nonce is a pure function of `packet_id` and `from`. A repeated `(packet_id, sender)` pair therefore reproduces the keystream exactly — which is what makes `meshtastic/core/packet_id.rs` a security component rather than a bookkeeping one.
+
+---
+
 ## UNVERIFIED — do not write a codec against these yet
 
 These are commonly asserted in secondary descriptions and are **not** confirmed by any primary source read so far. The official "encryption technical" page is explicitly a high-level overview and omits packet-level specification.
 
-1. **The 16-byte header byte layout** — field order, endianness, and the exact flag bit positions. Only `hop_limit` (3 bits) and `hop_start` (3 bits, per the proto comment) are documentarily confirmed as living in the unencrypted header.
-2. **The AES-CTR nonce construction** — the draft's `packet_id(8) ‖ from(4) ‖ extra_nonce(4)` layout and the 4-byte counter size.
+1. ~~**The 16-byte header byte layout**~~ — **RESOLVED 2026-08-16** by on-air capture, above.
+2. ~~**The AES-CTR nonce construction**~~ — **RESOLVED 2026-08-16** by decrypting captured frames to known plaintext, above.
 3. ~~**The channel hash function**~~ — **RESOLVED 2026-08-15** by oracle observation, above. It is `xor_fold(name) ^ xor_fold(psk)`.
 4. **The PKI/DM scheme details** — the docs confirm Curve25519 with "encryption and digital signatures" and mention "AES-CTR or AES-CCM" for admin session keys, but not the DM KDF, tag size, or where the extra nonce travels.
-5. **The raw sync-word register value a receiver must be programmed with.** The commonly quoted `0x2B` is a library API-level value that gets expanded into a register pair by the driver beneath it; a different radio family's register model will differ. Nothing read so far pins the on-air value itself.
-6. **Preset SF/BW/CR parameters.** The enum names are confirmed; the numeric parameters behind each are not, and with 17 presets including 62.5 kHz and 20 kHz variants the draft's 7-row table cannot be complete.
+5. ~~**The raw sync-word register value**~~ — **RESOLVED 2026-08-16**: `0x0740 = 0x24`, `0x0741 = 0xB4`, confirmed by decoding real traffic.
+6. **Preset SF/BW/CR parameters** — **LongFast resolved** (SF11 / BW250 / CR4/5); sixteen presets remain, including the 62.5 kHz and 20 kHz variants.
 
 **Resolving these needs either an authoritative byte-level document or a first capture.** Item 3 is now resolved. Items 1 and 2 remain, and the route to them is narrower than this document previously assumed.
 

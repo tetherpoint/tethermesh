@@ -54,7 +54,15 @@ It is a **counter, not a CSPRNG draw**, which is a deliberate departure from the
 
 The hard part is restart, and the resolution is a **high-water mark persisted ahead of use, in blocks**: identifiers are only ever issued below a value already durably stored, so a power loss can lose the unissued remainder of a block and never an identifier that was actually used. One write per block instead of one per packet, which matters on flash with a finite erase budget. The API returns `PersistFirst` instead of an identifier when the mark must be written, so the obligation cannot be skipped by accident. Exhaustion is reported rather than wrapped — a node that stops identifying packets is visibly broken, which beats one that quietly starts leaking plaintext XORs.
 
-**Gate:** a real captured frame decrypts to parseable payload bytes.
+**2026-08-16 — the gate is MET, and the phase is unblocked end to end.** A stock node transmitted; a second Heltec running our own SX1262 driver (written from the datasheet, not RadioLib) captured the PHY payload; the ciphertext decrypts under the default channel key to `Data{portnum=1, payload="sniff-probe-0"}` — the exact text sent.
+
+That single capture resolved four open L0 items at once. The 16-byte header layout and the AES-CTR nonce were read off real frames. The sync word and LongFast's modem parameters were confirmed by construction, since nothing decodes without them.
+
+`meshtastic/core/header.rs` implements pack and unpack, tested against the captured frames rather than against itself — the distinction matters, because a big-endian header round-trips through its own encoder perfectly and is wrong only on the air. Both that error and a flag-bit misplacement were observed red.
+
+**Still to build here:** AES-128-CTR, and PSK index expansion. The nonce construction is now specified exactly, and the captured frames are known-answer vectors for it.
+
+**Gate:** a real captured frame decrypts to parseable payload bytes. *Met.*
 
 ## L3 — protobuf codec
 

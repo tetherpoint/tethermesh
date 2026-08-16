@@ -57,6 +57,15 @@ Per the rule above, recorded rather than claimed:
 | `packet_id` non-repeat across reboot | issued identifiers before the high-water mark was durable — the RAM-only-counter bug | `4 identifiers issued, 1 distinct` |
 | duplicate suppression, key | keyed on `id` alone, ignoring `from` | a second sender's identical id read as a duplicate |
 | duplicate suppression, recording | reported `New` but never stored the entry | 5 failures, including eviction ordering |
+| header codec, endianness | read multi-byte fields big-endian | `sender does not match the transmitting board` |
+| header codec, flag bits | read `hop_start` from bits 3-5 instead of 5-7 | `hop_start should match the original hop_limit` |
+
+The header rows are the ones that justify capturing real frames at all. A
+big-endian header round-trips through our own encoder perfectly — it is only
+wrong against the air. Nothing but captured bytes can catch that, which is
+why `header_decodes_and_re_encodes_real_captured_frames` compares against
+traffic a stock node actually transmitted rather than against anything we
+produced.
 
 The `packet_id` row is the domain red list's *"`packet_id` must **not** repeat
 across a simulated reboot"*, and it is worth noting what the broken version
