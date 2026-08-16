@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 The tethermesh Authors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # Hardware crypto accelerators: what each part actually covers
 
 **2026-08-16.** `meshtastic/core/backend.rs` lets an implementer route any subset of the crate's cryptographic primitives onto silicon. This document records which parts cover which primitive, **how confident each claim is**, and which document would settle it. It follows the convention of `docs/FORMAL-VERIFICATION.md`: the point is to separate what was verified from what is believed, because a confident summary of an accelerator's feature list is exactly the kind of claim that is stale as often as not.

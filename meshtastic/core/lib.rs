@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The tethermesh Authors
+// SPDX-License-Identifier: Apache-2.0
+
 //! tethermesh — a clean-room Meshtastic-compatible stack.
 //!
 //! Read `meshtastic/WIRE_REFERENCE.md` before adding anything to this crate.

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The tethermesh Authors
+// SPDX-License-Identifier: Apache-2.0
+
 //! Per-message wrappers.
 //!
 //! [`crate::protobuf`] handles the wire format and knows nothing about any

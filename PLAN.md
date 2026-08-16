@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 The tethermesh Authors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # PLAN — building the stack
 
 **2026-08-14.** The roadmap for this library and nothing else. Every phase is justified on the library's own terms; if a phase cannot be, it belongs somewhere else.

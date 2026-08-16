@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 The tethermesh Authors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # What is proven, what is checked, and what is neither
 
 **2026-08-16.** Three different kinds of assurance are used in this crate and

@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 The tethermesh Authors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # The curve implementation: verified field arithmetic, our ladder
 
 **RESOLVED 2026-08-16.** The field arithmetic is now `fiat-crypto`'s —

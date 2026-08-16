@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The tethermesh Authors
+// SPDX-License-Identifier: Apache-2.0
+
 //! Packet identifiers, and why they are a security concern rather than hygiene.
 //!
 //! # The problem

@@ -1,6 +1,58 @@
-# Licensing options — NOT DECIDED
+<!-- SPDX-FileCopyrightText: 2026 The tethermesh Authors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 
-**Status: options recorded 2026-08-14. No decision taken. No LICENSE file in the repo.**
+# Licensing — DECIDED
+
+**Status: DECIDED 2026-08-16. Apache-2.0, for code and specification alike.
+`LICENSE` and `NOTICE` are in the repo, `Cargo.toml` carries
+`license = "Apache-2.0"`, and `tools/check_spdx.sh` enforces that every file
+declares it.**
+
+## The decision, and the reasoning that settled it
+
+**Apache-2.0 for the code**, over MIT, for the reason set out below: the
+explicit patent grant. The strategy is adoption by other implementers,
+possibly commercial ones, of a *cryptographic* suite — the area where patent
+uncertainty is taken most seriously. MIT is silent there; Apache answers.
+
+**Apache-2.0 for the specification too**, rather than CC-BY-4.0, and this
+follows directly from the first choice. **CC-BY-4.0 licenses no patent rights
+at all** — it says so explicitly. Putting the spec under it would deny a patent
+grant to *precisely the adopter this project is aiming at*: the one who reads
+the specification and writes their own clean-room implementation. Choosing
+Apache-2.0 for its patent grant and then exempting the one document
+implementers actually work from would be self-defeating.
+
+Three things reinforce it:
+
+- **These "spec" files are not prose.** `meshtastic/WIRE_REFERENCE.md` carries
+  hex frames, byte-offset tables, register values, a measured preset table.
+  The argument against a code licence for documents is weakest exactly here.
+- **It removes the demarcation problem entirely.** The objection recorded
+  below — that mixed-licence repos need unambiguous boundaries and create
+  confusion when those go wrong — does not arise with one licence.
+- **It is established practice.** OCI, OpenAPI and CloudEvents all license
+  specifications under Apache-2.0.
+
+**What is given up:** Apache-2.0's vocabulary — "Source form", "Object form",
+"compilation" — genuinely does not describe a document. That is a real cost and
+it is aesthetic; it was traded against a substantive patent benefit.
+
+**Also accepted:** §4(b) requires modified files to carry change notices, so
+anyone adapting the spec must mark their changes. For a specification that is
+arguably a feature: forks stay identifiable.
+
+**And the patent pledge is kept anyway**, in `suite/README.md`. Apache §3's
+grant attaches to "the Work", and its reach over *someone read the document and
+wrote independent code* is not airtight — copyright does not restrict
+implementing a described method in the first place, which is what makes the
+grant's edges fuzzy there. Under a single Apache-2.0 the pledge is
+belt-and-braces rather than load-bearing, but it is cheap and it removes the
+residual doubt that makes a cautious implementer hesitate.
+
+---
+
+## The options as recorded 2026-08-14, kept for the reasoning
 
 What *is* settled: tethermesh will be **permissively** licensed, not copyleft. That is a decision, because the clean-room constraint depends on it — refusing GPL derivation only makes sense if the result ends up permissive. See `PLAN.md` § clean-room constraint.
 
@@ -82,6 +134,18 @@ The proposal is `LICENSE` (Apache-2.0 or MIT) for code, `LICENSE-SPEC` (CC-BY-4.
 
 ---
 
-## Not decided
+## How the recommendation changed on the way to the decision
 
-Nothing here is chosen. The recommendation on file remains **Apache-2.0 for code, CC-BY-4.0 for the spec, plus an explicit patent pledge in the spec text** to close the gap above — but it is a recommendation, and the decision gates publication only, not development.
+The recommendation on file was **Apache-2.0 for code, CC-BY-4.0 for the spec,
+plus an explicit patent pledge**. The decision kept two of those three and
+dropped the split.
+
+What changed was noticing that the CC-BY-4.0 leg *worked against* the reason
+for choosing Apache in the first place. The gap identified above — that a
+patent grant riding only on the code licence leaves a clean-room implementer
+with no assurance — is not a footnote to the split proposal. It is an argument
+against it. Closing the gap with a pledge while still splitting the licence
+would have been treating the symptom.
+
+Putting the spec under Apache-2.0 closes it structurally, and the pledge then
+covers the residue rather than doing the work alone.

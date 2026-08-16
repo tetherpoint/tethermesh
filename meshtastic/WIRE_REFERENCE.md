@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 The tethermesh Authors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # WIRE_REFERENCE — Meshtastic on-air facts
 
 **Status: v4, 2026-08-16. P0 deliverable, partially complete — read the UNVERIFIED section before writing any codec.** v3 adds on-air capture from real hardware: the 16-byte header layout, the AES-CTR nonce, the sync word and LongFast's modem parameters are all resolved, and the load-bearing relay assumption is settled. **Every item that can be settled without a second hardware generation is now settled.**

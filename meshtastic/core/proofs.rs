@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The tethermesh Authors
+// SPDX-License-Identifier: Apache-2.0
+
 //! Machine-checked proofs, run by [Kani](https://model-checking.github.io/kani/).
 //!
 //! `DISTRIBUTION.md` promises that no path can panic on hostile input, and

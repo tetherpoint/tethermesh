@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 The tethermesh Authors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # Capture corpus
 
 Fixtures the day-to-day tests run against, so that testing does not depend on the oracle being present or on it staying still. Every file names the oracle it came from; see `DEPS.md`.

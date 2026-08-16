@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The tethermesh Authors
+// SPDX-License-Identifier: Apache-2.0
+
 //! Managed flooding: the rebroadcast decision.
 //!
 //! `WIRE_REFERENCE.md` records what routing is: *"A node decrements

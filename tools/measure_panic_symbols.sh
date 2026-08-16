@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 #
+# SPDX-FileCopyrightText: 2026 The tethermesh Authors
+# SPDX-License-Identifier: Apache-2.0
+#
 # measure_panic_symbols.sh — reproduce the dependency measurements in
 # docs/CRYPTO-DEPENDENCY.md.
 #

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 The tethermesh Authors
+# SPDX-License-Identifier: Apache-2.0
+
 [submodule "third_party/libcrux"]
 	path = third_party/libcrux
 	url = https://github.com/cryspen/libcrux

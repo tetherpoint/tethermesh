@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 #
+# SPDX-FileCopyrightText: 2026 The tethermesh Authors
+# SPDX-License-Identifier: Apache-2.0
+#
 # check_docs.sh — fail the build when documentation stops describing the code.
 #
 # WHY THIS IS A GATE AND NOT A REVIEW HABIT

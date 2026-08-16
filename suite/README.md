@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 The tethermesh Authors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # suite — the extension set
 
 Extensions ride the same mesh as ordinary Meshtastic traffic, on a private PortNum (≥ 256, the range upstream reserves for exactly this). Stock nodes relay them and ignore them, so an extension travels over existing infrastructure without asking anything of it.
@@ -62,3 +65,45 @@ Two consequences worth stating plainly. A ranging exchange needs the radio to it
 ## Not in this repository
 
 Source implementations that require particular hardware — a GNSS driver, a ranging driver — are out of scope here, as is any radio driver. This repository specifies the protocol and provides a portable implementation of it. See `SCOPE.md`.
+
+---
+
+## Licence and patent pledge
+
+This specification and the reference implementation are licensed under the
+**Apache License, Version 2.0**. See `LICENSE`; the reasoning is in
+`docs/LICENSING-OPTIONS.md`.
+
+**You may implement this specification.** Independently, commercially, in any
+language, on any hardware, without permission and without notifying anyone.
+Copyright protects the expression in this document, not the protocol it
+describes, and Apache-2.0 §2 grants you the right to reproduce and adapt the
+document itself as well.
+
+### Patent non-assertion
+
+**The tethermesh Authors will not assert any patent they hold or control
+against an implementation of this specification.**
+
+This is stated separately from the licence deliberately. Apache-2.0 §3 grants a
+patent licence tied to "the Work", and its reach over someone who *reads this
+document and writes independent code* — rather than copying ours — is arguable
+rather than certain, because copyright and patent attach differently to a
+description than to an implementation. That ambiguity is exactly what makes a
+cautious implementer's legal review stall, and stalling that review defeats the
+purpose of publishing a specification at all.
+
+So the pledge is unconditional and does not depend on which licence a reader
+concludes applies to their situation. It is not a grant of trademark rights,
+and it is not a warranty: see `LICENSE` §§6-8.
+
+### On the reference implementation
+
+`tethermesh` is a clean-room implementation. It derives nothing from the
+Meshtastic firmware, its clients, its protobuf schemas, or from RadioLib — all
+GPL-3.0 — and `tools/check_cleanroom.sh` enforces that on every run. An
+implementer adopting this suite inherits no copyleft obligation from us. See
+`NOTICE`.
+
+Meshtastic is a trademark of Meshtastic LLC. This project is not affiliated
+with or endorsed by it.

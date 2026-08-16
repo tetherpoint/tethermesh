@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The tethermesh Authors
+// SPDX-License-Identifier: Apache-2.0
+
 //! Host-side tests.
 //!
 //! These run against the committed corpus in `tests/captures/` rather than

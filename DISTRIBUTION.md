@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 The tethermesh Authors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # DISTRIBUTION — language, artifacts, and what is guaranteed
 
 **Settled 2026-08-14.** Recorded before implementation, because both decisions are expensive to reverse once code and consumers exist.

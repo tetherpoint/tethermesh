@@ -1,0 +1,39 @@
+tethermesh
+Copyright 2026 The tethermesh Authors
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+this file except in compliance with the License. You may obtain a copy of the
+License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed
+under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
+
+--------------------------------------------------------------------------------
+THIRD-PARTY MATERIAL
+--------------------------------------------------------------------------------
+
+This repository vendors third-party source as git submodules under third_party/.
+Those retain their own licences and are NOT covered by the licence above. See
+DEPS.md for the pinned commit and licence of each.
+
+    third_party/fiat-crypto   MIT / Apache-2.0 / BSD-1-Clause  (LINKED)
+    third_party/libcrux       Apache-2.0 / MIT                 (not linked)
+
+--------------------------------------------------------------------------------
+CLEAN-ROOM STATEMENT
+--------------------------------------------------------------------------------
+
+tethermesh is an independent implementation. It contains no code derived from
+the Meshtastic firmware, its mobile or desktop clients, its protobuf schemas, or
+from RadioLib -- all of which are GPL-3.0. Protocol facts were established from
+published documentation, from the schemas read as specification, and from
+black-box observation of a pinned reference build and of real on-air traffic.
+tools/check_cleanroom.sh enforces that boundary on every run, over the working
+tree and over vendored submodules.
+
+Meshtastic is a trademark of Meshtastic LLC. This project is not affiliated with
+or endorsed by it.

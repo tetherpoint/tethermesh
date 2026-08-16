@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 The tethermesh Authors
+# SPDX-License-Identifier: Apache-2.0
+
 # Build artefacts
 build/
 # Cargo's build directory. Cargo.lock is NOT ignored: DISTRIBUTION.md commits

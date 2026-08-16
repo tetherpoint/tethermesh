@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 The tethermesh Authors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # tethermesh
 
 **A clean-room-built Meshtastic-compatible stack, with new extensions.**

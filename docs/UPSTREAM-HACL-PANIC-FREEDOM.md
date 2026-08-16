@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 The tethermesh Authors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # Making HACL*'s extracted Rust panic-free — analysis for upstream
 
 **2026-08-16.** Written to be usable as an upstream issue against

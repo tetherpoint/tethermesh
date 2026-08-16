@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The tethermesh Authors
+// SPDX-License-Identifier: Apache-2.0
+
 //! LoRa time-on-air, and the duty-cycle budget computed from it.
 //!
 //! L5 needs two numbers that both derive from airtime: how long a frame

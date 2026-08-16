@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The tethermesh Authors
+// SPDX-License-Identifier: Apache-2.0
+
 //! SHA-256, needed for the PKI key derivation.
 //!
 //! `WIRE_REFERENCE.md` records the direct-message KDF as SHA-256 over the raw

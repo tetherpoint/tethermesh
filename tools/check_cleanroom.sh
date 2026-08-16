@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 #
+# SPDX-FileCopyrightText: 2026 The tethermesh Authors
+# SPDX-License-Identifier: Apache-2.0
+#
 # check_cleanroom.sh — fail the build if GPL-derived material enters the tree.
 #
 # WHY THIS IS A CHECK AND NOT A POLICY NOTE
@@ -86,7 +89,13 @@ while IFS= read -r f; do
     may_name_it=0
     case "$f" in
         tools/check_cleanroom.sh) continue ;;
-        PLAN.md|README.md|docs/*|meshtastic/WIRE_REFERENCE.md) may_name_it=1 ;;
+        # suite/README.md joined this list on 2026-08-16, when the licence
+        # decision put a clean-room statement and patent pledge in it. A
+        # non-derivation statement has to NAME what it does not derive from --
+        # "we derive nothing from RadioLib" is what an adopter's legal review
+        # needs, and a circumlocution would be worse for the reader and no
+        # safer. Same category as the entries beside it.
+        PLAN.md|README.md|suite/README.md|docs/*|meshtastic/WIRE_REFERENCE.md) may_name_it=1 ;;
         # Pinned upstream code, licence recorded in DEPS.md. Not held to rules
         # about how WE write code, but it IS scanned for GPL contamination --
         # see the submodule sweep after this loop, which is where the real

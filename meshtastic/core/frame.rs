@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The tethermesh Authors
+// SPDX-License-Identifier: Apache-2.0
+
 //! Whole frames: the header and the encrypted payload, together.
 //!
 //! [`crate::header`] packs the sixteen unencrypted bytes and

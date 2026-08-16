@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 The tethermesh Authors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # host_unit — the algorithmic layer, no hardware
 
 Host tests precede device work in every phase. What belongs here is anything

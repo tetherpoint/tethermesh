@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The tethermesh Authors
+// SPDX-License-Identifier: Apache-2.0
+
 //! Channel identification.
 //!
 //! The unencrypted header carries a one-byte hash of the channel. A receiver

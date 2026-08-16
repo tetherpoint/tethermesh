@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 The tethermesh Authors
+# SPDX-License-Identifier: Apache-2.0
+
 [package]
 name = "tethermesh"
 version = "0.0.0"
@@ -7,12 +10,24 @@ edition = "2021"
 rust-version = "1.75"
 publish = false
 
-# NO `license` FIELD, DELIBERATELY.
-# docs/LICENSING-OPTIONS.md records that permissive licensing is settled but
-# the specific choice — Apache-2.0 vs MIT, and whether the specification
-# carries CC-BY-4.0 separately — is NOT. Writing one here would settle it by
-# accident, in metadata, which is exactly how such decisions get made without
-# anyone deciding them. Add it when that document is closed out.
+# DECIDED 2026-08-16: Apache-2.0, for code AND specification alike.
+#
+# docs/LICENSING-OPTIONS.md carries the reasoning. In short: the reason to
+# prefer Apache-2.0 over MIT here is its explicit patent grant, because the
+# strategy is adoption by other implementers -- possibly commercial ones -- of
+# a CRYPTOGRAPHIC suite, which is the area where patent uncertainty is taken
+# most seriously.
+#
+# The specification is under the SAME licence rather than CC-BY-4.0, and that
+# follows from the same reasoning: CC-BY-4.0 licenses no patent rights at all,
+# so putting the spec under it would deny a patent grant to precisely the
+# adopter this project is aiming at -- the one who reads the spec and writes
+# their own clean-room implementation. Choosing Apache for its patent grant and
+# then exempting the document implementers actually work from would be
+# self-defeating. It also removes the mixed-licence demarcation problem
+# entirely, and this project's "spec" files are unusually code-like: hex
+# vectors, byte offsets, register values.
+license = "Apache-2.0"
 
 # NO DEPENDENCIES IN THE SHIPPED LIBRARY, AND THAT IS A REQUIREMENT RATHER
 # THAN A CURRENT STATE. DISTRIBUTION.md commits to no code-generation

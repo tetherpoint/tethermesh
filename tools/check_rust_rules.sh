@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 #
+# SPDX-FileCopyrightText: 2026 The tethermesh Authors
+# SPDX-License-Identifier: Apache-2.0
+#
 # check_rust_rules.sh — enforce the crate-level rules DISTRIBUTION.md commits to.
 #
 # WHY THESE ARE CHECKED AND NOT TRUSTED

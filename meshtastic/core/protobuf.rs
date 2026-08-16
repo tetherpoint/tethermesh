@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The tethermesh Authors
+// SPDX-License-Identifier: Apache-2.0
+
 //! Protobuf wire format — the primitives, hand-written.
 //!
 //! # Why hand-written

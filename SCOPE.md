@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 The tethermesh Authors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # SCOPE — what belongs in this repository, and what must never enter it
 
 This repository is **open**. Assume everything committed here will be read by people outside the project, including competitors, and that git history is permanent — a file deleted in a later commit is still in the history, and a repository that has been cloned once cannot be un-cloned.

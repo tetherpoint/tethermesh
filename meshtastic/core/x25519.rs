@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The tethermesh Authors
+// SPDX-License-Identifier: Apache-2.0
+
 //! X25519 key agreement, for direct messages.
 //!
 //! `WIRE_REFERENCE.md` records the direct-message construction as

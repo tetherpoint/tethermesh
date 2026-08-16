@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 #
+# SPDX-FileCopyrightText: 2026 The tethermesh Authors
+# SPDX-License-Identifier: Apache-2.0
+#
 # check_all.sh — the one entry point for this repository's guard rails.
 #
 # Every rule this project commits to in README.md, SCOPE.md and
@@ -52,6 +55,16 @@ EOF
 fi
 
 rc=0
+
+head "licence declaration (SPDX)"
+# Added with the 2026-08-16 licence decision. One licence today, which is
+# exactly when this looks unnecessary and exactly when it is cheapest: the
+# failure it prevents is a file arriving later with no header and inheriting
+# nothing.
+"$ROOT/tools/check_spdx.sh" || {
+    s=$?
+    [ "$s" = 3 ] || rc=1
+}
 
 head "clean-room (GPL boundary)"
 "$ROOT/tools/check_cleanroom.sh" || rc=1

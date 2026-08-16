@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The tethermesh Authors
+// SPDX-License-Identifier: Apache-2.0
+
 //! Duplicate suppression: remembering which packets have already been seen.
 //!
 //! Managed flooding rebroadcasts a packet that still has hops left, but only
