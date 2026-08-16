@@ -31,9 +31,13 @@ The correction: **the raw frame does not appear at the simulated-radio boundary.
 | 3 channel hash | resolved by observation, two data points |
 | 4 PKI/DM scheme | resolved by capturing and decrypting a real direct message |
 | 5 sync word | resolved — `0x0740=0x24`, `0x0741=0xB4`, confirmed by decoding real traffic |
-| 6 modem parameters | LongFast resolved; sixteen presets remain, reachable the same way |
+| 6 modem parameters | **resolved 2026-08-16** — SF and BW measured for all nine valid presets; CR outstanding |
 
-Item 6 is the only one still partly open, and it is bounded rather than unknown: the method that resolved LongFast works unchanged for the rest, and the bench boards arrived running `VLongSlow` at 62.5 kHz.
+**2026-08-16 — item 6 is now measured, and the estimate in it was wrong.** Writing each preset to a stock node and reading back what it programmed gives spreading factor and bandwidth for **all nine valid presets**, committed as `tests/captures/modem_presets.json` and cross-checked against `meshtastic/core/airtime.rs` by a test that would fail if the symbol-time formula were accidentally right at only one spreading factor.
+
+**There were never sixteen presets to find — there are eight.** Presets 2 and 10–16 report `name=Invalid` and **silently serve LongFast parameters**, so a node set to an out-of-range preset does not fail, it quietly runs LongFast. That is worth more than the table it corrects, because a mismatch under those settings would otherwise be attributed to almost anything else.
+
+**Coding rate is the one part still open**, and deliberately left `null` rather than inferred. The node never reports it, and the reported bitrate will not invert to it — the ratio of bitrate to `SF·BW/2^SF` drifts with spreading factor, so that figure carries overhead of a shape we have not pinned. LongFast's CR4/5 is known from on-air capture and remains the only one. Settling the rest needs a receiver configured to the wrong coding rate so that failure to decode is the signal — a differential test rather than a log read.
 
 **Gate:** every item either verified with a source, or explicitly still open. No item silently promoted from "commonly asserted" to "fact". *Met.*
 

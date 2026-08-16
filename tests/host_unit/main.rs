@@ -2488,3 +2488,82 @@ fn emit_pki_dm_frame_for_the_bench() {
     );
     println!("PKI_DM_TO {to:08x} ID {id:08x} LEN {}", frame_bytes.len());
 }
+
+/// Every measured modem preset, checked against our own airtime model.
+///
+/// L0 item 6. `tests/captures/modem_presets.json` records what each preset
+/// actually programs into the radio, read from a stock node's own boot report
+/// after writing `LoRaConfig.modem_preset` over the serial admin API.
+///
+/// **This is the check that generalises `airtime.rs` beyond one data point.**
+/// Until now the model was anchored by LongFast alone: sixteen preamble
+/// symbols reproducing a reported 131 ms. Nine presets spanning SF7-SF12 and
+/// 125/250/500 kHz is a far stronger constraint, and a symbol-time formula
+/// that was accidentally right at one spreading factor will not survive it.
+///
+/// Coding rate is deliberately absent from the fixture and so is absent here.
+/// The node does not report it, and the reported bitrate cannot invert to it:
+/// the ratio of bitrate to `SF*BW/2^SF` drifts with SF (0.697 at SF11, 0.725
+/// at SF7), so that figure carries packet overhead of a shape we have not
+/// established. Guessing it would be assuming a formula to manufacture a fact.
+#[test]
+fn every_measured_modem_preset_agrees_with_our_airtime_model() {
+    let doc = fs::read_to_string(captures_dir().join("modem_presets.json"))
+        .expect("cannot read modem_presets.json");
+
+    let mut checked = 0usize;
+    let mut rest = doc.as_str();
+    while let Some(i) = rest.find("\"preset\":") {
+        rest = &rest[i + 9..];
+        let block_end = rest.find('}').unwrap_or(rest.len());
+        let block = &rest[..block_end];
+
+        // Only rows the node accepted carry real parameters.
+        if !block.contains("\"valid\": true") {
+            continue;
+        }
+        let num = |key: &str| -> Option<f64> {
+            let k = format!("\"{key}\":");
+            let j = block.find(&k)? + k.len();
+            let tail = block[j..].trim_start();
+            let end = tail.find(|c: char| c != '.' && c != '-' && !c.is_ascii_digit())
+                .unwrap_or(tail.len());
+            tail[..end].parse().ok()
+        };
+
+        let (Some(bw_khz), Some(sf), Some(pre_ms)) =
+            (num("bandwidth_khz"), num("spreading_factor"), num("preamble_ms"))
+        else {
+            continue;
+        };
+
+        let params = ModemParams {
+            spreading_factor: sf as u8,
+            bandwidth_hz: (bw_khz * 1000.0) as u32,
+            ..ModemParams::LONGFAST
+        };
+        let sym = params.symbol_time_us().expect("symbol time for a measured preset");
+
+        // The node reports preamble time in whole milliseconds, so allow the
+        // rounding it must have done -- but nothing more.
+        let modelled_pre_us = u32::from(params.preamble_symbols) * sym;
+        let reported_pre_us = (pre_ms * 1000.0) as u32;
+        let diff = modelled_pre_us.abs_diff(reported_pre_us);
+        assert!(
+            diff <= 1000,
+            "SF{sf} BW{bw_khz}kHz: modelled preamble {modelled_pre_us} us vs reported \
+             {reported_pre_us} us, off by {diff} us -- more than integer-ms rounding"
+        );
+
+        // Airtime must be computable and sane at the largest legal payload.
+        let at = params.airtime_us(frame::MAX_PAYLOAD as u16).expect("airtime");
+        assert!(at > modelled_pre_us, "airtime must exceed its own preamble");
+        checked += 1;
+    }
+
+    assert_eq!(
+        checked, 9,
+        "expected nine valid presets in the fixture; a changed fixture must be \
+         re-adjudicated rather than silently checked less"
+    );
+}

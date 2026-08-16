@@ -243,7 +243,27 @@ These are commonly asserted in secondary descriptions and are **not** confirmed 
 3. ~~**The channel hash function**~~ — **RESOLVED 2026-08-15** by oracle observation, above. It is `xor_fold(name) ^ xor_fold(psk)`.
 4. ~~**The PKI/DM scheme details**~~ — **RESOLVED 2026-08-16** by capturing and decrypting a real direct message, above. The docs had confirmed Curve25519 and mentioned "AES-CTR or AES-CCM" without saying which, nor the KDF, the tag size, or where the extra nonce travels. All four are now measured.
 5. ~~**The raw sync-word register value**~~ — **RESOLVED 2026-08-16**: `0x0740 = 0x24`, `0x0741 = 0xB4`, confirmed by decoding real traffic.
-6. **Preset SF/BW/CR parameters** — **LongFast resolved** (SF11 / BW250 / CR4/5); sixteen presets remain, including the 62.5 kHz and 20 kHz variants.
+6. ~~**Preset SF/BW/CR parameters**~~ — **SF and BW RESOLVED 2026-08-16 for every valid preset**, by writing each one to a stock node and reading back what it programmed. Coding rate remains unmeasured; see below. Full table in `tests/captures/modem_presets.json`.
+
+**The count in this item was wrong, and the correction is the more useful finding.** It said "sixteen presets remain". There are **eight** further valid presets beyond LongFast, not sixteen. Presets 2 and 10–16 are not presets at all: the node reports `name=Invalid` and **silently serves LongFast parameters**. Preset 2 is the deprecated `VERY_LONG_SLOW`; 10–16 are past the end of the enum. A node configured to an out-of-range preset does not fail — it quietly runs LongFast, which is worth knowing before attributing a mismatch to something else.
+
+| preset | name | BW kHz | SF | bitrate B/s |
+|---|---|---|---|---|
+| 0 | LongFast | 250 | 11 | 116.967873 |
+| 1 | LongSlow | 125 | 12 | 27.011360 |
+| 2 | *Invalid* | — | — | falls back to LongFast |
+| 3 | MediumSlow | 250 | 10 | 216.141006 |
+| 4 | MediumFast | 250 | 9 | 394.915253 |
+| 5 | ShortSlow | 250 | 8 | 703.927490 |
+| 6 | ShortFast | 250 | 7 | 1239.361694 |
+| 7 | LongMod | 125 | 11 | 49.343502 |
+| 8 | ShortTurbo | 500 | 7 | 2478.723389 |
+| 9 | LongTurbo | 500 | 11 | 233.935745 |
+| 10–16 | *Invalid* | — | — | fall back to LongFast |
+
+**Method, and why SF is trustworthy when the node never reports it.** Bandwidth is stated outright at boot. SF is not — it falls out of the preamble time, since sixteen preamble symbols give `T_sym = preamble_ms / 16` and `2^SF = T_sym × BW`. At LongFast that yields SF11, which **on-air capture had already established independently**. One preset with two independent derivations is what licenses the derivation for the other eight. All nine are cross-checked against `meshtastic/core/airtime.rs` by a committed test.
+
+**Coding rate is still unmeasured, and is recorded as `null` rather than guessed.** The node does not report it, and the reported bitrate cannot be inverted to recover it: the ratio of bitrate to `SF·BW/2^SF` drifts with spreading factor — 0.697 at SF11, 0.725 at SF7 — so that figure carries packet overhead of a shape this project has not established. Inferring CR from it would mean assuming a formula in order to manufacture a fact, which is the error this document exists to prevent. **LongFast's CR4/5 is known from on-air capture and is the only one.** Settling the rest needs a receiver deliberately configured to the wrong coding rate, since it will fail to decode — a differential test, not a log read.
 7. **Contention-window bounds** — **the direction is documented, the numbers are not.** The official documentation says only *"The CW size is small for a low SNR, such that nodes that are further away are more likely to flood first."* No primary source read so far gives `CW_MIN`, `CW_MAX`, or the SNR range they map across. `meshtastic/core/routing.rs` implements the documented direction with **our own** parameterisation, marked as ours in that module rather than presented as theirs. Frames stay identical and suppression still works, so this does not affect interoperability — but our *timing* will not match a stock node's, so we may win or lose races we would otherwise have lost or won. Settling it needs a timed capture of several nodes relaying one frame.
 
 **Airtime, and what is actually established about it.** `meshtastic/core/airtime.rs` computes time-on-air from **Semtech's** published LoRa formula — the radio vendor's, not the reference implementation's. Two things anchor it here rather than to itself:
