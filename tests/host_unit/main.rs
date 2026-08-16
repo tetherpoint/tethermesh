@@ -1575,8 +1575,17 @@ fn x25519_agrees_with_an_audited_implementation() {
 }
 
 /// Edge-case scalars and points, where reductions are most likely to be wrong.
+///
+/// Named for `x25519-dalek` explicitly. This was `..._agrees_with_the_oracle_...`
+/// until 2026-08-16, which was actively misleading: everywhere else in this
+/// project "the oracle" means the pinned `meshtasticd` container, and a reader
+/// could reasonably conclude X25519 had been checked against the reference
+/// implementation. It has not been, and it cannot be — 2.7.26 is a black box
+/// that exposes no raw curve primitive. The only reference-implementation
+/// evidence for X25519 is `x25519_reproduces_the_bench_exchange_...`, which
+/// replays a real captured exchange.
 #[test]
-fn x25519_agrees_with_the_oracle_on_boundary_values() {
+fn x25519_agrees_with_dalek_on_boundary_values() {
     let interesting: [[u8; 32]; 6] = [
         [0x00; 32],
         [0xFF; 32],
