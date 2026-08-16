@@ -17,6 +17,10 @@ use std::path::PathBuf;
 use tethermesh::airtime::{DutyCycle, ModemParams};
 use tethermesh::backend::{Crypto as Backend, Error as BackendError, SecretKey, Software};
 use tethermesh::channel::channel_hash;
+use tethermesh::delivery::{
+    acknowledgement, acknowledges, wants_acknowledgement, Outbox, RetryPolicy,
+    Error as DeliveryError, ACK_PAYLOAD,
+};
 use tethermesh::crypto::{
     Aes256,
     ccm_decrypt_in_place, ccm_encrypt_in_place, ctr_apply, expand_psk, nonce, Aes128, CcmError,
@@ -2737,4 +2741,175 @@ fn decode_supplied_frame_for_the_bench() {
         }
         Err(e) => println!("DATA decode failed: {e:?}"),
     }
+}
+
+// ===========================================================================
+// Delivery — acknowledgement and retransmission.
+//
+// The policy constants here are MEASURED, not chosen: three attempts about
+// seven seconds apart, from tests/captures/retry_behaviour.json. The ack bytes
+// are measured too, from tests/captures/routing_ack.json, and that one matters
+// because proto3 would have produced different ones.
+// ===========================================================================
+
+fn probe_frame(id: u32) -> Vec<u8> {
+    let Psk::Aes128(key) = expand_psk(&[0x01]).unwrap() else { panic!() };
+    let data = Data { portnum: PortNum::TEXT_MESSAGE_APP.0, payload: b"d", ..Data::default() };
+    let mut pl = [0u8; 64];
+    let n = data.encode(&mut pl).unwrap();
+    let h = Header { to: 0x1111_2222, from: 0x7e57_0001, id, hop_limit: 3, hop_start: 3,
+                     want_ack: true, channel: channel_hash(b"LongFast", &key), ..Header::default() };
+    let mut fb = [0u8; frame::MAX_FRAME];
+    let len = frame::encode(&h, &pl[..n], &key, 0, &mut fb).unwrap();
+    fb[..len].to_vec()
+}
+fn wide_duty() -> DutyCycle { DutyCycle::new(1000, 3_600_000, 0).unwrap() }
+
+/// The acknowledgement bytes are the measured ones, not what a writer emits.
+///
+/// A stock node encodes `Routing` field 3 = 0 **explicitly**. proto3 omits a
+/// zero varint, so generating this through the writer yields an empty payload.
+/// If this ever becomes empty, acknowledgements stop being recognised and the
+/// failure looks like a radio problem.
+#[test]
+fn the_acknowledgement_payload_is_the_measured_two_bytes() {
+    assert_eq!(ACK_PAYLOAD, [0x18, 0x00], "field 3, varint 0, encoded explicitly");
+    let a = acknowledgement(0x0bad_c0de);
+    assert_eq!(a.portnum, PortNum::ROUTING_APP.0);
+    assert_eq!(a.payload, &[0x18, 0x00]);
+    assert_eq!(a.request_id, 0x0bad_c0de);
+    assert!(!a.want_response);
+
+    // And it survives our own codec unchanged.
+    let mut buf = [0u8; 64];
+    let n = a.encode(&mut buf).unwrap();
+    let back = Data::decode(&buf[..n]).unwrap();
+    assert_eq!(back.payload, &[0x18, 0x00]);
+    assert_eq!(back.request_id, 0x0bad_c0de);
+}
+
+/// Matching needs only portnum and request_id — never the Routing message.
+#[test]
+fn an_acknowledgement_is_recognised_by_portnum_and_request_id_alone() {
+    let ack = acknowledgement(0x1234_5678);
+    assert_eq!(acknowledges(&ack), Some(0x1234_5678));
+
+    // A rejection retires the entry too: no retransmission will help either way.
+    let nak = Data { portnum: PortNum::ROUTING_APP.0, payload: &[0x18, 0x06],
+                     request_id: 0x1234_5678, ..Data::default() };
+    assert_eq!(acknowledges(&nak), Some(0x1234_5678), "a NAK is still an answer");
+
+    let text = Data { portnum: PortNum::TEXT_MESSAGE_APP.0, request_id: 0x1234_5678,
+                      ..Data::default() };
+    assert_eq!(acknowledges(&text), None, "portnum must match");
+    let bare = Data { portnum: PortNum::ROUTING_APP.0, ..Data::default() };
+    assert_eq!(acknowledges(&bare), None, "request_id 0 refers to nothing");
+}
+
+/// Retransmission waits the interval, then delivers the frame **unchanged**.
+#[test]
+fn a_tracked_frame_is_retransmitted_verbatim_after_the_interval() {
+    let mut ob: Outbox<2> = Outbox::new(RetryPolicy::MEASURED_CEILING);
+    let mut duty = wide_duty();
+    let f = probe_frame(0xAA00_0001);
+    ob.track(&f, 0).unwrap();
+    assert_eq!(ob.len(), 1);
+
+    assert!(ob.next_due(6_999_999, 100_000, &mut duty).is_none(), "not due yet");
+
+    let due = ob.next_due(7_000_000, 100_000, &mut duty).expect("due now");
+    assert_eq!(due.attempt, 2, "the original counts as attempt one");
+    assert_eq!(due.frame, &f[..], "resent verbatim — we do not re-encrypt");
+}
+
+/// Exactly three transmissions, matching the measured ceiling — never a fourth.
+#[test]
+fn the_measured_ceiling_of_three_attempts_is_not_exceeded() {
+    let mut ob: Outbox<2> = Outbox::new(RetryPolicy::MEASURED_CEILING);
+    let mut duty = wide_duty();
+    ob.track(&probe_frame(0xAA00_0002), 0).unwrap();
+
+    let a2 = ob.next_due(7_000_000, 100_000, &mut duty).map(|d| d.attempt);
+    let a3 = ob.next_due(14_000_000, 100_000, &mut duty).map(|d| d.attempt);
+    assert_eq!((a2, a3), (Some(2), Some(3)));
+    assert!(
+        ob.next_due(21_000_000, 100_000, &mut duty).is_none(),
+        "a fourth transmission would exceed what upstream was measured doing, and \
+         upstream's policy is a ceiling"
+    );
+}
+
+/// An acknowledgement stops the retransmissions.
+#[test]
+fn acknowledging_retires_the_entry_and_stops_retransmission() {
+    let mut ob: Outbox<2> = Outbox::new(RetryPolicy::MEASURED_CEILING);
+    let mut duty = wide_duty();
+    ob.track(&probe_frame(0xAA00_0003), 0).unwrap();
+
+    assert!(ob.acknowledge(0xAA00_0003), "must match the tracked id");
+    assert!(ob.is_empty());
+    assert!(ob.next_due(7_000_000, 100_000, &mut duty).is_none());
+    assert!(!ob.acknowledge(0xAA00_0003), "already retired");
+    assert!(!ob.acknowledge(0xDEAD_BEEF), "an unmatched ack is ordinary, not an error");
+}
+
+/// Giving up is reported, not silent.
+#[test]
+fn exhausting_the_attempts_reports_the_give_up() {
+    let mut ob: Outbox<2> = Outbox::new(RetryPolicy::MEASURED_CEILING);
+    let mut duty = wide_duty();
+    ob.track(&probe_frame(0xAA00_0004), 0).unwrap();
+    let _ = ob.next_due(7_000_000, 100_000, &mut duty);
+    let _ = ob.next_due(14_000_000, 100_000, &mut duty);
+
+    assert!(ob.reap(14_000_000).is_none(), "last interval has not elapsed");
+    assert_eq!(ob.reap(21_000_000), Some((0x7e57_0001, 0xAA00_0004)));
+    assert!(ob.is_empty());
+    assert!(ob.reap(99_000_000).is_none());
+}
+
+/// The duty budget gates retransmission, and deciding does not spend it.
+#[test]
+fn retransmission_respects_the_duty_budget_without_charging_it() {
+    let mut ob: Outbox<2> = Outbox::new(RetryPolicy::MEASURED_CEILING);
+    ob.track(&probe_frame(0xAA00_0005), 0).unwrap();
+
+    // 1 ms of budget against a 100 ms frame.
+    let mut tight = DutyCycle::new(1, 1000, 0).unwrap();
+    assert!(ob.next_due(7_000_000, 100_000, &mut tight).is_none(), "budget must gate it");
+
+    let mut wide = wide_duty();
+    assert!(ob.next_due(7_000_000, 100_000, &mut wide).is_some());
+    assert_eq!(wide.used_us(), 0, "deciding must not bill airtime the caller has not sent");
+}
+
+/// Fixed capacity is a design property, and it reports rather than overwrites.
+#[test]
+fn a_full_outbox_refuses_rather_than_dropping_something() {
+    let mut ob: Outbox<2> = Outbox::new(RetryPolicy::MEASURED_CEILING);
+    ob.track(&probe_frame(1), 0).unwrap();
+    ob.track(&probe_frame(2), 0).unwrap();
+    assert_eq!(ob.track(&probe_frame(3), 0), Err(DeliveryError::Full));
+    assert_eq!(ob.len(), 2, "the existing entries survive");
+
+    assert_eq!(ob.track(&[0u8; 4], 0), Err(DeliveryError::BadFrame));
+}
+
+/// Only frames addressed to us, asking for it, warrant an acknowledgement.
+#[test]
+fn only_a_want_ack_frame_addressed_to_us_is_acknowledged() {
+    let f = probe_frame(0xAA00_0006);           // to = 0x11112222, want_ack = true
+    assert!(wants_acknowledgement(&f, 0x1111_2222));
+    assert!(!wants_acknowledgement(&f, 0x9999_9999), "not addressed to us");
+    assert!(!wants_acknowledgement(&[0u8; 4], 0x1111_2222), "too short to have a header");
+}
+
+/// SEND_ONCE never retransmits, which is the safe default for a shared channel.
+#[test]
+fn send_once_never_retransmits() {
+    let mut ob: Outbox<2> = Outbox::new(RetryPolicy::SEND_ONCE);
+    let mut duty = wide_duty();
+    ob.track(&probe_frame(0xAA00_0007), 0).unwrap();
+    assert!(ob.next_due(u64::from(u32::MAX), 100_000, &mut duty).is_none());
+    assert_eq!(ob.reap(u64::from(u32::MAX)), Some((0x7e57_0001, 0xAA00_0007)));
 }

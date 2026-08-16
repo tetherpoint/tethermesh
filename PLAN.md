@@ -252,7 +252,13 @@ So the ceiling is **3 attempts at ~7 s**. Our policy sits at or below that.
 
 **And one deliberate deviation, with its justification.** We need not re-encrypt per attempt. Holding the encoded frame and resending it verbatim is cryptographically safe — nonce reuse only endangers *different* plaintexts — costs less state under the no-allocation rule, and is indistinguishable to a receiver, which drops the repeated `(from, id)` as a duplicate regardless.
 
-**Gate for this item:** retry count and backoff recorded in `meshtastic/WIRE_REFERENCE.md` with the capture behind them, and our policy stated as at-or-below what was measured. *Measurement met; the implementation remains to be written.*
+**2026-08-16 — implemented.** `meshtastic/core/delivery.rs`: a caller-owned fixed-capacity `Outbox<N>`, `RetryPolicy::MEASURED_CEILING` (3 attempts, ~7 s) alongside `SEND_ONCE`, acknowledgement construction from the measured bytes, and matching on `Data.request_id` alone. Ten tests, each seen red first.
+
+The shape follows the crate's existing seams rather than inventing new ones: `now_us` is an argument as it is for `DutyCycle`, the queue is caller-provided like `PacketHistory`, and `next_due` **checks** the duty budget without charging it — the caller charges on actual transmission, exactly as `should_relay` does. Charging in the decision would bill a node for a frame it had not sent.
+
+**Gate for this item:** retry count and backoff recorded in `meshtastic/WIRE_REFERENCE.md` with the capture behind them, and our policy stated as at-or-below what was measured. ***Met.***
+
+**Still not implemented, deliberately:** emitting an acknowledgement requires framing and encrypting it, and measurement showed the reply travels *channel-encrypted even when acknowledging a PKI message*. That is a caller decision about which key to use, so `delivery::acknowledgement` returns the `Data` and stops there.
 
 **Gate:** relay behaviour matches the reference across a topology matrix, and the relay question is answered in the wire reference either way. *Now gated on hardware, not on effort.*
 

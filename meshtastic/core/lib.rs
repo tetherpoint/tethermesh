@@ -54,6 +54,7 @@ pub mod airtime;
 pub mod backend;
 pub mod channel;
 pub mod crypto;
+pub mod delivery;
 pub mod frame;
 pub mod header;
 pub mod history;
