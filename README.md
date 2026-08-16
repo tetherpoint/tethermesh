@@ -91,7 +91,17 @@ The frame header, channel hashing, channel and PKI cryptography, the protobuf co
 
 - **The clock.** There is none in here. Anything time-dependent takes `now_us` as an argument — `DutyCycle` does exactly this — because a `no_std` library cannot portably know the time and a hidden one would be untestable.
 - **The scheduler and the radio itself.** We return *"wait a backoff drawn from this window, then transmit if nobody else did"*. Waiting, drawing, and arbitrating access to the radio are yours.
-- **Buffers.** Nothing here allocates.
+- **Locking, if two tasks touch one context.** `DISTRIBUTION.md` forbids mutable global state precisely because `Send`/`Sync` do not cross an FFI boundary a foreign scheduler calls into — so concurrency safety here is a property of *API shape*, state in a caller-owned context, rather than of the language. One task per context needs no lock; sharing one needs yours. Nothing in this library can enforce that, and it does not pretend to.
+- **Buffers, and they are not small.** Nothing here allocates, so every stateful type is yours to place. Measured sizes:
+
+  | type | bytes |
+  |---|---|
+  | `DutyCycle` | 32 |
+  | `Outbox<4>` | 1,096 |
+  | `PacketHistory<64>` | 528 |
+  | `PacketHistory<400>` | 3,216 |
+
+  400 is the history depth the reference was observed using. A node carrying that plus a small outbox needs roughly **4.3 KB of state**, which exceeds a typical RTOS task stack — so **put them in a context created once at initialisation, never in task-stack locals.** This is the practical shape of "no allocation": the memory does not vanish, it becomes yours to place deliberately.
 - **Identity, key custody, persistence.**
 
 ### The gap you must fill yourself today: delivery
