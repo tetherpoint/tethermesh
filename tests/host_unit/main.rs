@@ -12,6 +12,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use tethermesh::channel::channel_hash;
+use tethermesh::history::{PacketHistory, Seen};
 use tethermesh::message::{ChannelSettings, Data, PortNum, User};
 use tethermesh::packet_id::{NextId, PacketIdSource};
 use tethermesh::protobuf::{Error as ProtoError, Reader, Value, Writer};
@@ -659,4 +660,93 @@ fn exhaustion_is_reported_rather_than_wrapping() {
         }
     }
     assert!(saw_exhausted, "ran off the end of the identifier space without saying so");
+}
+
+/// The domain red-list item: a duplicate `(from, id)` must not be forwarded
+/// twice.
+#[test]
+fn a_repeated_packet_is_reported_as_duplicate() {
+    let mut h: PacketHistory<8> = PacketHistory::new();
+    assert_eq!(h.observe(0x7739_e49b, 0x59e2_815c), Seen::New);
+    assert_eq!(h.observe(0x7739_e49b, 0x59e2_815c), Seen::Duplicate);
+    assert_eq!(h.observe(0x7739_e49b, 0x59e2_815c), Seen::Duplicate);
+    assert_eq!(h.len(), 1, "a duplicate consumed a slot");
+}
+
+/// Identifiers are unique per sender, not globally. Keying on the identifier
+/// alone would silently suppress a stranger's traffic whenever a neighbour
+/// happened to pick the same 32-bit number.
+#[test]
+fn the_same_id_from_a_different_sender_is_not_a_duplicate() {
+    let mut h: PacketHistory<8> = PacketHistory::new();
+    assert_eq!(h.observe(0xaaaa_aaaa, 42), Seen::New);
+    assert_eq!(h.observe(0xbbbb_bbbb, 42), Seen::New);
+    assert_eq!(h.observe(0xaaaa_aaaa, 43), Seen::New);
+    assert_eq!(h.observe(0xaaaa_aaaa, 42), Seen::Duplicate);
+    assert_eq!(h.observe(0xbbbb_bbbb, 42), Seen::Duplicate);
+}
+
+/// `(0, 0)` is a legitimate pair and must not read as an empty slot.
+#[test]
+fn zero_is_a_real_packet_not_an_empty_slot() {
+    let mut h: PacketHistory<4> = PacketHistory::new();
+    assert!(!h.contains(0, 0));
+    assert_eq!(h.observe(0, 0), Seen::New);
+    assert!(h.contains(0, 0));
+    assert_eq!(h.observe(0, 0), Seen::Duplicate);
+}
+
+/// Memory is bounded, and eviction is oldest-first.
+#[test]
+fn the_oldest_entry_is_evicted_when_full() {
+    const N: usize = 4;
+    let mut h: PacketHistory<N> = PacketHistory::new();
+    for id in 0..N as u32 {
+        assert_eq!(h.observe(1, id), Seen::New);
+    }
+    assert_eq!(h.len(), N);
+    assert_eq!(h.capacity(), N);
+
+    // One more evicts the oldest, and only the oldest.
+    assert_eq!(h.observe(1, 99), Seen::New);
+    assert_eq!(h.len(), N, "history grew past its capacity");
+    assert!(!h.contains(1, 0), "the oldest entry survived eviction");
+    for id in 1..N as u32 {
+        assert!(h.contains(1, id), "id {id} was evicted out of order");
+    }
+    assert!(h.contains(1, 99));
+}
+
+/// Far more traffic than capacity must neither grow nor wrap incorrectly.
+#[test]
+fn sustained_traffic_stays_bounded_and_remembers_the_most_recent() {
+    const N: usize = 16;
+    let mut h: PacketHistory<N> = PacketHistory::new();
+    for id in 0..10_000u32 {
+        assert_eq!(h.observe(7, id), Seen::New, "id {id} wrongly seen as a duplicate");
+        assert!(h.len() <= N);
+    }
+    // The most recent N are remembered; anything older is not.
+    for back in 1..=N as u32 {
+        assert!(h.contains(7, 10_000 - back), "recent id was forgotten");
+    }
+    assert!(!h.contains(7, 10_000 - N as u32 - 1), "an evicted id came back");
+}
+
+/// A duplicate must not refresh its own entry, or one chattering node's
+/// retransmissions would hold its slot while evicting everyone else's.
+#[test]
+fn repeats_do_not_keep_an_entry_alive() {
+    const N: usize = 4;
+    let mut h: PacketHistory<N> = PacketHistory::new();
+    h.observe(1, 0);
+    for _ in 0..50 {
+        assert_eq!(h.observe(1, 0), Seen::Duplicate);
+    }
+    // Fill past capacity with other traffic; the repeated entry must age out
+    // like anything else.
+    for id in 1..=N as u32 {
+        h.observe(2, id);
+    }
+    assert!(!h.contains(1, 0), "a repeated entry outlived its age");
 }

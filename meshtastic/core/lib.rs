@@ -47,6 +47,7 @@
 #![deny(unsafe_code)]
 
 pub mod channel;
+pub mod history;
 pub mod message;
 pub mod packet_id;
 pub mod protobuf;

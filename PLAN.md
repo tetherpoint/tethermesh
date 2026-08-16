@@ -95,6 +95,10 @@ The second is the direction that fails in the field, and the one a lenient decod
 
 Managed flooding: hop-limit decrement, duplicate suppression keyed on sender and identifier, the SNR-scaled contention window, and duty-cycle accounting.
 
+**2026-08-16 — duplicate suppression is done**, ahead of the rest of L5, because it needs no header layout: it takes two numbers and answers whether they have been seen. `meshtastic/core/history.rs`, a fixed-capacity age-evicting ring, default 400 entries to match what the reference was observed to use.
+
+Deliberately **not** included: a `should_relay`. Suppression is one input to the rebroadcast decision; the others are the hop limit, the contention window, duty budget — and whether a node relays on channels it cannot decrypt, which is still PLAUSIBLE, UNPROVEN. Writing that function today would mean taking a position on the open question in code, which is how an assumption stops looking like one.
+
 **And the assumption everything else rests on.** Whether nodes relay traffic on channels they cannot decrypt is currently PLAUSIBLE, UNPROVEN. Settle it here: several instances, controlled topology, inject a frame on a channel none of them holds, observe whether it is repeated. ~~In simulation topology is a coordinate rather than a hardware problem.~~
 
 **2026-08-15 — the simulation route was tried and does not work.** Two local instances can be made to form a mesh, by enabling `UDP_BROADCAST`; the process-local SimRadio alone will not do it. But captured UDP traffic carries `hop_limit = 0`, so those packets are never candidates for rebroadcast and the managed-flooding decision is never reached. A local UDP mesh produces traffic that looks like a mesh and cannot answer this question. Settling it needs two real radios. Detail in `meshtastic/WIRE_REFERENCE.md`.

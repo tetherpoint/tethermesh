@@ -55,6 +55,8 @@ Per the rule above, recorded rather than claimed:
 | proto3 default omission | made the encoder emit a zero-valued field | `an all-default Data encoded to 2 bytes, expected 0` |
 | `User` wrapper vs reference bytes | *not deliberate* — the wrapper was missing `macaddr` | failed with a 38-byte re-encode against 46 reference bytes |
 | `packet_id` non-repeat across reboot | issued identifiers before the high-water mark was durable — the RAM-only-counter bug | `4 identifiers issued, 1 distinct` |
+| duplicate suppression, key | keyed on `id` alone, ignoring `from` | a second sender's identical id read as a duplicate |
+| duplicate suppression, recording | reported `New` but never stored the entry | 5 failures, including eviction ordering |
 
 The `packet_id` row is the domain red list's *"`packet_id` must **not** repeat
 across a simulated reboot"*, and it is worth noting what the broken version
