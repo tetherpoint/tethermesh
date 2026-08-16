@@ -36,6 +36,24 @@ publish = false
 
 # `cfg(kani)` is set by the Kani verifier, not by cargo, so declare it rather
 # than let every normal build warn about an unexpected condition name.
+# THE ONE DEPENDENCY, AND IT CLEARS EVERY BAR.
+#
+# fiat-crypto's curve25519 field arithmetic is generated from Coq proofs by
+# mit-plv/fiat-crypto — the same pipeline BoringSSL uses. It is triple-licensed
+# permissively, is `no_std`, allocates nothing, and adds ZERO panic paths above
+# a no-dependency baseline; measured, not assumed, in docs/CRYPTO-DEPENDENCY.md.
+#
+# It is used for exactly the layer where a hand-written bug bit this project:
+# the field arithmetic. The first draft of x25519.rs biased fe_sub by p instead
+# of 2p, producing an implementation that was self-consistent and wrong. That
+# class of error is what fiat proves away.
+#
+# It is arithmetic, not codegen: no build script, no proc-macro, no schema
+# compiler. The "no code-generation dependency" rule above is about compiling a
+# GPL .proto into a codec, and this is not that.
+[dependencies]
+fiat-crypto = { version = "0.3", default-features = false }
+
 [lints.rust]
 unexpected_cfgs = { level = "allow", check-cfg = ['cfg(kani)'] }
 

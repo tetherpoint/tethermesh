@@ -46,6 +46,20 @@ value computed by an implementation that is not ours:
 - **The whole frame path** — real traffic captured off the air, decoded and
   re-encoded byte for byte.
 
+## Proven by someone else, and linked
+
+The X25519 **field arithmetic** is `fiat-crypto`'s, generated from Coq proofs.
+Addition, subtraction, multiplication, squaring, carrying, the 121666 scalar
+multiply, serialisation and the constant-time select are all verified upstream
+and used unmodified. The Montgomery ladder and the inversion chain built on
+them are ours.
+
+That split is deliberate: the ladder is short, public and checked against RFC
+7748 vectors and two independent implementations; the field arithmetic is
+where subtle bugs live and where a proof is worth having. The bug this project
+actually shipped — `fe_sub` biased by `p` instead of `2p` — was in the half
+that is now verified.
+
 ## Neither proven nor independently checked
 
 Stated plainly, because the gap is real:
@@ -54,10 +68,10 @@ Stated plainly, because the gap is real:
   branches, but Rust cannot express "do not turn this into a branch" and no
   tool here verifies the emitted code. This is a strong expectation, not a
   guarantee, and it is not a defence against physical side-channel attack.
-- **The curve arithmetic itself.** That our X25519 computes the correct group
-  operation is supported by vectors and differential testing, not proof.
-  Proving it is what fiat-crypto and HACL* achieved with Coq and F*, at a
-  scale this project has no business reproducing.
+- **The ladder.** The field operations under it are proven; that the
+  Montgomery ladder composes them into the right group operation is supported
+  by RFC 7748 vectors and agreement with two independent implementations, not
+  by proof.
 
 ## Why the verified library was not used instead
 

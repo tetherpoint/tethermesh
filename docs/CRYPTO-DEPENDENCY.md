@@ -1,4 +1,40 @@
-# Why the curve implementation is ours, and measured rather than argued
+# The curve implementation: verified field arithmetic, our ladder
+
+**RESOLVED 2026-08-16.** The field arithmetic is now `fiat-crypto`'s —
+generated from Coq proofs by mit-plv, the same pipeline BoringSSL uses. The
+Montgomery ladder on top is ours. Everything below is the reasoning that led
+there, kept because the measurements are the point.
+
+The short version:
+
+| | allocator | panic paths above baseline | verified |
+|---|---|---|---|
+| **fiat-crypto field arithmetic (chosen)** | no | **+0** | **yes, Coq** |
+| our hand-written field arithmetic | no | +0 | no |
+| `x25519-dalek` | no | +8 | audited only |
+| `salty` | no | +6 | no |
+| `libcrux-curve25519` (HACL*) | **required** | +37 | yes, F* |
+
+fiat-crypto is the only option that is formally verified **and** costs nothing
+against the rules that may not be violated. It is triple-licensed
+MIT/Apache-2.0/BSD-1-Clause, is `no_std`, has **zero dependencies of its own**,
+and its generated code uses fixed-size arrays — which is exactly why it has no
+bounds-check panics where HACL's slice-typed extraction does.
+
+It also covers precisely the layer where the hand-written code failed: the
+first draft of `x25519.rs` biased `fe_sub` by `p` instead of `2p`. That is a
+field-arithmetic bug, and field arithmetic is what fiat proves.
+
+**On linkage.** It is a crates.io dependency rather than a submodule, and the
+choice is narrow. Unlike libcrux — whose manifest inherits workspace keys and
+therefore fails to resolve for downstream consumers — fiat-crypto is entirely
+self-contained. Either would work. crates.io was chosen because `Cargo.lock`
+records a SHA256 of the exact crate contents, which pins content rather than
+history, and because the upstream repository is 176 MB of Coq development for
+roughly 700 lines of generated Rust. Switching is a one-line change if
+in-tree auditability is later preferred.
+
+## The earlier reasoning, kept for the record
 
 **2026-08-16.** Recorded because "we wrote our own crypto" is normally the
 wrong answer, and the reasoning needs to survive someone reading it later and

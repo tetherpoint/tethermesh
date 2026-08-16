@@ -28,270 +28,155 @@
 /// Length of a scalar, a public key, and a shared secret.
 pub const KEY_LEN: usize = 32;
 
-type Fe = [u64; 5];
+use fiat_crypto::curve25519_64 as f;
 
-const MASK51: u64 = (1u64 << 51) - 1;
+/// A reduced field element. The tight/loose distinction is fiat's, and it
+/// encodes the bounds its proof relies on: multiplication consumes loose
+/// operands and produces tight ones, addition the reverse. Following it is
+/// not bureaucracy — it is how the verified preconditions are respected.
+type Tight = f::fiat_25519_tight_field_element;
+type Loose = f::fiat_25519_loose_field_element;
 
-const fn fe_zero() -> Fe {
-    [0, 0, 0, 0, 0]
+const fn tight_zero() -> Tight {
+    f::fiat_25519_tight_field_element([0, 0, 0, 0, 0])
 }
 
-const fn fe_one() -> Fe {
-    [1, 0, 0, 0, 0]
+const fn tight_one() -> Tight {
+    f::fiat_25519_tight_field_element([1, 0, 0, 0, 0])
 }
 
-fn fe_add(a: &Fe, b: &Fe) -> Fe {
-    [
-        a[0].wrapping_add(b[0]),
-        a[1].wrapping_add(b[1]),
-        a[2].wrapping_add(b[2]),
-        a[3].wrapping_add(b[3]),
-        a[4].wrapping_add(b[4]),
-    ]
+fn relax(a: &Tight) -> Loose {
+    let mut o = f::fiat_25519_loose_field_element([0; 5]);
+    f::fiat_25519_relax(&mut o, a);
+    o
 }
 
-/// `a - b`, biased by 2p so no limb underflows.
-fn fe_sub(a: &Fe, b: &Fe) -> Fe {
-    // 2p in limb form. p's limbs are [2^51-19, 2^51-1, 2^51-1, 2^51-1, 2^51-1],
-    // so these are twice that. Biasing by p alone is not enough: limbs can
-    // exceed 2^51 between carry passes, and a single-p bias then underflows.
-    let t = [
-        a[0].wrapping_add(0x000F_FFFF_FFFF_FFDA),
-        a[1].wrapping_add(0x000F_FFFF_FFFF_FFFE),
-        a[2].wrapping_add(0x000F_FFFF_FFFF_FFFE),
-        a[3].wrapping_add(0x000F_FFFF_FFFF_FFFE),
-        a[4].wrapping_add(0x000F_FFFF_FFFF_FFFE),
-    ];
-    [
-        t[0].wrapping_sub(b[0]),
-        t[1].wrapping_sub(b[1]),
-        t[2].wrapping_sub(b[2]),
-        t[3].wrapping_sub(b[3]),
-        t[4].wrapping_sub(b[4]),
-    ]
+fn add(a: &Tight, b: &Tight) -> Loose {
+    let mut o = f::fiat_25519_loose_field_element([0; 5]);
+    f::fiat_25519_add(&mut o, a, b);
+    o
 }
 
-fn fe_carry(mut c0: u128, mut c1: u128, mut c2: u128, mut c3: u128, mut c4: u128) -> Fe {
-    let m = u128::from(MASK51);
-    c1 = c1.wrapping_add(c0 >> 51);
-    c0 &= m;
-    c2 = c2.wrapping_add(c1 >> 51);
-    c1 &= m;
-    c3 = c3.wrapping_add(c2 >> 51);
-    c2 &= m;
-    c4 = c4.wrapping_add(c3 >> 51);
-    c3 &= m;
-    // The top limb folds back into the bottom, times 19.
-    c0 = c0.wrapping_add((c4 >> 51).wrapping_mul(19));
-    c4 &= m;
-    c1 = c1.wrapping_add(c0 >> 51);
-    c0 &= m;
-    [c0 as u64, c1 as u64, c2 as u64, c3 as u64, c4 as u64]
+fn sub(a: &Tight, b: &Tight) -> Loose {
+    let mut o = f::fiat_25519_loose_field_element([0; 5]);
+    f::fiat_25519_sub(&mut o, a, b);
+    o
 }
 
-fn fe_mul(a: &Fe, b: &Fe) -> Fe {
-    let p = |x: u64, y: u64| -> u128 { u128::from(x).wrapping_mul(u128::from(y)) };
-    let b1_19 = b[1].wrapping_mul(19);
-    let b2_19 = b[2].wrapping_mul(19);
-    let b3_19 = b[3].wrapping_mul(19);
-    let b4_19 = b[4].wrapping_mul(19);
-
-    let c0 = p(a[0], b[0])
-        .wrapping_add(p(a[1], b4_19))
-        .wrapping_add(p(a[2], b3_19))
-        .wrapping_add(p(a[3], b2_19))
-        .wrapping_add(p(a[4], b1_19));
-    let c1 = p(a[0], b[1])
-        .wrapping_add(p(a[1], b[0]))
-        .wrapping_add(p(a[2], b4_19))
-        .wrapping_add(p(a[3], b3_19))
-        .wrapping_add(p(a[4], b2_19));
-    let c2 = p(a[0], b[2])
-        .wrapping_add(p(a[1], b[1]))
-        .wrapping_add(p(a[2], b[0]))
-        .wrapping_add(p(a[3], b4_19))
-        .wrapping_add(p(a[4], b3_19));
-    let c3 = p(a[0], b[3])
-        .wrapping_add(p(a[1], b[2]))
-        .wrapping_add(p(a[2], b[1]))
-        .wrapping_add(p(a[3], b[0]))
-        .wrapping_add(p(a[4], b4_19));
-    let c4 = p(a[0], b[4])
-        .wrapping_add(p(a[1], b[3]))
-        .wrapping_add(p(a[2], b[2]))
-        .wrapping_add(p(a[3], b[1]))
-        .wrapping_add(p(a[4], b[0]));
-    fe_carry(c0, c1, c2, c3, c4)
+fn mul(a: &Loose, b: &Loose) -> Tight {
+    let mut o = tight_zero();
+    f::fiat_25519_carry_mul(&mut o, a, b);
+    o
 }
 
-fn fe_sq(a: &Fe) -> Fe {
-    fe_mul(a, a)
+fn sq(a: &Loose) -> Tight {
+    let mut o = tight_zero();
+    f::fiat_25519_carry_square(&mut o, a);
+    o
 }
 
-fn fe_mul121666(a: &Fe) -> Fe {
-    let p = |x: u64| -> u128 { u128::from(x).wrapping_mul(121_666) };
-    fe_carry(p(a[0]), p(a[1]), p(a[2]), p(a[3]), p(a[4]))
+fn mul121666(a: &Loose) -> Tight {
+    let mut o = tight_zero();
+    f::fiat_25519_carry_scmul_121666(&mut o, a);
+    o
 }
 
-/// Swap `a` and `b` when `swap` is 1, leave them when it is 0.
+fn sq_t(a: &Tight) -> Tight {
+    sq(&relax(a))
+}
+
+fn mul_t(a: &Tight, b: &Tight) -> Tight {
+    mul(&relax(a), &relax(b))
+}
+
+/// Constant-time conditional swap, via fiat's `selectznz`.
+fn cswap(swap: u64, a: &mut Tight, b: &mut Tight) {
+    let c = if swap == 0 { 0u8 } else { 1u8 };
+    let (x, y) = (a.0, b.0);
+    let mut na = [0u64; 5];
+    let mut nb = [0u64; 5];
+    f::fiat_25519_selectznz(&mut na, c, &x, &y);
+    f::fiat_25519_selectznz(&mut nb, c, &y, &x);
+    a.0 = na;
+    b.0 = nb;
+}
+
+/// `a^(p-2)`, i.e. the inverse for non-zero `a`.
 ///
-/// Arithmetic rather than a branch: the scalar bit driving this is secret, and
-/// a branch on it is exactly what a timing attack reads.
-fn fe_cswap(swap: u64, a: &mut Fe, b: &mut Fe) {
-    let mask = 0u64.wrapping_sub(swap);
-    for i in 0..5usize {
-        let ai = a.get(i).copied().unwrap_or(0);
-        let bi = b.get(i).copied().unwrap_or(0);
-        let t = mask & (ai ^ bi);
-        if let Some(p) = a.get_mut(i) {
-            *p = ai ^ t;
-        }
-        if let Some(p) = b.get_mut(i) {
-            *p = bi ^ t;
-        }
-    }
-}
+/// A fixed addition chain: the exponent is public, so the work is identical
+/// whatever is being inverted.
+fn invert(a: &Tight) -> Tight {
+    let z2 = sq_t(a);
+    let z8 = sq_t(&sq_t(&z2));
+    let z9 = mul_t(&z8, a);
+    let z11 = mul_t(&z9, &z2);
+    let z22 = sq_t(&z11);
+    let z5 = mul_t(&z22, &z9);
 
-/// `a^(p-2)`, which is `a^-1` for non-zero `a`.
-///
-/// A fixed addition chain: the exponent is public, so this is the same work
-/// every time regardless of the value being inverted.
-fn fe_invert(a: &Fe) -> Fe {
-    let z2 = fe_sq(a);
-    let z8 = fe_sq(&fe_sq(&z2));
-    let z9 = fe_mul(&z8, a);
-    let z11 = fe_mul(&z9, &z2);
-    let z22 = fe_sq(&z11);
-    let z5 = fe_mul(&z22, &z9);
-
-    let mut t = fe_sq(&z5);
+    let mut t = sq_t(&z5);
     for _ in 0..4 {
-        t = fe_sq(&t);
+        t = sq_t(&t);
     }
-    let z10 = fe_mul(&t, &z5);
+    let z10 = mul_t(&t, &z5);
 
-    let mut t = fe_sq(&z10);
+    let mut t = sq_t(&z10);
     for _ in 0..9 {
-        t = fe_sq(&t);
+        t = sq_t(&t);
     }
-    let z20 = fe_mul(&t, &z10);
+    let z20 = mul_t(&t, &z10);
 
-    let mut t = fe_sq(&z20);
+    let mut t = sq_t(&z20);
     for _ in 0..19 {
-        t = fe_sq(&t);
+        t = sq_t(&t);
     }
-    let z40 = fe_mul(&t, &z20);
+    let z40 = mul_t(&t, &z20);
 
-    let mut t = fe_sq(&z40);
+    let mut t = sq_t(&z40);
     for _ in 0..9 {
-        t = fe_sq(&t);
+        t = sq_t(&t);
     }
-    let z50 = fe_mul(&t, &z10);
+    let z50 = mul_t(&t, &z10);
 
-    let mut t = fe_sq(&z50);
+    let mut t = sq_t(&z50);
     for _ in 0..49 {
-        t = fe_sq(&t);
+        t = sq_t(&t);
     }
-    let z100 = fe_mul(&t, &z50);
+    let z100 = mul_t(&t, &z50);
 
-    let mut t = fe_sq(&z100);
+    let mut t = sq_t(&z100);
     for _ in 0..99 {
-        t = fe_sq(&t);
+        t = sq_t(&t);
     }
-    let z200 = fe_mul(&t, &z100);
+    let z200 = mul_t(&t, &z100);
 
-    let mut t = fe_sq(&z200);
+    let mut t = sq_t(&z200);
     for _ in 0..49 {
-        t = fe_sq(&t);
+        t = sq_t(&t);
     }
-    let z250 = fe_mul(&t, &z50);
+    let z250 = mul_t(&t, &z50);
 
-    let mut t = fe_sq(&z250);
+    let mut t = sq_t(&z250);
     for _ in 0..4 {
-        t = fe_sq(&t);
+        t = sq_t(&t);
     }
-    fe_mul(&t, &z11)
+    mul_t(&t, &z11)
 }
 
-fn fe_from_bytes(b: &[u8; KEY_LEN]) -> Fe {
-    let ld = |i: usize| -> u64 {
-        let mut v = 0u64;
-        for k in 0..8usize {
-            let idx = i.wrapping_add(k);
-            let byte = b.get(idx).copied().unwrap_or(0);
-            v |= u64::from(byte) << (k.wrapping_mul(8));
-        }
-        v
-    };
-    [
-        ld(0) & MASK51,
-        (ld(6) >> 3) & MASK51,
-        (ld(12) >> 6) & MASK51,
-        (ld(19) >> 1) & MASK51,
-        (ld(24) >> 12) & MASK51,
-    ]
+fn from_bytes(b: &[u8; KEY_LEN]) -> Tight {
+    let mut o = tight_zero();
+    // The top bit is masked off before decoding, as RFC 7748 requires.
+    let mut m = *b;
+    if let Some(p) = m.get_mut(31) {
+        *p &= 0x7F;
+    }
+    f::fiat_25519_from_bytes(&mut o, &m);
+    o
 }
 
-fn fe_to_bytes(a: &Fe) -> [u8; KEY_LEN] {
-    let get = |t: &Fe, i: usize| -> u64 { t.get(i).copied().unwrap_or(0) };
-    let put = |t: &mut Fe, i: usize, v: u64| {
-        if let Some(p) = t.get_mut(i) {
-            *p = v;
-        }
-    };
-
-    // Normalise: limbs can exceed 2^51 on the way in, so carry until they do
-    // not. Twice is enough because each pass folds at most a small multiple.
-    let mut t = *a;
-    for _ in 0..2 {
-        let mut carry = 0u64;
-        for i in 0..5usize {
-            let v = get(&t, i).wrapping_add(carry);
-            put(&mut t, i, v & MASK51);
-            carry = v >> 51;
-        }
-        let v0 = get(&t, 0).wrapping_add(carry.wrapping_mul(19));
-        put(&mut t, 0, v0);
-    }
-
-    // Is the value >= p? Adding 19 and watching the top carry answers it
-    // without a comparison, so the result does not branch on the value.
-    let mut q = get(&t, 0).wrapping_add(19) >> 51;
-    for i in 1..5usize {
-        q = get(&t, i).wrapping_add(q) >> 51;
-    }
-    let v0 = get(&t, 0).wrapping_add(q.wrapping_mul(19));
-    put(&mut t, 0, v0);
-
-    let mut carry = 0u64;
-    for i in 0..5usize {
-        let v = get(&t, i).wrapping_add(carry);
-        put(&mut t, i, v & MASK51);
-        carry = v >> 51;
-    }
-    // Dropping the final carry is the subtraction of 2^255.
-
-    // Serialise with 64-bit shifts only. A u128 shift pulls in the
-    // compiler-rt intrinsic __ashlti3, which is an outside reference the
-    // panic-free artifact check flags — and nothing here needs 128 bits: a
-    // limb is 51 bits and at most 7 bits of carry-over sit above it.
-    let mut out = [0u8; KEY_LEN];
-    let mut acc: u64 = 0;
-    let mut bits: u32 = 0;
-    let mut li = 0usize;
-    for idx in 0..KEY_LEN {
-        if bits < 8 {
-            acc |= get(&t, li) << bits;      // bits < 8, limb < 2^51, so < 2^59
-            bits = bits.wrapping_add(51);
-            li = li.wrapping_add(1);
-        }
-        if let Some(p) = out.get_mut(idx) {
-            *p = (acc & 0xFF) as u8;
-        }
-        acc >>= 8;
-        bits = bits.wrapping_sub(8);
-    }
-    out
+fn to_bytes(a: &Tight) -> [u8; KEY_LEN] {
+    let mut o = [0u8; KEY_LEN];
+    f::fiat_25519_to_bytes(&mut o, a);
+    o
 }
 
 /// Clamp a scalar as RFC 7748 requires.
@@ -320,12 +205,12 @@ pub fn clamp(scalar: &[u8; KEY_LEN]) -> [u8; KEY_LEN] {
 /// left to [`x25519`] so this stays a pure ladder.
 fn scalarmult(scalar: &[u8; KEY_LEN], point: &[u8; KEY_LEN]) -> [u8; KEY_LEN] {
     let k = clamp(scalar);
-    let x1 = fe_from_bytes(point);
+    let x1 = from_bytes(point);
 
-    let mut x2 = fe_one();
-    let mut z2 = fe_zero();
+    let mut x2 = tight_one();
+    let mut z2 = tight_zero();
     let mut x3 = x1;
-    let mut z3 = fe_one();
+    let mut z3 = tight_one();
     let mut swap = 0u64;
 
     let mut pos: i32 = 254;
@@ -333,31 +218,31 @@ fn scalarmult(scalar: &[u8; KEY_LEN], point: &[u8; KEY_LEN]) -> [u8; KEY_LEN] {
         let byte = k.get((pos as usize) >> 3).copied().unwrap_or(0);
         let bit = u64::from((byte >> ((pos as u32) & 7)) & 1);
         swap ^= bit;
-        fe_cswap(swap, &mut x2, &mut x3);
-        fe_cswap(swap, &mut z2, &mut z3);
+        cswap(swap, &mut x2, &mut x3);
+        cswap(swap, &mut z2, &mut z3);
         swap = bit;
 
-        let a = fe_add(&x2, &z2);
-        let b = fe_sub(&x2, &z2);
-        let c = fe_add(&x3, &z3);
-        let d = fe_sub(&x3, &z3);
-        let da = fe_mul(&d, &a);
-        let cb = fe_mul(&c, &b);
-        let aa = fe_sq(&a);
-        let bb = fe_sq(&b);
-        let e = fe_sub(&aa, &bb);
+        let a = add(&x2, &z2);
+        let b = sub(&x2, &z2);
+        let aa = sq(&a);
+        let bb = sq(&b);
+        let e = sub(&aa, &bb);
+        let c = add(&x3, &z3);
+        let d = sub(&x3, &z3);
+        let da = mul(&d, &a);
+        let cb = mul(&c, &b);
 
-        x3 = fe_sq(&fe_add(&da, &cb));
-        z3 = fe_mul(&x1, &fe_sq(&fe_sub(&da, &cb)));
-        x2 = fe_mul(&aa, &bb);
-        z2 = fe_mul(&e, &fe_add(&bb, &fe_mul121666(&e)));
+        x3 = sq(&add(&da, &cb));
+        z3 = mul(&relax(&x1), &relax(&sq(&sub(&da, &cb))));
+        x2 = mul(&relax(&aa), &relax(&bb));
+        z2 = mul(&e, &add(&bb, &mul121666(&e)));
 
         pos = pos.saturating_sub(1);
     }
-    fe_cswap(swap, &mut x2, &mut x3);
-    fe_cswap(swap, &mut z2, &mut z3);
+    cswap(swap, &mut x2, &mut x3);
+    cswap(swap, &mut z2, &mut z3);
 
-    fe_to_bytes(&fe_mul(&x2, &fe_invert(&z2)))
+    to_bytes(&mul_t(&x2, &invert(&z2)))
 }
 
 /// The Curve25519 base point, u = 9.
