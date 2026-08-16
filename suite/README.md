@@ -66,6 +66,31 @@ Two consequences worth stating plainly. A ranging exchange needs the radio to it
 
 Source implementations that require particular hardware — a GNSS driver, a ranging driver — are out of scope here, as is any radio driver. This repository specifies the protocol and provides a portable implementation of it. See `SCOPE.md`.
 
+## Bundles, and what each one needs before it can be written
+
+The suite is **one crate per bundle**, so a consumer takes the core plus only what they want. `SCOPE.md` records how a bundle crate is added and gated; this is what each one *depends on*.
+
+| bundle | depends on | can be specified now? |
+|---|---|---|
+| **groups** | nothing beyond the core | **yes** — pure protocol |
+| **ranging (RTToF)** | a radio with hardware ranging | **no** — see below |
+
+### groups
+
+Owner, member roster and revocation, over authenticated channels. No hardware precondition: it is message formats and state, testable against the existing bench and provable with the same Kani harnesses the core uses. A roster under the no-allocation rule is a caller-provided fixed-capacity collection — the pattern `PacketHistory` and `delivery::Outbox` already use, so this is a known shape rather than an open question.
+
+**This is the bundle to specify first**, because nothing gates it.
+
+### ranging (RTToF)
+
+Round-trip time of flight measures distance from the time a signal takes to travel there and back. **It requires the radio to do the timing**, because the radio timestamps at sample level with calibration. Doing it in software fails badly: LoRa demodulation latency and processing jitter are milliseconds, and light covers 300 m per microsecond, so a millisecond of jitter is hundreds of kilometres of error.
+
+**The SX1262 has no ranging hardware**, so the current bench cannot exercise this at all. Semtech's a companion radio driver does, and the bundle becomes reachable once this library has a driver for a ranging-capable part.
+
+**Do not specify it before then, and the reason is not merely convenience.** A ranging protocol has two layers: the radio exchange, which the hardware performs, and the mesh-level carriage — requesting a range, reporting a result, associating it with a node. Only the second is protocol, and it *could* be drafted now. But the message format should follow what the radio actually reports, and designing the container before knowing what goes in it is how a format ends up carrying the wrong quantities at the wrong precision. This project has twice had a parameter written from documentation alone turn out wrong on contact with hardware; a whole message format is a larger bet of the same kind.
+
+So: **groups now, ranging after the port.**
+
 ---
 
 ## Licence and patent pledge
