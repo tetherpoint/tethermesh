@@ -60,7 +60,11 @@ That single capture resolved four open L0 items at once. The 16-byte header layo
 
 `meshtastic/core/header.rs` implements pack and unpack, tested against the captured frames rather than against itself — the distinction matters, because a big-endian header round-trips through its own encoder perfectly and is wrong only on the air. Both that error and a flag-bit misplacement were observed red.
 
-**Still to build here:** AES-128-CTR, and PSK index expansion. The nonce construction is now specified exactly, and the captured frames are known-answer vectors for it.
+**AES-128-CTR and PSK expansion are done too** — `meshtastic/core/crypto.rs`. Encryption only, because CTR never invokes the inverse cipher. Verified against the FIPS-197 published vector first, then against captured traffic: our own Rust decrypts real over-the-air frames to the exact text that was transmitted.
+
+Two notes on how it was built. The AES core needs variable indexing and index arithmetic on every line, which the crate denies outright; rather than suppress the lints for one file, every access goes through total accessors and wrapping index arithmetic. And a stored PSK is an **index, not a key** — feeding the stored bytes to AES computes a different key for the most common channel on the network, silently. Both the nonce byte order and that expansion were observed red against captured frames.
+
+**L2 is complete apart from framing the two halves together.**
 
 **Gate:** a real captured frame decrypts to parseable payload bytes. *Met.*
 

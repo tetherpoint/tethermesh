@@ -12,6 +12,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use tethermesh::channel::channel_hash;
+use tethermesh::crypto::{ctr_apply, expand_psk, nonce, Aes128, Psk, DEFAULT_KEY};
 use tethermesh::header::{Header, HEADER_LEN};
 use tethermesh::history::{PacketHistory, Seen};
 use tethermesh::message::{ChannelSettings, Data, PortNum, User};
@@ -850,4 +851,112 @@ fn a_short_frame_is_rejected_rather_than_read_past() {
         assert!(Header::decode(&vec![0u8; n]).is_none(), "accepted a {n}-byte header");
     }
     assert!(Header::decode(&[0u8; HEADER_LEN]).is_some());
+}
+
+/// FIPS-197 Appendix C.1 — the published AES-128 known-answer vector.
+///
+/// Checked before anything else: if the block cipher is wrong, every
+/// downstream test is testing the wrong thing, and a CTR test would still
+/// "pass" against our own broken keystream.
+#[test]
+fn aes128_matches_the_fips197_vector() {
+    let key = hex_to_bytes("000102030405060708090a0b0c0d0e0f");
+    let mut block = [0u8; 16];
+    block.copy_from_slice(&hex_to_bytes("00112233445566778899aabbccddeeff"));
+
+    let mut k = [0u8; 16];
+    k.copy_from_slice(&key);
+    Aes128::new(&k).encrypt_block(&mut block);
+
+    assert_eq!(
+        block.iter().map(|b| format!("{b:02x}")).collect::<String>(),
+        "69c4e0d86a7b0430d8cdb78070b4c55a"
+    );
+}
+
+/// The nonce construction, against frames captured off the air.
+///
+/// The plaintext is known because we transmitted it, so this is a direct
+/// check rather than a plausibility argument: wrong nonce, wrong byte order
+/// or wrong counter semantics all produce garbage rather than the text.
+#[test]
+fn captured_frames_decrypt_to_the_text_that_was_transmitted() {
+    let doc = fs::read_to_string(captures_dir().join("on_air_frames.json")).unwrap();
+
+    let mut raws = Vec::new();
+    let mut from = 0usize;
+    while let Some(hit) = doc[from..].find("\"raw_hex\"") {
+        let abs = from + hit;
+        if let Some(s) = json_str(&doc[abs..], "raw_hex") {
+            raws.push(s.to_string());
+        }
+        from = abs + 9;
+    }
+    assert!(raws.len() >= 3);
+
+    let Psk::Aes128(key) = expand_psk(&[0x01]).expect("short PSK #1 must expand") else {
+        panic!("the default channel key is AES-128")
+    };
+
+    for (i, hex) in raws.iter().enumerate() {
+        let frame = hex_to_bytes(hex);
+        let h = Header::decode(&frame).unwrap();
+        let mut body = frame[HEADER_LEN..].to_vec();
+
+        ctr_apply(&key, &nonce(h.id, h.from, 0), &mut body);
+
+        let text = format!("sniff-probe-{i}");
+        let found = String::from_utf8_lossy(&body).contains(&text);
+        assert!(
+            found,
+            "frame {i} did not decrypt to {text:?}; got {}",
+            body.iter().map(|b| format!("{b:02x}")).collect::<String>()
+        );
+
+        // And it must be a well-formed Data message, not merely contain the text.
+        let d = Data::decode(&body).expect("plaintext should parse as Data");
+        assert_eq!(d.portnum, PortNum::TEXT_MESSAGE_APP.0);
+        assert_eq!(d.payload, text.as_bytes());
+    }
+}
+
+/// CTR is its own inverse, and must cross an AES block boundary correctly.
+#[test]
+fn ctr_is_symmetric_across_block_boundaries() {
+    let key = [0x42u8; 16];
+    let n = nonce(0xdead_beef, 0x1234_5678, 0);
+    for len in [0usize, 1, 15, 16, 17, 31, 32, 33, 200] {
+        let original: Vec<u8> = (0..len).map(|i| (i as u8).wrapping_mul(31)).collect();
+        let mut buf = original.clone();
+        ctr_apply(&key, &n, &mut buf);
+        if len > 0 {
+            assert_ne!(buf, original, "len {len}: ciphertext equals plaintext");
+        }
+        ctr_apply(&key, &n, &mut buf);
+        assert_eq!(buf, original, "len {len}: round trip failed");
+    }
+}
+
+/// A stored PSK is an index, not a key. Feeding the stored bytes straight to
+/// AES computes a different key for the most common channel on the network.
+#[test]
+fn short_psk_indices_expand_to_the_documented_keys() {
+    assert_eq!(expand_psk(&[]), Some(Psk::None));
+    assert_eq!(expand_psk(&[0x00]), Some(Psk::None));
+
+    let Psk::Aes128(k1) = expand_psk(&[0x01]).unwrap() else { panic!() };
+    assert_eq!(k1, DEFAULT_KEY, "index 1 is the default key unchanged");
+
+    // 2..=10 add n-1 to the LAST byte.
+    let Psk::Aes128(k2) = expand_psk(&[0x02]).unwrap() else { panic!() };
+    assert_eq!(k2[15], DEFAULT_KEY[15].wrapping_add(1));
+    assert_eq!(k2[..15], DEFAULT_KEY[..15]);
+
+    let Psk::Aes128(k10) = expand_psk(&[0x0a]).unwrap() else { panic!() };
+    assert_eq!(k10[15], DEFAULT_KEY[15].wrapping_add(9));
+
+    assert_eq!(expand_psk(&[0x0b]), None, "index 11 is not defined");
+    assert!(matches!(expand_psk(&[0u8; 16]), Some(Psk::Aes128(_))));
+    assert!(matches!(expand_psk(&[0u8; 32]), Some(Psk::Aes256(_))));
+    assert_eq!(expand_psk(&[0u8; 7]), None, "undefined length must be rejected");
 }

@@ -38,8 +38,11 @@ are not interchangeable:
   value but say nothing about how those fields are packed;
 - **synthetic known-answer vectors**, computed from verified functions.
 
-Raw on-air frames need a radio; see `meshtastic/WIRE_REFERENCE.md` for why no
-local route produces them.
+**Raw on-air frames now exist** — `on_air_frames.json`, captured 2026-08-16 by
+our own SX1262 receiver listening to a stock node. They are the only fixtures
+that can catch an endianness or nonce error, because everything else in the
+suite is checked against something we produced ourselves and would agree with
+a wrong implementation perfectly.
 
 ## What has been observed red
 
@@ -59,6 +62,8 @@ Per the rule above, recorded rather than claimed:
 | duplicate suppression, recording | reported `New` but never stored the entry | 5 failures, including eviction ordering |
 | header codec, endianness | read multi-byte fields big-endian | `sender does not match the transmitting board` |
 | header codec, flag bits | read `hop_start` from bits 3-5 instead of 5-7 | `hop_start should match the original hop_limit` |
+| CTR nonce byte order | big-endian `packet_id` in the nonce | captured frame decrypted to `fbd305d3…` instead of the text |
+| PSK expansion | treated a one-byte PSK as a literal key | captured frames failed to decrypt, and the vector test failed |
 
 The header rows are the ones that justify capturing real frames at all. A
 big-endian header round-trips through our own encoder perfectly — it is only

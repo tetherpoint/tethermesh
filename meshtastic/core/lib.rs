@@ -47,6 +47,7 @@
 #![deny(unsafe_code)]
 
 pub mod channel;
+pub mod crypto;
 pub mod header;
 pub mod history;
 pub mod message;
