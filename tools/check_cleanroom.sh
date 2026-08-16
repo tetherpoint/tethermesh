@@ -95,7 +95,12 @@ while IFS= read -r f; do
         # "we derive nothing from RadioLib" is what an adopter's legal review
         # needs, and a circumlocution would be worse for the reader and no
         # safer. Same category as the entries beside it.
-        PLAN.md|README.md|suite/README.md|docs/*|meshtastic/WIRE_REFERENCE.md) may_name_it=1 ;;
+        # NOTICE joined on 2026-08-16 for the same reason as suite/README.md:
+        # its clean-room statement has to name what this stack does NOT derive
+        # from. Note it passed this gate before being committed and failed
+        # immediately after -- `git ls-files` does not see untracked files, so
+        # a new file is unscanned until it is staged. Use --staged pre-commit.
+        PLAN.md|README.md|NOTICE|suite/README.md|docs/*|meshtastic/WIRE_REFERENCE.md) may_name_it=1 ;;
         # Pinned upstream code, licence recorded in DEPS.md. Not held to rules
         # about how WE write code, but it IS scanned for GPL contamination --
         # see the submodule sweep after this loop, which is where the real

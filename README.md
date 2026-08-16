@@ -5,7 +5,40 @@
 
 **A clean-room-built Meshtastic-compatible stack, with new extensions.**
 
-Status: **early. Specification work landed; codec implementation not started.** No LICENSE yet — see below before relying on anything here.
+Status: **L0–L6 complete.** Wire reference settled, codec and crypto implemented, routing done, and a stock unmodified node accepts our traffic — including PKI direct messages — on real hardware. Extension suite (L7) and release engineering (L8) remain. Licensed **Apache-2.0**.
+
+## Purpose
+
+**To let anyone build on the Meshtastic mesh without inheriting its licence, its firmware, or its limits.**
+
+Meshtastic works and its network exists. What it lacks is a way for someone else to add capability to that network: the firmware and schemas are GPL-3.0, so building on them means becoming GPL-3.0, and the protocol has no authentication on channel traffic at all. tethermesh answers both. It is an independently written, permissively licensed implementation of the on-air protocol — usable from C, C++ or Rust firmware as an ordinary static library — plus an extension suite that adds authenticated messaging and managed groups **while remaining invisible to, and carried by, unmodified stock nodes**.
+
+The goal is adoption by other implementers, including commercial ones. Everything below follows from that.
+
+## Principles
+
+These are enforced by `tools/check_all.sh` on every run, not left to discipline. Each has already caught a real defect.
+
+- **Clean-room from the protocol, never from the source.** Facts about the wire may be learned; expression may not. The `.proto` files are read as specification and never vendored or run through a code generator; the GPL-3.0 radio-driver library this ecosystem builds on is off limits entirely. Enforced by `tools/check_cleanroom.sh`, over the working tree *and* the vendored submodules.
+- **No panics on hostile input.** This parses untrusted frames from a public mesh. With `panic = "abort"` a panic halts the node, so an unchecked panic path turns a memory bug into a remote denial of service. No `unwrap`, no indexing, no bare arithmetic. Checked against the **built object**, not the source — which is what caught a live panic path in `frame::encode` that source review had missed.
+- **No allocation.** `no_std`, no global allocator, caller-provided buffers. An allocator on a microcontroller is a failure mode, not a convenience. This is why a formally verified crypto crate was rejected after measurement.
+- **No mutable global state.** `Send`/`Sync` do not cross an FFI boundary that a foreign RTOS scheduler calls into, so concurrency safety is a property of API shape, not of the language.
+- **No `unsafe`** in our own code.
+- **Nothing overstated.** Documentation separates *proven* from *checked against someone else's answer* from *neither*, and says which document would settle an open claim. See `docs/FORMAL-VERIFICATION.md`.
+- **Green and red, with red proven.** Every guard has been observed to fire. A test that has never failed is not yet a test.
+- **Measure, don't assume.** Where a figure could be derived or observed, it is observed. Two claims written from documentation alone turned out wrong on contact with hardware, and both were caught this way rather than by review.
+
+## Cryptography: verified where it counts, and offloadable
+
+**The X25519 field arithmetic is formally verified and is not ours.** Multiplication, squaring, addition, subtraction, carrying, the 121666 scalar multiply, serialisation and the constant-time select all come from [`fiat-crypto`](https://github.com/mit-plv/fiat-crypto), generated from **Coq proofs** by MIT PLV — the same pipeline BoringSSL uses — and called unmodified from an in-tree pinned submodule.
+
+**Be precise about the split, because it matters.** What is proven is the field arithmetic. The Montgomery ladder and the fixed-chain inversion built on top are **ours and are not proven**; they are checked against RFC 7748's published vectors and against two independent implementations (`x25519-dalek` and the formally verified `libcrux-curve25519`) across hundreds of random agreements per test run. That split is deliberate: the ladder is short and public, while field arithmetic is where subtle bugs live — and the one bug this project actually shipped, a `fe_sub` biased by `p` instead of `2p`, was in the half that is now verified.
+
+fiat-crypto was chosen because it is the only option measured that is formally verified **and** costs nothing against the rules above: no allocator, and **zero panic paths above a no-dependency baseline**. Measured, not assumed — `tools/measure_panic_symbols.sh` reproduces it.
+
+**Hardware acceleration is a supported seam.** `meshtastic/core/backend.rs` lets an implementer route any subset of the primitives — X25519, SHA-256, AES-CTR, AES-CCM — onto silicon, per primitive rather than all-or-nothing, with a software default for everything not overridden. The reason is side-channel resistance and key custody rather than speed: a part with key storage can perform an agreement using a private key that never becomes addressable, which is a promise software on a general-purpose core cannot make.
+
+**With a caveat worth stating up front: X25519 acceleration is rare.** Of nine parts surveyed in `docs/HARDWARE-BACKENDS.md`, exactly **one** accelerates Curve25519. Most parts advertising an "ECC accelerator" implement NIST prime curves only and cannot touch it — several even advertise constant-time point multiplication, on curves this stack does not use. Check the specific part; do not assume.
 
 ## What this is
 
@@ -53,7 +86,7 @@ Portable `no_std` Rust with no hardware dependency, exported over a C ABI. A rad
 
 `meshtastic/WIRE_REFERENCE.md`. It is pinned to a specific upstream schema commit and splits **verified** facts from **unverified** ones, because the wire format moves between releases and because several widely repeated claims turned out to be stale. Notably: `DATA_PAYLOAD_LEN` is 233, there are 17 modem presets rather than the 7 usually listed, and routing has included next-hop since firmware 2.6.
 
-Six items remain unverified and block the frame codec — header byte layout, CTR nonce construction, channel hash function, PKI/DM details, the raw sync-word register value, and per-preset SF/BW/CR parameters. Most fall out of decoding a single real frame.
+All six items that once blocked the frame codec are now settled on hardware — header byte layout, CTR nonce, channel hash, PKI/DM scheme, sync-word register values and per-preset modulation parameters. What remains open is listed in that document's UNVERIFIED section with the measurement each would need.
 
 ## Conventions
 
@@ -64,6 +97,12 @@ Six items remain unverified and block the frame codec — header byte layout, CT
 
 ## Licence
 
-**Not yet chosen.** Nothing here should be relied on until it is — an unlicensed work is all-rights-reserved by default, which is the opposite of the intent.
+**Apache-2.0**, for the code and the specification alike. See `LICENSE` and `NOTICE`; the reasoning is in `docs/LICENSING-OPTIONS.md`.
 
-The intent is permissive. `docs/LICENSING-OPTIONS.md` sets out the trade-offs: Apache-2.0 versus MIT for the code, and whether the specification should carry CC-BY-4.0 separately. The standing recommendation is Apache-2.0 for code and CC-BY-4.0 for the spec, plus an explicit patent pledge — because a clean-room implementer working from the spec alone otherwise receives no patent assurance at all.
+Apache-2.0 over MIT for its **explicit patent grant**, because the strategy is adoption by other implementers — possibly commercial ones — of a *cryptographic* suite, which is where patent uncertainty is taken most seriously.
+
+The specification carries the same licence rather than CC-BY-4.0, for the same reason: **CC-BY-4.0 licenses no patent rights at all**, so a separate spec licence would deny a patent grant to precisely the adopter this project exists for — the one who reads the specification and writes their own clean-room implementation.
+
+`suite/README.md` additionally carries an **unconditional patent non-assertion pledge**. You may implement this specification independently, commercially, in any language, without permission and without telling anyone.
+
+Every file declares its licence; `tools/check_spdx.sh` enforces that, so a file cannot arrive undeclared. Vendored submodules under `third_party/` retain their own licences — see `DEPS.md` and `NOTICE`.
