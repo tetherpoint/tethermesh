@@ -64,7 +64,31 @@ fail() { printf '\033[31m[cleanroom] VIOLATION: %s\033[0m\n' "$*" >&2; violation
 # One definition for both the in-tree check and the submodule sweep below.
 # These were written out twice and the copies disagreed: the sweep was
 # missing a pattern, so a submodule could carry a header the tree could not.
-GPL_HEADER_RE="GNU GENERAL PUBLIC LICENSE|SPDX-License-Identifier: *GPL|This program is free software"
+#
+# THE PATTERNS LIVE IN A DATA FILE, AND THAT IS THE POINT. A scanner that
+# defines its own blacklist matches on itself, so this file used to skip itself
+# entirely -- which meant the one file that could carry a real GPL header
+# undetected was this one. Demonstrated 2026-08-16, not theorised. Moving the
+# strings to tools/gpl-patterns.txt shrinks the unavoidable exemption from a
+# whole program to a list of literals anyone can read in seconds.
+PATTERN_FILE="$ROOT/tools/gpl-patterns.txt"
+if [ ! -r "$PATTERN_FILE" ]; then
+    printf '\033[31m[cleanroom] REFUSING: %s is missing or unreadable.\033[0m\n' "$PATTERN_FILE" >&2
+    printf '        The GPL patterns are not compiled in and there is no fallback,\n' >&2
+    printf '        deliberately: an empty pattern set would disable this gate while\n' >&2
+    printf '        every log line still read OK.\n' >&2
+    exit 1
+fi
+# `|| true` matters: under `set -euo pipefail` a grep that matches nothing exits
+# 1 and kills the script HERE, before the guard below can say why. That fails
+# safe -- non-zero, nothing passes -- but it fails SILENTLY, and a checker that
+# dies without a message is the same defect as one that passes without looking.
+# Found by red-testing an empty pattern file, not by reading this code.
+GPL_HEADER_RE=$(grep -vE '^[[:space:]]*(#|$)' "$PATTERN_FILE" | paste -sd '|' - || true)
+if [ -z "$GPL_HEADER_RE" ]; then
+    printf '\033[31m[cleanroom] REFUSING: %s contains no patterns.\033[0m\n' "$PATTERN_FILE" >&2
+    exit 1
+fi
 
 violations=0
 MODE="${1:-full}"
@@ -88,7 +112,9 @@ while IFS= read -r f; do
     # Naming it and carrying its licence header are different acts.
     may_name_it=0
     case "$f" in
-        tools/check_cleanroom.sh) continue ;;
+        # The data file is the only true exemption left, and it has to be:
+        # it IS the blacklist. It is three literal lines and a comment block.
+        tools/gpl-patterns.txt) continue ;;
         # suite/README.md joined this list on 2026-08-16, when the licence
         # decision put a clean-room statement and patent pledge in it. A
         # non-derivation statement has to NAME what it does not derive from --
@@ -100,7 +126,11 @@ while IFS= read -r f; do
         # from. Note it passed this gate before being committed and failed
         # immediately after -- `git ls-files` does not see untracked files, so
         # a new file is unscanned until it is staged. Use --staged pre-commit.
-        PLAN.md|README.md|NOTICE|suite/README.md|docs/*|meshtastic/WIRE_REFERENCE.md) may_name_it=1 ;;
+        # check_cleanroom.sh is now SCANNED rather than skipped -- it no longer
+        # contains the GPL header strings, which moved to the data file. It
+        # still names the forbidden radio library in its own error message and
+        # in the comment explaining the rule, so it needs this and only this.
+        PLAN.md|README.md|NOTICE|suite/README.md|docs/*|meshtastic/WIRE_REFERENCE.md|tools/check_cleanroom.sh) may_name_it=1 ;;
         # Pinned upstream code, licence recorded in DEPS.md. Not held to rules
         # about how WE write code, but it IS scanned for GPL contamination --
         # see the submodule sweep after this loop, which is where the real

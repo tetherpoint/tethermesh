@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: 2026 The tethermesh Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# gpl-patterns.txt — the strings tools/check_cleanroom.sh refuses to find.
+#
+# WHY THESE LIVE IN A DATA FILE
+# -----------------------------
+# A scanner that defines its own blacklist cannot be checked against that
+# blacklist: it matches on itself. check_cleanroom.sh handled that by skipping
+# itself entirely -- `continue`, every check -- which meant the one file in the
+# repository that could carry a genuine GPL licence header undetected was the
+# file enforcing the rule. That was demonstrated on 2026-08-16 by pasting a
+# real GPL-3.0 header into it and watching the gate report OK.
+#
+# The exemption is structural and cannot be removed, only made small. So it is
+# moved HERE. The unchecked surface goes from a 190-line program to this file,
+# which contains nothing but literal strings and can be read in full in a few
+# seconds by anyone who wants to confirm it hides nothing.
+#
+# FORMAT
+#   One extended-regular-expression alternative per line. Blank lines and
+#   lines beginning with '#' are ignored. The remainder are joined with '|'
+#   into a single ERE.
+#
+# IF THIS FILE GOES MISSING, THE GATE REFUSES.
+#   It does not fall back to a built-in list and it does not pass. An empty or
+#   unreadable pattern set would silently disable the check while every log
+#   line still read OK, which is precisely the failure mode this repository
+#   exists to prevent. Deleting this file breaks the build, loudly, on purpose.
+#
+# WHY EACH PATTERN
+#   The first is the licence's own title, which appears in the header block of
+#   GPL-licensed sources. The second is the machine-readable tag. The third is
+#   the opening line of the standard GPL notice paragraph, which is present in
+#   many files that carry no title and no SPDX tag at all.
+
+GNU GENERAL PUBLIC LICENSE
+SPDX-License-Identifier: *GPL
+This program is free software
