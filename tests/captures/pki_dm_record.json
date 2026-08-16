@@ -1,0 +1,39 @@
+{
+  "record": "pki_direct_message",
+  "date": "2026-08-16",
+  "resolves": "WIRE_REFERENCE.md UNVERIFIED item 4 \u2014 the PKI/DM scheme",
+  "method": "We published an X25519 public key for a synthetic node via NodeInfo, then drove the stock node's own API to send that node a text. The resulting frame was captured off the air by our receiver and decrypted with the matching private key.",
+  "frame_hex": "0100577e64e769339af44fc063000064036a57dcaa29a26e1fab2b56a160ab4e2f1660e31b3a9e8ac92df45158",
+  "header": {
+    "to": "0x7e570001",
+    "from": "0x3369e764",
+    "id": "0xc04ff49a",
+    "flags": "0x63",
+    "channel": "0x00",
+    "next_hop": 0,
+    "relay_node": "0x64"
+  },
+  "scheme": {
+    "key_agreement": "X25519",
+    "kdf": "SHA-256 over the raw X25519 shared secret",
+    "cipher": "AES-256-CCM",
+    "key_size": "32 bytes \u2014 the full SHA-256 output, NOT truncated to 128 bits",
+    "tag_size": "8 bytes",
+    "nonce": "13 bytes: packet_id (u32 LE) || extra_nonce (4 bytes) || from (u32 LE) || 0x00",
+    "payload_layout": "ciphertext || tag(8) || extra_nonce(4)",
+    "channel_hash": "0x00 \u2014 this is how a PKI packet is distinguished on the wire"
+  },
+  "verification": {
+    "ecdh_agrees_both_directions": true,
+    "derived_key_prefix": "d885d224e6cc3de0",
+    "firmware_reported_prefix": "d8 85 d2 24 e6 cc 3d e0",
+    "reconstructed_nonce": "9af44fc02df4515864e7693300",
+    "firmware_reported_nonce": "9a f4 4f c0 2d f4 51 58 64 e7 69 33 00",
+    "plaintext": "0801120b706b692d70726f62652d424800",
+    "plaintext_decoded": "Data{portnum=1, payload='pki-probe-B', bitfield=0}"
+  },
+  "behaviour_notes": [
+    "A stock node uses PKI for direct messages by default and REFUSES to fall back to channel encryption when the destination's public key is unknown: 'Unknown public key for destination node ..., refusing to send legacy DM'. A node that has not published a key cannot be sent a DM at all.",
+    "The node must have learned the key in the CURRENT boot; a freshly learned node lost across a reset takes the key with it."
+  ]
+}

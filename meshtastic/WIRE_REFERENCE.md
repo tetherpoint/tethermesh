@@ -1,6 +1,6 @@
 # WIRE_REFERENCE — Meshtastic on-air facts
 
-**Status: v3, 2026-08-16. P0 deliverable, partially complete — read the UNVERIFIED section before writing any codec.** v3 adds on-air capture from real hardware: the 16-byte header layout, the AES-CTR nonce, the sync word and LongFast's modem parameters are all resolved, and the load-bearing relay assumption is settled. **Only the PKI/DM details remain open.**
+**Status: v4, 2026-08-16. P0 deliverable, partially complete — read the UNVERIFIED section before writing any codec.** v3 adds on-air capture from real hardware: the 16-byte header layout, the AES-CTR nonce, the sync word and LongFast's modem parameters are all resolved, and the load-bearing relay assumption is settled. **Every item that can be settled without a second hardware generation is now settled.**
 
 This is the single source of truth for what tethermesh puts on and takes off the air. Every claim is sourced. Where this document disagrees with any secondary description of the Meshtastic protocol — including widely repeated ones — this document wins, because those descriptions were checked and several were stale.
 
@@ -192,6 +192,28 @@ Every field cross-checks against something established independently. `to` is th
 
 **All multi-byte fields are little-endian.** Note this is the opposite of the protobuf `fixed32` byte order intuition some readers bring, and it is the single most likely thing to get silently wrong.
 
+### Item 4 — PKI direct messages
+
+**Resolved 2026-08-16.** We published an X25519 public key for a synthetic node, drove the stock node's own API to send that node a text, captured the frame off the air, and decrypted it with the matching private key.
+
+```
+key agreement  X25519
+KDF            SHA-256 over the raw shared secret
+cipher         AES-256-CCM, 8-byte tag
+key size       32 bytes — the FULL SHA-256 output, not truncated to 128 bits
+nonce (13 B)   packet_id (u32 LE) || extra_nonce (4 B) || from (u32 LE) || 0x00
+payload        ciphertext || tag(8) || extra_nonce(4)
+channel byte   0x00 — this is how a PKI packet is distinguished on the wire
+```
+
+The extra nonce travels **appended to the payload**, which is the part the draft could not say. A receiver reads the last four bytes first, rebuilds the nonce, then authenticates and decrypts what precedes them.
+
+Confirmed against the firmware's own debug output, which prints both the nonce and the first bytes of the derived key: our reconstruction matched `9a f4 4f c0 2d f4 51 58 64 e7 69 33 00` and `d8 85 d2 24 e6 cc 3d e0` exactly, and the ciphertext decrypted to `Data{portnum=1, payload="pki-probe-B"}`.
+
+**Direct messages are authenticated; channel messages are not.** CCM carries a tag, so a forged DM fails verification. That is a real asymmetry: the forgery weakness recorded above applies to channel traffic, not to the PKI path.
+
+**Two behaviours that constrain any implementation.** A stock node uses PKI for direct messages **by default and refuses to fall back** to channel encryption when it does not hold the destination's public key — *"Unknown public key for destination node …, refusing to send legacy DM"*. A node that has never published a key cannot be sent a direct message at all. And the key must have been learned in the current boot; a node learned and then lost across a reset takes the key with it.
+
 ### Item 2 — the AES-CTR nonce
 
 ```
@@ -219,7 +241,7 @@ These are commonly asserted in secondary descriptions and are **not** confirmed 
 1. ~~**The 16-byte header byte layout**~~ — **RESOLVED 2026-08-16** by on-air capture, above.
 2. ~~**The AES-CTR nonce construction**~~ — **RESOLVED 2026-08-16** by decrypting captured frames to known plaintext, above.
 3. ~~**The channel hash function**~~ — **RESOLVED 2026-08-15** by oracle observation, above. It is `xor_fold(name) ^ xor_fold(psk)`.
-4. **The PKI/DM scheme details** — the docs confirm Curve25519 with "encryption and digital signatures" and mention "AES-CTR or AES-CCM" for admin session keys, but not the DM KDF, tag size, or where the extra nonce travels.
+4. ~~**The PKI/DM scheme details**~~ — **RESOLVED 2026-08-16** by capturing and decrypting a real direct message, above. The docs had confirmed Curve25519 and mentioned "AES-CTR or AES-CCM" without saying which, nor the KDF, the tag size, or where the extra nonce travels. All four are now measured.
 5. ~~**The raw sync-word register value**~~ — **RESOLVED 2026-08-16**: `0x0740 = 0x24`, `0x0741 = 0xB4`, confirmed by decoding real traffic.
 6. **Preset SF/BW/CR parameters** — **LongFast resolved** (SF11 / BW250 / CR4/5); sixteen presets remain, including the 62.5 kHz and 20 kHz variants.
 

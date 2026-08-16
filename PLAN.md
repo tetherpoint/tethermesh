@@ -22,7 +22,20 @@ So hardware is needed for exactly two things: **the physical layer** (sync word 
 
 The correction: **the raw frame does not appear at the simulated-radio boundary.** The reference's `SimRadio` is process-local — it loops the frame back inside the same process, no socket carries it, and two local instances do not hear each other. What the oracle yields is a *field-level* view (every header field named with its value), not a byte-level one, so it cannot settle header packing or the CTR nonce. Those now need a real radio, an authoritative document, or differential testing against their decoder. See `meshtastic/WIRE_REFERENCE.md` § UNVERIFIED.
 
-**Gate:** every item either verified with a source, or explicitly still open. No item silently promoted from "commonly asserted" to "fact". *Gate holds — items 1, 2, 4, 5, 6 are marked open, with the reason each is open now recorded.*
+**2026-08-16 — L0 IS COMPLETE.** All six items are resolved or explicitly bounded:
+
+| item | state |
+|---|---|
+| 1 header byte layout | resolved by on-air capture |
+| 2 AES-CTR nonce | resolved by decrypting captured frames to known plaintext |
+| 3 channel hash | resolved by observation, two data points |
+| 4 PKI/DM scheme | resolved by capturing and decrypting a real direct message |
+| 5 sync word | resolved — `0x0740=0x24`, `0x0741=0xB4`, confirmed by decoding real traffic |
+| 6 modem parameters | LongFast resolved; sixteen presets remain, reachable the same way |
+
+Item 6 is the only one still partly open, and it is bounded rather than unknown: the method that resolved LongFast works unchanged for the rest, and the bench boards arrived running `VLongSlow` at 62.5 kHz.
+
+**Gate:** every item either verified with a source, or explicitly still open. No item silently promoted from "commonly asserted" to "fact". *Met.*
 
 ## L1 — oracle harness and fixture corpus
 
@@ -147,6 +160,21 @@ Deliberately **not** included: a `should_relay`. Suppression is one input to the
 ## L6 — PKI direct messages
 
 X25519 key agreement and the AEAD path for direct messages. Identity persistence is a caller concern; this layer provides the construction.
+
+**2026-08-16 — the construction is now fully specified**, so this phase is implementation rather than investigation:
+
+```
+key agreement  X25519
+KDF            SHA-256 over the raw shared secret
+cipher         AES-256-CCM, 8-byte tag, full 32-byte key
+nonce (13 B)   packet_id (u32 LE) || extra_nonce (4 B) || from (u32 LE) || 0x00
+payload        ciphertext || tag(8) || extra_nonce(4)
+channel byte   0x00 distinguishes a PKI packet on the wire
+```
+
+**Direct messages are authenticated and channel messages are not.** The forgery weakness this project keeps flagging applies to channel traffic only; CCM's tag means a forged DM fails verification. That asymmetry is worth carrying into the suite's design, because it narrows what the AEAD extension has to add.
+
+Two behaviours constrain any implementation: a stock node uses PKI for DMs **by default and refuses to fall back** to channel encryption without the destination's public key, so a node that never publishes a key cannot be messaged directly at all; and the key must have been learned in the current boot.
 
 **Gate:** decrypt a captured direct message; produce one the reference accepts.
 

@@ -1115,14 +1115,28 @@ fn emit_conformance_frame_for_the_bench() {
 #[test]
 fn emit_nodeinfo_frame_for_the_bench() {
     const FROM: u32 = 0x7e57_0001;
-    const ID: u32 = 0x0bad_c0df;
+    // Overridable: a repeated (from, id) is dropped by their duplicate
+    // suppression, so a resend with a stale id is indistinguishable from a
+    // frame that never arrived. That has now cost two debugging cycles.
+    let id: u32 = std::env::var("NI_ID").ok()
+        .and_then(|v| u32::from_str_radix(v.trim_start_matches("0x"), 16).ok())
+        .unwrap_or(0x0bad_c0df);
 
     let Psk::Aes128(key) = expand_psk(&[0x01]).unwrap() else { panic!() };
+
+    // Our X25519 public key, supplied by the bench. Publishing it is what
+    // lets a stock node choose the PKI path when it addresses us — the
+    // scheme cannot be observed until something uses it.
+    let pk_hex = std::env::var("TM_PUBKEY").unwrap_or_default();
+    let pk: Vec<u8> = (0..pk_hex.len() / 2)
+        .map(|i| u8::from_str_radix(&pk_hex[i * 2..i * 2 + 2], 16).unwrap_or(0))
+        .collect();
 
     let user = User {
         id: b"!7e570001",
         long_name: b"tethermesh",
         short_name: b"tm",
+        public_key: &pk,
         // Deprecated since 2.1.x and still emitted by 2.7.26 — matching what
         // a stock node puts on the wire rather than what the schema implies.
         macaddr: &[0, 0, 0, 0, 0, 0],
@@ -1144,7 +1158,7 @@ fn emit_nodeinfo_frame_for_the_bench() {
     let header = Header {
         to: 0xFFFF_FFFF,
         from: FROM,
-        id: ID,
+        id,
         hop_limit: 3,
         hop_start: 3,
         channel: channel_hash(b"LongFast", &key),
