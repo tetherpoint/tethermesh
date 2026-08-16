@@ -35,15 +35,18 @@
 //! sharply in what they accelerate, and an all-or-nothing trait would force
 //! implementers to either reimplement everything or use none of it.
 //!
-//! No two of the four parts surveyed in `docs/HARDWARE-BACKENDS.md` accelerate
-//! the same set. Check the reference manual for the specific part rather than
-//! trusting a summary; this is exactly the kind of claim that is stale as often
-//! as not.
+//! Of the nine parts surveyed in `docs/HARDWARE-BACKENDS.md`, **exactly one
+//! accelerates this stack's curve** — and several that advertise an "ECC
+//! accelerator" cannot touch Curve25519, because their unit is NIST-prime only.
+//! Check the reference manual for the specific part rather than trusting a
+//! summary; this is exactly the kind of claim that is stale as often as not,
+//! and the 2026-08-16 survey found one entry in that document confidently
+//! wrong for precisely this reason.
 //!
 //! # Two things this seam learned from real parts
 //!
 //! The first version of this trait was written against an on-chip accelerator
-//! and was wrong for two of the four parts surveyed. Both corrections are worth
+//! and was wrong for two of the parts surveyed. Both corrections are worth
 //! stating, because both are invisible until an implementer hits them.
 //!
 //! **Hardware fails, and failure is not an answer.** An off-chip companion such

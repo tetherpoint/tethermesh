@@ -25,14 +25,32 @@ It also covers precisely the layer where the hand-written code failed: the
 first draft of `x25519.rs` biased `fe_sub` by `p` instead of `2p`. That is a
 field-arithmetic bug, and field arithmetic is what fiat proves.
 
-**On linkage.** It is a crates.io dependency rather than a submodule, and the
-choice is narrow. Unlike libcrux — whose manifest inherits workspace keys and
-therefore fails to resolve for downstream consumers — fiat-crypto is entirely
-self-contained. Either would work. crates.io was chosen because `Cargo.lock`
-records a SHA256 of the exact crate contents, which pins content rather than
-history, and because the upstream repository is 176 MB of Coq development for
-roughly 700 lines of generated Rust. Switching is a one-line change if
-in-tree auditability is later preferred.
+**On linkage.** It is an in-tree git submodule, pinned at
+`a6ddbd4e89e1714cb825437a401505b9c76537cf` and sparse-checked-out to
+`fiat-rust/` only. `Cargo.toml` carries a path dependency on it; see `DEPS.md`
+for the pin of record.
+
+An earlier draft of this section argued the opposite — that a crates.io pull
+was preferable, because `Cargo.lock` records a SHA256 of the crate contents
+(pinning content rather than history) and because the upstream repository is
+176 MB of Coq development for roughly 700 lines of generated Rust. That
+reasoning was overtaken within one commit and is kept here only so the
+reversal is legible:
+
+- The size objection was answered by sparse checkout. Only `fiat-rust/` is
+  fetched, which is 4.9 MB rather than 176 MB.
+- The auditability argument won. A registry checksum is a genuine pin, but
+  the source then lives in `~/.cargo/registry`, where nobody reviewing this
+  repository can see what actually compiles without fetching it. For the one
+  dependency that performs cryptography, having the exact source in the tree
+  at a named commit is worth a few megabytes.
+
+It also had to be shown to *work*, which was not a foregone conclusion:
+`fiat-rust` inherits no workspace keys and has no dependencies of its own, so
+a path dependency on it resolves for **downstream** consumers too. That was
+verified by building an external crate against this one. The same approach
+with libcrux fails at exactly that step, because `hacl-rs`'s manifest inherits
+workspace keys that cannot be parsed from outside its workspace.
 
 ## The earlier reasoning, kept for the record
 
@@ -62,24 +80,46 @@ compatible with this project's permissive intent.
 `tools/check_rust_rules.sh` enforces it against the built artifact. A
 dependency's panic paths become ours.
 
-Measured, as staticlibs, `no_std`, `panic = "abort"`, LTO off, each against a
+Measured as staticlibs, `no_std`, `panic = "abort"`, LTO off, each against a
 baseline containing no dependency at all — because `core` contributes panic
-symbols regardless and counting them makes any crate look bad:
+symbols regardless and counting them absolutely makes any crate look bad.
 
-| staticlib | total symbols | panic-related | above baseline |
-|---|---|---|---|
-| baseline, no dependency | 2038 | 48 | — |
-| **ours** | 2103 | 48 | **+0** |
-| `x25519-dalek` 2.0.1 | 2612 | 56 | +8 |
-| `salty` 0.3 | 2312 | 54 | +6 |
+**Run it yourself: `tools/measure_panic_symbols.sh`.** The methodology lives in
+that script rather than in this prose, for a reason given below.
 
-`salty` is written for Cortex-M and still adds panic paths. No panic-free
-X25519 crate was found.
+Re-measured 2026-08-16 on `rustc 1.97.1`, the toolchain `DEPS.md` pins:
 
-An earlier note in this project put dalek's contribution at 58 symbols. That
-was wrong — it counted `core`'s unreachable code. The corrected figure is +8,
-which is a much weaker argument than the original number implied, and it is
-recorded here rather than quietly replaced.
+| staticlib | total symbols | panic-related (raw) | distinct names | above baseline |
+|---|---|---|---|---|
+| baseline, no dependency | 2037 | 65 | 64 | — |
+| `x25519-dalek` 2.0.1 | 2441 | 71 | 64 | **+0 distinct** (+6 raw) |
+| `libcrux-curve25519` 0.0.8 | — | — | — | **does not build `no_std`** |
+
+`libcrux-curve25519` is not a row that can be filled in: it fails to compile
+with *"no global memory allocator found but one is required"*. That is the
+finding, and it is the one that actually rules it out — `DISTRIBUTION.md`
+forbids an allocator outright, so the panic count never gets a vote.
+
+**Why this table was rewritten, and what it costs the argument.** The earlier
+version reported a baseline of 2038 total / 48 panic-related and put dalek at
++8. The 2026-08-16 audit could not reproduce it *on the same toolchain this
+document names*: the totals matched almost exactly (2037 vs 2038), which shows
+the artifact was built the same way, but the panic count did not (65 vs 48).
+The gap is the symbol-matching pattern, and the document never recorded it —
+nor the harness source. So the figures could be neither defended nor refuted.
+That is why the method is now a committed script and this table cites it.
+
+**The honest reading is that this argument is weak against `x25519-dalek`, and
+has been getting weaker each time it was checked.** It began as "58 symbols",
+was retracted to +8 on the grounds that the original had counted `core`'s
+unreachable code, and re-measures now at +0 distinct panic symbol names. A
+figure that shrinks every time someone looks at it should not be load-bearing.
+
+It is not load-bearing here. `fiat-crypto` was chosen because it is **formally
+verified and costs nothing** — it dominates on its own merits. Nothing in the
+decision requires dalek to have been disqualified, and this document should not
+be read as claiming it was. `salty` 0.3 was measured in the original round and
+has not been re-measured; treat its figure as unverified.
 
 ## What was done instead
 

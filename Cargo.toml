@@ -21,12 +21,24 @@ publish = false
 # must clear both bars.
 #
 # There is a third bar, discovered by measurement on 2026-08-16: the
-# panic-free artifact guarantee. Linking x25519-dalek — permissively licensed,
-# audited, and by every other measure the better choice for a curve
-# implementation — brings 58 panic symbols into the linked artifact, including
-# core::panicking::assert_failed and rust_begin_unwind. Ours currently has zero
-# undefined references of any kind. A dependency must clear that bar too, and
-# a cryptography crate is unlikely to.
+# panic-free artifact guarantee. The linked object must keep ZERO undefined
+# references, which is what tools/check_rust_rules.sh --binary enforces and
+# what ours currently has. A dependency must clear that bar too.
+#
+# BE PRECISE ABOUT HOW STRONG THIS ARGUMENT IS. An earlier version of this
+# comment said linking x25519-dalek brings "58 panic symbols" into the
+# artifact. That was wrong — it counted core's unreachable code, which is
+# present in an empty no_std crate regardless. docs/CRYPTO-DEPENDENCY.md
+# retracted it to +8; the 2026-08-16 audit re-measured with
+# tools/measure_panic_symbols.sh and got +0 DISTINCT panic symbol names
+# (+6 raw archive entries) over a no-dependency baseline.
+#
+# So the panic bar is NOT what rules out x25519-dalek, and claiming it does
+# overstates the case by roughly seven times. fiat-crypto was chosen because
+# it is formally verified AND costs nothing — it dominates on its own merits,
+# not because the alternative was disqualified. libcrux IS ruled out
+# mechanically, but by the allocator rule rather than this one: it fails to
+# compile no_std with "no global memory allocator found but one is required".
 #
 # DEV-DEPENDENCIES ARE A DIFFERENT QUESTION and are used deliberately. A vetted
 # implementation is enormously valuable as a TEST ORACLE, and a test binary is

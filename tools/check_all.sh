@@ -56,6 +56,16 @@ rc=0
 head "clean-room (GPL boundary)"
 "$ROOT/tools/check_cleanroom.sh" || rc=1
 
+head "documentation matches the code"
+# Added after the 2026-08-16 audit, which found three documents asserting
+# things that had stopped being true -- including one arguing at length for a
+# dependency arrangement the next commit reversed. Cross-references rot without
+# anyone editing the document, so they are checked rather than reviewed.
+"$ROOT/tools/check_docs.sh" || {
+    s=$?
+    [ "$s" = 3 ] || rc=1
+}
+
 head "crate rules (panic-free, no alloc, no global state)"
 "$ROOT/tools/check_rust_rules.sh" || {
     s=$?

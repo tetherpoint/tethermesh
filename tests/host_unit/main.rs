@@ -1474,26 +1474,72 @@ fn x25519_reproduces_the_bench_exchange_and_decrypts_the_message() {
 
 /// A small-order public key drives the output to zero whatever the private
 /// key is, so accepting it agrees a secret an attacker already knows.
+///
+/// **All seven canonical values, not a sample.** This test previously carried
+/// three of them, which the 2026-08-16 audit flagged as constraining less than
+/// the name implies: the two order-8 points are the interesting ones and only
+/// one was present, and the non-canonical encodings above `p` were absent
+/// entirely — those are exactly the inputs where a sloppy reduction turns a
+/// rejection into an acceptance. This is the list libsodium blacklists.
+///
+/// It is also checked against `x25519-dalek` rather than only against itself.
+/// A hand-maintained list of "bad points" is worth little if the reason each
+/// one is bad is our own belief; asserting the oracle drives them to zero too
+/// is what makes this a check rather than a restatement.
 #[test]
 fn small_order_public_keys_are_rejected() {
-    let priv_key = [0x11u8; 32];
-    for bad in [
-        "0000000000000000000000000000000000000000000000000000000000000000",
-        "0100000000000000000000000000000000000000000000000000000000000000",
-        "e0eb7a7c3b41b8ae1656e3faf19fc46ada098deb9c32b1fd866205165f49b800",
-    ] {
-        let mut p = [0u8; 32];
-        p.copy_from_slice(&hex_to_bytes(bad));
-        assert_eq!(x25519(&priv_key, &p), None, "small-order point {bad} must be rejected");
+    let small_order = [
+        // u = 0 and u = 1.
+        ("0000000000000000000000000000000000000000000000000000000000000000", "zero"),
+        ("0100000000000000000000000000000000000000000000000000000000000000", "one"),
+        // The two points of order 8 — the pair that actually matters.
+        ("e0eb7a7c3b41b8ae1656e3faf19fc46ada098deb9c32b1fd866205165f49b800", "order 8 (a)"),
+        ("5f9c95bca3508c24b1d0b1559c83ef5b04445cc4581c8e86d8224eddd09f1157", "order 8 (b)"),
+        // Non-canonical encodings: p-1, p and p+1 reduce to -1, 0 and 1.
+        // A reduction that stops short accepts these, which is precisely the
+        // bug class the fe_sub defect belonged to.
+        ("ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f", "p-1"),
+        ("edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f", "p"),
+        ("eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f", "p+1"),
+    ];
+
+    // Several private keys, because the whole point of a small-order point is
+    // that it forces the output regardless of the scalar. One key could pass
+    // by coincidence; these cannot.
+    for priv_key in [[0x11u8; 32], [0xFFu8; 32], [0x01u8; 32], [0xA5u8; 32]] {
+        for (bad, label) in small_order {
+            let mut p = [0u8; 32];
+            p.copy_from_slice(&hex_to_bytes(bad));
+
+            assert_eq!(
+                x25519(&priv_key, &p),
+                None,
+                "small-order point ({label}) {bad} must be rejected"
+            );
+
+            // ...and the oracle agrees it is degenerate, so the list is not
+            // just an article of faith carried forward from somewhere.
+            let theirs = *x25519_dalek::StaticSecret::from(priv_key)
+                .diffie_hellman(&x25519_dalek::PublicKey::from(p))
+                .as_bytes();
+            assert_eq!(
+                theirs, [0u8; 32],
+                "we call ({label}) {bad} small-order but dalek did not drive it to zero"
+            );
+        }
     }
 }
 
 /// Differential test against an audited implementation.
 ///
 /// `x25519-dalek` is a **dev-dependency only** — it is never linked into the
-/// shipped library, because doing so brings 58 panic symbols into an artifact
-/// that currently has zero undefined references. As a test oracle it costs
-/// nothing and buys a great deal.
+/// shipped library. Not because it would be disastrous: the 2026-08-16 audit
+/// measured its contribution at +0 distinct panic symbol names over a
+/// no-dependency baseline, correcting a much-repeated "58 symbols" figure that
+/// had counted `core`'s unreachable code. The reason is simply that
+/// `fiat-crypto` is formally verified and costs nothing, so there is no call
+/// for a second curve implementation in the artifact. As a test oracle this
+/// one costs nothing and buys a great deal.
 ///
 /// Fixed vectors prove a function agrees at a handful of points. The `fe_sub`
 /// bug that shipped in the first draft of `x25519.rs` was self-consistent

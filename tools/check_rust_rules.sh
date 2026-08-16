@@ -103,6 +103,66 @@ while IFS= read -r f; do
         && fail "$base — pulls in alloc. Buffers are caller-provided."
 done <<< "$rs_files"
 
+# ── fiat-crypto precondition discipline ────────────────────────────────────
+# THE FAILURE MODE THIS EXISTS FOR IS SILENT AND CRYPTOGRAPHIC.
+#
+# fiat-crypto's field operations are proven correct in Coq *given inputs within
+# stated magnitude bounds*. Supply a value outside them and the proof does not
+# apply -- the result may simply be wrong, with nothing to signal it. No test
+# vector reliably catches this, because the wrong answer is still deterministic
+# and self-consistent.
+#
+# What makes it safe in x25519.rs is structural: fiat's `tight`/`loose` types
+# ARE those bounds, so misuse is a compile error. That argument holds only
+# while every field value flows through the typed wrappers. Reaching into `.0`
+# gets the raw limb array and steps outside the type system entirely, and
+# arithmetic done there voids the proof silently.
+#
+# The 2026-08-16 audit adjudicated every `.0` in the tree by hand and found
+# three, all in `cswap`, all moving limb arrays through fiat's own selectznz
+# with no arithmetic. That is a fact about a moment, not a property -- so it is
+# a gate now. This is an ALLOWLIST of the shapes adjudicated as safe, not a
+# blocklist of operators: a blocklist has to anticipate every way to write
+# arithmetic, and an allowlist only has to recognise the ways already approved.
+#
+# IF THIS FIRES, DO NOT WIDEN THE PATTERN TO MAKE IT PASS. Establish that the
+# new site performs no arithmetic on raw limbs, then add its shape here
+# deliberately -- the friction is the point.
+fiat_files=$(grep -lE 'fiat_crypto|fiat_25519' $rs_files 2>/dev/null || true)
+while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    base=$(basename "$f")
+    case "$f" in */tests/*|*/benches/*) continue ;; esac
+
+    # Strip comments and string literals before judging: a doc comment
+    # explaining the rule must not trip it, which is the same exemption
+    # check_cleanroom.sh grants itself.
+    while IFS=: read -r lineno body; do
+        [ -n "$lineno" ] || continue
+        trimmed=$(printf '%s' "$body" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+        case "$trimmed" in
+            //*|'*'*) continue ;;                       # comment or rustdoc continuation
+        esac
+        ok=0
+        # 1. paired read into locals:   let (x, y) = (a.0, b.0);
+        printf '%s' "$trimmed" | grep -qE '^let \([a-z_]+, [a-z_]+\) = \([a-z_]+\.0, [a-z_]+\.0\);$' && ok=1
+        # 2. plain write-back:          a.0 = na;
+        printf '%s' "$trimmed" | grep -qE '^[a-z_]+\.0 = [a-z_]+;$' && ok=1
+        # 3. plain read into a local:   let x = a.0;
+        printf '%s' "$trimmed" | grep -qE '^let [a-z_]+ = [a-z_]+\.0;$' && ok=1
+        if [ "$ok" -eq 0 ]; then
+            fail "$base:$lineno — unadjudicated use of a fiat limb array via '.0'.
+              Field values must flow through the tight/loose wrappers; those types
+              ARE fiat's proven magnitude bounds. Arithmetic on raw limbs voids the
+              Coq proof SILENTLY -- the answer stays deterministic and wrong.
+              The line was:
+                  $trimmed
+              If it genuinely performs no arithmetic, add its shape to the
+              allowlist in $(basename "${BASH_SOURCE[0]}") on purpose."
+        fi
+    done < <(grep -nE '\.0\b' "$f" 2>/dev/null || true)
+done <<< "$fiat_files"
+
 # ── binary check: no panic path may survive into the artifact ──────────────
 # THIS CHECK WAS SILENTLY VACUOUS UNTIL 2026-08-16, IN THREE SEPARATE WAYS.
 # Recorded here because each one passed while proving nothing, which is worse
