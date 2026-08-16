@@ -57,6 +57,64 @@ cost to the artifact. It is also strictly more than a fixed vector gives: the
 `fe_sub` bug would have been caught on the first random input, not by luck in
 choosing the right constant.
 
+## The submodule option, measured
+
+Proposed: vendor the verified code as a pinned git submodule and strip its
+panics — losing the exact proof but keeping the algorithmic work. A pinned
+submodule is genuinely different from a fork, so this was measured rather than
+argued.
+
+`libcrux-curve25519` is a 169-line wrapper with **no alloc and no panics**.
+Everything objectionable is in its dependencies, and the curve code itself is
+narrow: `curve25519_51.rs` (342 lines) and `bignum25519_51.rs` (726) plus
+about 180 lines of support. Both are alloc-free and free of `panic!`,
+`unwrap` and `assert`. Compiled standalone, `no_std`, they need **no
+allocator at all** — versus the full crate, which does.
+
+So far so good. Then the metric that actually governs:
+
+| | allocator | undefined refs from the object |
+|---|---|---|
+| ours | no | **0** |
+| HACL curve files, isolated | no | **8** |
+| full `libcrux-curve25519` | **required** | — |
+
+The eight are not incidental:
+
+```
+core::panicking::panic_bounds_check      array indexing
+core::slice::index::slice_index_fail     slicing
+copy_from_slice_impl::len_mismatch_fail
+core::panicking::panic_fmt
+core::fmt::Formatter::pad
+```
+
+**The generated HACL Rust is not panic-free.** Its bounds checks are real
+panic paths, and there are several. Removing them means rewriting indexing
+throughout machine-generated code — which is precisely the modification that
+voids the proof.
+
+That is the whole argument in one line: **the proof is the only thing their
+code has that ours does not.** The algorithm is the same — `curve25519_51` is
+the 51-bit limb Montgomery ladder from RFC 7748, which is what `x25519.rs`
+implements, because there is only one sensible way to do it. Discard the proof
+and what remains is ~1,250 lines of `uu____0` and `r#priv` that nobody here
+can review, implementing an algorithm we already have, needing a proc-macro
+the build rules bar, and still not panic-free.
+
+There is also a real option that keeps the proof intact, and it is a product
+decision rather than a technical one: **put PKI behind a feature flag** where
+allocation and panics are acceptable, and use `libcrux-curve25519`
+unmodified. That trades the crate-wide guarantee on one path for a machine
+-checked curve. It has not been taken, but it is the only version of "use the
+verified library" that keeps the verification.
+
+What was done instead costs nothing and captures most of the value: **both**
+`x25519-dalek` and `libcrux-curve25519` are dev-dependency oracles, and the
+suite cross-checks ours against both on every run. Agreement with two
+independent implementations — one audited, one formally verified — is a
+stronger claim than agreement with either.
+
 ## When to revisit
 
 - If a panic-free, audited X25519 appears, prefer it.

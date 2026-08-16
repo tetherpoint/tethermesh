@@ -47,6 +47,11 @@ unexpected_cfgs = { level = "allow", check-cfg = ['cfg(kani)'] }
 # and the fe_sub bug found on 2026-08-16 was exactly the kind a fixed vector
 # catches only by luck.
 x25519-dalek = { version = "2", default-features = false, features = ["static_secrets"] }
+# A SECOND, independent oracle: formally verified, derived from HACL*. Two
+# unrelated implementations agreeing with ours is a stronger claim than one.
+# It needs a global allocator, which is why it cannot be a real dependency —
+# but a test binary has std, so as an oracle that costs nothing.
+libcrux-curve25519 = "0.0.8"
 rand = "0.8"
 
 [lib]

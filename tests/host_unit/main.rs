@@ -1680,3 +1680,43 @@ fn an_unknown_portnum_is_carried_not_rejected() {
     let n2 = d2.encode(&mut buf).unwrap();
     assert_eq!(Data::decode(&buf[..n2]).unwrap().portnum, 0x7FFF_FFFF);
 }
+
+/// A second differential oracle: formally verified code derived from HACL*.
+///
+/// `x25519-dalek` and `libcrux-curve25519` are independent implementations,
+/// and agreeing with both is a stronger claim than agreeing with either. This
+/// one is additionally the output of a verified pipeline, so where it agrees
+/// with ours the algorithm and constants are corroborated by a proof we did
+/// not have to reproduce.
+///
+/// It is an oracle and never a dependency: it requires a global allocator,
+/// which `DISTRIBUTION.md` forbids in the shipped library. A test binary has
+/// std, so nothing is given up here.
+#[test]
+fn x25519_agrees_with_a_formally_verified_implementation() {
+    use rand::RngCore;
+    let mut rng = rand::thread_rng();
+
+    for i in 0..256 {
+        let mut sk = [0u8; 32];
+        let mut pk = [0u8; 32];
+        rng.fill_bytes(&mut sk);
+        rng.fill_bytes(&mut pk);
+
+        let mut theirs = [0u8; 32];
+        let ok = libcrux_curve25519::ecdh(&mut theirs, &pk, &sk).is_ok();
+
+        match x25519(&sk, &pk) {
+            Some(ours) => {
+                assert!(ok, "we accepted a point the verified code rejected, iteration {i}");
+                assert_eq!(ours, theirs, "disagreed with verified code, iteration {i}");
+            }
+            None => assert!(!ok, "we rejected a point the verified code accepted, iteration {i}"),
+        }
+
+        // Public keys too.
+        let mut theirs_pub = [0u8; 32];
+        libcrux_curve25519::secret_to_public(&mut theirs_pub, &sk);
+        assert_eq!(public_key(&sk), theirs_pub, "public_key disagreed, iteration {i}");
+    }
+}
