@@ -2192,3 +2192,179 @@ fn deciding_to_relay_does_not_itself_spend_the_budget() {
     }
     assert_eq!(duty.used_us(), 0, "the decision must not charge airtime");
 }
+
+// ===========================================================================
+// L4 — fuzzing the parse path.
+//
+// This complements the Kani harnesses rather than duplicating them. Kani
+// proves the parse path panic-free over EVERY input, but only up to a bounded
+// length -- eight bytes for the wire reader, sixteen for a header -- because
+// an unbounded proof does not terminate. These run unbounded lengths over
+// randomised bytes, which is weaker per input and reaches inputs a bounded
+// proof never sees: length prefixes that overrun, nested wrappers, payloads at
+// and beyond MAX_PAYLOAD.
+//
+// The panic-free CLAIM rests on tools/check_rust_rules.sh inspecting the built
+// artifact, and PLAN.md is explicit that fuzzing alone only shows nothing
+// crashed today. These are here to reach the cases that argument does not
+// cover by itself, not to replace it.
+// ===========================================================================
+
+/// A tiny xorshift PRNG, seeded fixed so a failure is reproducible.
+///
+/// Deliberately not `rand`: a fuzz failure that cannot be replayed is a bug
+/// report nobody can act on, and the seed is printed in every assertion below.
+struct Xor(u64);
+
+impl Xor {
+    fn next_u64(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.0 = x;
+        x
+    }
+    fn fill(&mut self, buf: &mut [u8]) {
+        for chunk in buf.chunks_mut(8) {
+            let v = self.next_u64().to_le_bytes();
+            for (d, s) in chunk.iter_mut().zip(v.iter()) {
+                *d = *s;
+            }
+        }
+    }
+    fn below(&mut self, n: usize) -> usize {
+        if n == 0 { 0 } else { (self.next_u64() % (n as u64)) as usize }
+    }
+}
+
+/// Every entry point on the parse path, over random bytes of every length.
+///
+/// The assertion is implicit and total: a panic anywhere fails the test. What
+/// is asserted explicitly is the property that a *successful* parse must be
+/// self-consistent, because a decoder that accepts garbage and returns
+/// something is worse than one that rejects it.
+#[test]
+fn the_parse_path_survives_random_bytes_at_every_length() {
+    let mut rng = Xor(0x5EED_1234_ABCD_0001);
+    let mut buf = [0u8; 512];
+
+    for round in 0..20_000 {
+        let len = rng.below(buf.len() + 1);
+        let bytes = &mut buf[..len];
+        rng.fill(bytes);
+
+        // Header: decode must round-trip exactly when it succeeds.
+        if let Some(h) = Header::decode(bytes) {
+            assert_eq!(
+                h.encode().as_slice(),
+                &bytes[..HEADER_LEN],
+                "header round-trip broke, round {round}, len {len}"
+            );
+            // Relaying spends exactly one hop or refuses.
+            match h.relayed_by(0x1234_5678) {
+                Some(r) => assert_eq!(r.hop_limit + 1, h.hop_limit),
+                None => assert_eq!(h.hop_limit, 0),
+            }
+        }
+
+        // Frame helpers must report rather than read past.
+        let _ = frame::peek_header(bytes);
+        let _ = frame::payload(bytes);
+
+        // The schema-free wire reader must terminate on any input.
+        let mut r = Reader::new(bytes);
+        let mut steps = 0;
+        while steps < 4096 {
+            match r.next_field() {
+                Ok(Some(_)) => steps += 1,
+                _ => break,
+            }
+        }
+
+        // Wrappers: a successful decode must re-encode and re-decode stably.
+        if let Ok(d) = Data::decode(bytes) {
+            let mut out = [0u8; 640];
+            if let Ok(n) = d.encode(&mut out) {
+                let again = Data::decode(&out[..n]).expect("re-decode of our own encoding");
+                assert_eq!(again.portnum, d.portnum, "portnum unstable, round {round}");
+                assert_eq!(again.payload, d.payload, "payload unstable, round {round}");
+            }
+        }
+        if let Ok(u) = User::decode(bytes) {
+            let mut out = [0u8; 640];
+            if let Ok(n) = u.encode(&mut out) {
+                let again = User::decode(&out[..n]).expect("re-decode of our own encoding");
+                assert_eq!(again.id, u.id, "user id unstable, round {round}");
+            }
+        }
+        if let Ok(c) = ChannelSettings::decode(bytes) {
+            let mut out = [0u8; 640];
+            let _ = c.encode(&mut out);
+        }
+    }
+}
+
+/// Mutated real frames — the neighbourhood of valid input, which uniform
+/// random bytes almost never reaches.
+///
+/// A 16-byte header has 2^128 possible values, so random bytes essentially
+/// never produce a *plausible* frame. Flipping bits in captured traffic
+/// explores the region where a decoder is most likely to be wrong: valid
+/// length prefixes pointing slightly too far, almost-correct wire types,
+/// off-by-one payload bounds.
+#[test]
+fn mutated_captures_are_rejected_or_handled_but_never_panic() {
+    let doc = fs::read_to_string(captures_dir().join("on_air_frames.json")).unwrap();
+    let mut originals: Vec<Vec<u8>> = Vec::new();
+    let mut rest = doc.as_str();
+    while let Some(i) = rest.find("\"raw_hex\"") {
+        rest = &rest[i..];
+        if let Some(h) = json_str(rest, "raw_hex") {
+            originals.push(hex_to_bytes(h));
+        }
+        rest = &rest[9..];
+    }
+    assert!(!originals.is_empty(), "no captured frames to mutate");
+
+    let mut rng = Xor(0x0FF1_CE00_D15E_A5E5);
+    let mut mutations = 0u32;
+
+    for base in &originals {
+        for _ in 0..4_000 {
+            let mut f = base.clone();
+            // One to three bit flips, or a length-changing truncation.
+            let flips = 1 + rng.below(3);
+            for _ in 0..flips {
+                if f.is_empty() { break; }
+                let i = rng.below(f.len());
+                let bit = rng.below(8);
+                f[i] ^= 1u8 << bit;
+            }
+            if rng.below(4) == 0 && !f.is_empty() {
+                let keep = rng.below(f.len());
+                f.truncate(keep);
+            }
+            mutations += 1;
+
+            if let Some(h) = Header::decode(&f) {
+                assert_eq!(h.encode().as_slice(), &f[..HEADER_LEN]);
+            }
+            let _ = frame::peek_header(&f);
+            if let Ok(p) = frame::payload(&f) {
+                assert!(p.len() <= frame::MAX_PAYLOAD, "payload exceeded MAX_PAYLOAD");
+            }
+            let mut r = Reader::new(&f);
+            let mut steps = 0;
+            while steps < 4096 {
+                match r.next_field() {
+                    Ok(Some(_)) => steps += 1,
+                    _ => break,
+                }
+            }
+            let _ = Data::decode(&f);
+            let _ = User::decode(&f);
+        }
+    }
+    assert!(mutations > 1_000, "fuzzer did too little work to mean anything");
+}

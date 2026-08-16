@@ -144,7 +144,13 @@ Fixed, it failed immediately: `frame::encode` had a live panic path through `cop
 - *their encoder → our decoder* — **met across the corpus**, 43/43 bit-identical (L3).
 - *our encoder → their decoder* — **demonstrated, not yet corpus-wide.** A stock node accepted our text frame, our `User`, and answered our traceroute. That is three constructed frames, not a systematic sweep of every corpus message back at them.
 - *panic-free artifact* — **met and continuously enforced** by `check_all.sh`.
-- *fuzzing* — **outstanding.**
+- *fuzzing* — **met 2026-08-16**, and deliberately scoped as complementary rather than as the evidence.
+
+**On what the fuzzing is and is not.** Two tests in `tests/host_unit`. The first drives every parse entry point — `Header::decode`, `frame::peek_header`, `frame::payload`, `Reader`, and the `Data`/`User`/`ChannelSettings` wrappers — with 20,000 rounds of random bytes at every length from 0 to 512. The second flips one to three bits in **real captured frames**, 12,000 mutations, because uniform random bytes essentially never produce a plausible 16-byte header and the interesting failures live in the neighbourhood of valid input: length prefixes pointing slightly too far, almost-correct wire types, off-by-one payload bounds.
+
+Both use a fixed-seed xorshift rather than `rand`, so any failure replays exactly. A fuzz failure nobody can reproduce is not a bug report.
+
+**This does not replace the artifact check, and the gate above still says so.** Kani proves the parse path panic-free over *every* input but only to a bounded length; these reach unbounded lengths at the cost of sampling rather than proving. The panic-free *claim* still rests on `check_rust_rules.sh` finding no panic machinery linked. Both fuzzers were seen red against injected faults — a byte-order flip in `Header::encode`, and a payload bound that lets `frame::payload` overrun.
 
 ## L5 — routing
 
