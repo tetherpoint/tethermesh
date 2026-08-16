@@ -6,11 +6,51 @@
 //! publishes vectors for it; the bench supplied one more, from a real
 //! exchange with a stock node.
 //!
+//! # What is proven and what is not — read before editing the ladder
+//!
+//! The **field arithmetic is not ours**. Multiplication, squaring, addition,
+//! subtraction, carrying, the 121666 scalar multiply, serialisation and the
+//! constant-time select all come from `fiat-crypto`, generated from Coq
+//! proofs and called unmodified from the pinned submodule.
+//!
+//! Note the algorithm names, which are easy to conflate: this file implements
+//! the Montgomery **ladder**, the scalar-multiplication loop. It contains no
+//! Montgomery **multiplication** — the linked code is `unsaturated_solinas`,
+//! and REDC appears nowhere in it.
+//!
+//! **Their proof is not weakened by our calling it, but it does not extend to
+//! our composition.** Two things sit outside it:
+//!
+//! 1. *Sequencing* — that [`scalarmult`] and [`invert`] compose those
+//!    operations into the right group operation. Checked against RFC 7748
+//!    vectors and against two independent implementations, not proven.
+//! 2. *Preconditions* — and this is the one that can bite silently. Each fiat
+//!    operation is proven correct **given inputs within stated magnitude
+//!    bounds**. Supply a value outside them and the proof simply does not
+//!    apply; the result may be wrong with nothing to signal it.
+//!
+//! What makes (2) safe here is structural rather than careful: fiat's
+//! `tight`/`loose` types *are* those bounds, expressed in the type system.
+//!
+//! ```text
+//! add(tight, tight) -> loose        mul(loose, loose) -> tight
+//! sub(tight, tight) -> loose        relax(tight)      -> loose
+//! ```
+//!
+//! Two additions cannot be chained without an intervening carry, because
+//! `add` requires `tight` and produces `loose`. The misuse that would void the
+//! proof is a **compile error**, so this file compiling is itself evidence
+//! that every call site respects the preconditions.
+//!
+//! If you edit the ladder, keep every field value flowing through the
+//! wrappers below. Reaching into `.0` to do arithmetic by hand discards
+//! exactly the protection described above.
+//!
 //! # Representation
 //!
-//! Field elements are five 51-bit limbs over `2^255 - 19`. That leaves
-//! headroom in a `u64` for several additions before a carry pass is needed,
-//! and keeps multiplication to twenty-five 64×64 products.
+//! Field elements are five 51-bit limbs over `2^255 - 19` — fiat's
+//! representation, which happens to be the one the hand-written version used
+//! too, because it is the standard choice at 64-bit word size.
 //!
 //! # Constant time, and what that does and does not mean here
 //!
