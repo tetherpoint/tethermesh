@@ -15,6 +15,29 @@ space symbolically, so a harness that passes has ruled out panics, arithmetic
 overflow and out-of-bounds access on that path altogether — not for the inputs
 a test happened to try.
 
+**The scope grew on 2026-08-16** from the parse path to the L5 arithmetic —
+airtime, the duty budget and the contention window. Those are total-function
+claims over wide numeric ranges, which is precisely what a bounded test samples
+badly and a proof settles outright: `slots_for_snr` takes every `i16`, and
+`airtime_us` every payload length against every parameter combination.
+
+**One harness is deliberately narrowed, and the narrowing is worth reading.**
+`a_duty_cycle_can_never_be_charged_beyond_its_budget` leaves the **charges
+symbolic and the configuration fixed**. The first version made the window and
+permille symbolic too and did not terminate in nine minutes; `budget_us`
+divides, and bit-vector division is expensive for a solver whatever the operand
+size. Bounding the operands did not help, so the *shape* changed rather than the
+bound — and it then verified in 65 milliseconds.
+
+That is a real reduction in what is claimed. What remains proven is the part
+that can actually be wrong — the guard in `charge`, over **every** pair of
+charge values, plus the property that a refused charge bills nothing — at a
+representative 1% hourly budget. The multiply and divide in `budget_us` are
+covered by tests instead.
+
+Recorded because the alternative was a harness that looked stronger and hung. A
+proof that does not terminate proves nothing.
+
 | harness | property |
 |---|---|
 | `header_decode_never_panics` | no 16-byte input panics |
@@ -23,6 +46,11 @@ a test happened to try.
 | `short_frames_are_rejected_not_read_past` | every under-length input is rejected |
 | `protobuf_reader_never_panics_on_arbitrary_bytes` | no 8-byte input panics the wire reader |
 | `channel_hash_is_total` | total over its inputs |
+| `symbol_time_never_panics_for_any_modem_parameters` | no spreading factor or bandwidth panics it; out-of-range inputs are refused rather than approximated |
+| `airtime_never_panics_for_any_payload_or_parameters` | total over every payload length and parameter set, including the short-payload case where the symbol count goes negative and must clamp |
+| `a_duty_cycle_can_never_be_charged_beyond_its_budget` | no accepted sequence of charges overruns the budget |
+| `the_contention_window_is_total_and_stays_within_its_bounds` | every SNR yields a window inside the configured bounds; a degenerate range still answers |
+| `should_relay_is_total_and_spends_exactly_one_hop` | relaying decrements `hop_limit` by exactly one and never relays a spent frame |
 
 **Why this matters more than the artifact check.** `check_rust_rules.sh`
 inspects the built object for panic machinery. That is evidence — it says the

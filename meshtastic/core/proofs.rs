@@ -15,6 +15,12 @@
 //! panics, arithmetic overflow and out-of-bounds access on that path
 //! altogether.
 //!
+//! Scope was originally the parse path alone. It now also covers the arithmetic
+//! added for L5 — airtime, the duty budget and the contention window — because
+//! those are total-function claims over wide numeric inputs, which is exactly
+//! what a bounded test samples badly and a proof settles outright. The curve
+//! arithmetic remains out of scope for the reason below.
+//!
 //! Scope, stated honestly. This proves things about the **parse path**, which
 //! is where attacker-controlled bytes arrive and where a panic would be a
 //! remote denial of service. It proves nothing about the curve arithmetic in
@@ -30,7 +36,9 @@
 //! module that suspends the crate's rules is proving things about code the
 //! crate would not accept.
 
+use crate::airtime::{DutyCycle, ModemParams};
 use crate::channel::channel_hash;
+use crate::routing::{should_relay, ContentionWindow, Observed, Relay, Role};
 use crate::frame;
 use crate::header::{Header, HEADER_LEN};
 use crate::protobuf::Reader;
@@ -117,4 +125,138 @@ fn channel_hash_is_total() {
     let name: [u8; 8] = kani::any();
     let psk: [u8; 8] = kani::any();
     let _ = channel_hash(&name, &psk);
+}
+
+// ── L5 arithmetic ──────────────────────────────────────────────────────────
+// These are cheap to prove and awkward to test: the inputs are wide numeric
+// ranges where a test picks a handful of values and a proof covers all of them.
+
+/// Symbol time is total: no spreading factor or bandwidth panics it.
+///
+/// It refuses out-of-range inputs rather than returning a plausible wrong
+/// number, and the refusal itself must not panic — this is the entry point
+/// every other airtime figure is built on.
+#[kani::proof]
+fn symbol_time_never_panics_for_any_modem_parameters() {
+    let p = ModemParams {
+        spreading_factor: kani::any(),
+        bandwidth_hz: kani::any(),
+        coding_rate: kani::any(),
+        preamble_symbols: kani::any(),
+        crc: kani::any(),
+        implicit_header: kani::any(),
+        low_data_rate_optimize: kani::any(),
+    };
+    let _ = p.symbol_time_us();
+}
+
+/// Airtime is total over every payload length and every parameter set.
+///
+/// The payload symbol count is computed signed and clamped, because the
+/// numerator goes negative for a short payload at a high spreading factor.
+/// This proves that clamp holds for all of them rather than for the sizes a
+/// test happened to try.
+#[kani::proof]
+fn airtime_never_panics_for_any_payload_or_parameters() {
+    let p = ModemParams {
+        spreading_factor: kani::any(),
+        bandwidth_hz: kani::any(),
+        coding_rate: kani::any(),
+        preamble_symbols: kani::any(),
+        crc: kani::any(),
+        implicit_header: kani::any(),
+        low_data_rate_optimize: kani::any(),
+    };
+    let len: u16 = kani::any();
+    let _ = p.airtime_us(len);
+}
+
+/// **A charged duty cycle never exceeds its own budget.**
+///
+/// The property the type exists for: `charge` refuses rather than saturating,
+/// so no accepted sequence can overrun.
+///
+/// # What is symbolic here, and what is not
+///
+/// The **charges are symbolic; the configuration is fixed.** An earlier version
+/// left the window and permille symbolic too and did not terminate: `budget_us`
+/// divides, and bit-vector division is expensive for the solver whatever the
+/// operand size. Bounding the operands did not help, so the shape changed
+/// rather than the bound.
+///
+/// That is a real narrowing and is stated rather than glossed. What remains
+/// proven is the part that can actually be wrong — the guard logic in `charge`,
+/// over **every** pair of charge values — at a representative 1% hourly budget.
+/// The arithmetic in `budget_us` is a multiply and a divide covered by tests.
+///
+/// A proof that does not terminate proves nothing, and a narrower one that does
+/// is worth more than an honest-looking one that hangs.
+#[kani::proof]
+fn a_duty_cycle_can_never_be_charged_beyond_its_budget() {
+    // 1% of an hour — a real EU sub-band budget.
+    let Some(mut d) = DutyCycle::new(10, 3_600_000, 0) else { return };
+    let budget = d.budget_us();
+
+    let a: u32 = kani::any();
+    let b: u32 = kani::any();
+
+    let _ = d.charge(0, a);
+    assert!(d.used_us() <= budget, "one charge overran the budget");
+    let _ = d.charge(0, b);
+    assert!(d.used_us() <= budget, "two charges overran the budget");
+
+    // And a refused charge must bill nothing.
+    let before = d.used_us();
+    let huge: u32 = kani::any();
+    kani::assume(u64::from(huge) > budget);
+    assert!(!d.charge(0, huge), "a charge larger than the whole budget must refuse");
+    assert!(d.used_us() == before, "a refused charge must not bill airtime");
+}
+
+/// The contention window is total, and always inside its configured bounds.
+///
+/// Every SNR yields a window, none panics, and a degenerate configuration —
+/// inverted or empty range — divides by nothing and still answers.
+#[kani::proof]
+fn the_contention_window_is_total_and_stays_within_its_bounds() {
+    let cw = ContentionWindow {
+        min_slots: kani::any(),
+        max_slots: kani::any(),
+        snr_floor_quarter_db: kani::any(),
+        snr_ceil_quarter_db: kani::any(),
+    };
+    let snr: i16 = kani::any();
+    let slots = cw.slots_for_snr(snr);
+    if cw.min_slots <= cw.max_slots {
+        assert!(slots >= cw.min_slots, "window fell below its own minimum");
+        assert!(slots <= cw.max_slots, "window rose above its own maximum");
+    }
+}
+
+/// The rebroadcast decision is total, and never spends a hop it did not have.
+///
+/// Relaying must decrement `hop_limit` by exactly one, and a frame with none
+/// left must be refused — over every combination of inputs, not the handful a
+/// test constructs.
+#[kani::proof]
+fn should_relay_is_total_and_spends_exactly_one_hop() {
+    let o = Observed {
+        hop_limit: kani::any(),
+        snr_quarter_db: kani::any(),
+        duplicate: kani::any(),
+        heard_relayed: kani::any(),
+        airtime_us: kani::any(),
+    };
+    let role = match kani::any::<u8>() % 3 {
+        0 => Role::Client,
+        1 => Role::Router,
+        _ => Role::Repeater,
+    };
+    let Some(mut duty) = DutyCycle::new(1000, 60_000, 0) else { return };
+    let cw = ContentionWindow::MESHTASTIC_SHAPE;
+
+    if let Relay::After { hop_limit, .. } = should_relay(&o, role, &cw, &mut duty, 0) {
+        assert!(o.hop_limit > 0, "relayed a frame with no hops left");
+        assert!(hop_limit == o.hop_limit - 1, "hop limit not spent exactly once");
+    }
 }
