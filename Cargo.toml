@@ -111,17 +111,34 @@ rand = "0.8"
 [lib]
 name = "tethermesh"
 path = "meshtastic/core/lib.rs"
-# rlib ONLY, for now.
+# rlib ONLY, and the reason is now different from the one recorded here before.
 #
-# DISTRIBUTION.md promises a prebuilt static library and a C header, which
-# means `staticlib` — but a no_std staticlib is a linkable artifact and must
-# therefore carry a #[panic_handler], and defining one emits the very
-# `rust_begin_unwind` symbol that tools/check_rust_rules.sh --binary treats as
+# THE OLD REASON WAS WRONG, AND IT DEFERRED L8 FOR NOTHING. It read: a no_std
+# staticlib must carry a #[panic_handler], and defining one emits the very
+# `rust_begin_unwind` symbol that check_rust_rules.sh --binary treats as
 # evidence that some path can panic.
 #
-# That tension is real and belongs to L8, where the C ABI surface is designed.
-# It is written down here rather than resolved early, because the resolution
-# affects what the panic-free claim actually means at the artifact boundary.
+# Tested 2026-08-16 rather than reasoned about. A staticlib was built for
+# thumbv8m-none-eabihf -- the RP2350's Cortex-M33 -- and a C consumer linked
+# against it with --gc-sections. The consumer runs, returns the verified
+# channel hash, and carries ZERO panic-related symbols in the final image.
+#
+# The apparent conflict was a measurement artifact. `nm -u` on an ARCHIVE
+# reports undefined symbols per member, including ones other members of the
+# same archive satisfy -- so rust_begin_unwind shows up as both defined (T,
+# ours) and undefined (U, referenced by core) in the same .a. That is the same
+# noise that made an earlier dependency measurement unreadable. The question
+# only has an answer in the FINAL LINKED IMAGE, which is exactly what
+# DISTRIBUTION.md already promises CI will build.
+#
+# SO WHY STILL rlib? Because a library that defines a #[panic_handler] forces
+# it on every consumer, and only one may exist in a linked program. The handler
+# belongs to whoever builds the artifact, not to the protocol code.
+#
+# The shape that follows: tethermesh stays an rlib, and a thin separate FFI
+# crate provides the staticlib, the panic handler and the C ABI. That crate is
+# the consumer's, or ours to ship, but it is not this one. The multi-crate gate
+# work of 2026-08-16 means such a crate is held to the same rules automatically.
 crate-type = ["rlib"]
 
 # Integration tests live where the repository layout says they live.

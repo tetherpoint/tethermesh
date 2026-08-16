@@ -344,6 +344,16 @@ Writing the spec first is not process for its own sake — the spec is the deliv
 
 The C ABI surface, `cbindgen` header, and the artifact discipline `DISTRIBUTION.md` commits to: a declared target set, reproducible builds, `tm_abi_version()`, a CI size budget, and a minimal C consumer built against each released archive.
 
+**2026-08-16 — the blocker that deferred this phase turned out not to exist.**
+
+L8 has been parked behind the `staticlib` / `#[panic_handler]` tension: that a linkable `no_std` artifact needs a panic handler, and defining one emits the `rust_begin_unwind` symbol the artifact gate reads as evidence a path can panic. Tested rather than reasoned about, and it is a **measurement artifact**.
+
+A staticlib was built for `thumbv8m-none-eabihf` — the RP2350's Cortex-M33 — and a C consumer linked against it with `--gc-sections`. It runs, returns the verified `0x08` channel hash, and the final image contains **zero** panic-related symbols. `nm -u` on an *archive* reports per-member undefined symbols that other members of the same archive satisfy, so `rust_begin_unwind` appears as both defined and undefined in the same `.a`. The question only has an answer in the linked image — which is what this phase's own gate already specifies.
+
+**The crate stays `rlib` for a different and better reason:** a library defining a `#[panic_handler]` forces it on every consumer, and only one may exist per linked program. The handler belongs to whoever builds the artifact. So the shape is **tethermesh as an rlib, plus a thin FFI crate** carrying the staticlib, the panic handler and the C ABI — and the multi-crate gate work done the same day holds that crate to the same rules automatically.
+
+**One FFI design lesson, from getting it wrong in the test harness.** The first C consumer passed the *short PSK index* `{1}` where `channel_hash` wants the *expanded 16-byte key*, and got `0x0b` instead of `0x08` — silently, with no error. A C surface that accepts a byte pointer and a length cannot distinguish them. The ABI should either expand internally or take a distinct type, because this is precisely the mistake a consumer will make and the failure is a wrong channel hash rather than a crash.
+
 **Gate:** every promise in `DISTRIBUTION.md` has a check behind it, and the caveat appears in the release notes, the archive and the generated header.
 
 ---
