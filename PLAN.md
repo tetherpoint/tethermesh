@@ -158,7 +158,17 @@ This is the assumption the whole extension suite rests on, so L7 is no longer co
 
 Deliberately **not** included at the time: a `should_relay`. Suppression is one input to the rebroadcast decision; the others are the hop limit, the contention window and the duty budget — and, then, whether a node relays on channels it cannot decrypt. Writing that function while the last one was open would have meant taking a position on an open question in code, which is how an assumption stops looking like one.
 
-**That reason has since expired.** The relay question was settled the same day, by measurement, in the paragraph above. `should_relay` is now blocked only on the contention window and duty-cycle accounting — ordinary remaining work, not an open question.
+**That reason has since expired, and the work is now done.** The relay question was settled the same day by measurement, and `should_relay` landed on 2026-08-16 in `meshtastic/core/routing.rs`, together with the contention window and duty-cycle accounting it was waiting on.
+
+**2026-08-16 — the rest of L5 is implemented.** Three pieces:
+
+- **`meshtastic/core/airtime.rs`** — LoRa time-on-air from **Semtech's** published formula (the radio vendor's, not the reference implementation's), plus a caller-owned `DutyCycle` budget. Anchored by two independent checks: sixteen preamble symbols reproduce the 131 ms the reference was observed to report, and a 70-byte packet models 1.18% above the simulator's 755 ms — the direction and roughly the magnitude by which the simulator's bitrate is already known to be optimistic against silicon.
+- **`meshtastic/core/routing.rs`** — the SNR-scaled contention window and `should_relay`, combining hop limit, duplicate suppression, role and duty budget into one decision with a distinct reason for each refusal. A full budget is reported separately from a loop, because one is a property of this node and the other of the frame.
+- **17 tests**, every one mutated red first: inverting the contention window, shortening the preamble, letting `charge` saturate instead of refuse, dropping the hop decrement, making routers defer, and letting the decision spend the budget.
+
+**One gap is recorded rather than papered over.** The contention window's *bounds* have never been observed — only the documented direction that a weaker signal takes a shorter backoff. Ours is our own parameterisation, marked as such in the module and listed as item 7 in the wire reference's UNVERIFIED section. Frames are unaffected and suppression still works, so interoperability holds; our timing will simply not match a stock node's.
+
+**Gate, restated:** what remains for L5 is *validation against the reference across a topology matrix*, not implementation.
 
 ~~**And the assumption everything else rests on.** Whether nodes relay traffic on channels they cannot decrypt is currently PLAUSIBLE, UNPROVEN. Settle it here: several instances, controlled topology, inject a frame on a channel none of them holds, observe whether it is repeated. In simulation topology is a coordinate rather than a hardware problem.~~ **Struck 2026-08-16 — answered, and the answer is yes.** Kept struck rather than deleted because the two paragraphs above only make sense against it.
 

@@ -47,6 +47,7 @@
 #![deny(unsafe_code)]
 
 
+pub mod airtime;
 pub mod backend;
 pub mod channel;
 pub mod crypto;
@@ -56,6 +57,7 @@ pub mod history;
 pub mod message;
 pub mod packet_id;
 pub mod protobuf;
+pub mod routing;
 
 #[cfg(kani)]
 mod proofs;

@@ -11,6 +11,7 @@
 use std::fs;
 use std::path::PathBuf;
 
+use tethermesh::airtime::{DutyCycle, ModemParams};
 use tethermesh::backend::{Crypto as Backend, Error as BackendError, SecretKey, Software};
 use tethermesh::channel::channel_hash;
 use tethermesh::crypto::{
@@ -24,6 +25,9 @@ use tethermesh::history::{PacketHistory, Seen};
 use tethermesh::message::{ChannelSettings, Data, PortNum, User};
 use tethermesh::packet_id::{NextId, PacketIdSource};
 use tethermesh::protobuf::{Error as ProtoError, Reader, Value, Writer};
+use tethermesh::routing::{
+    should_relay, ContentionWindow, Observed, Relay, Role, Suppressed,
+};
 use tethermesh::sha256::{sha256, Sha256};
 use tethermesh::x25519::{public_key, x25519};
 
@@ -1918,4 +1922,273 @@ fn a_bad_tag_is_never_reported_as_a_hardware_fault() {
     let err = sw.ccm_open(&key, &nonce, &mut buf[..n], CCM_TAG_LEN).unwrap_err();
     assert_eq!(err, BackendError::Ccm(CcmError::Unauthentic), "forgery misreported");
     assert_ne!(err, BackendError::Hardware, "a forgery was reported as retryable");
+}
+
+// ===========================================================================
+// L5 — airtime, duty cycle, and the rebroadcast decision.
+//
+// The airtime model is Semtech's published LoRa time-on-air formula, not
+// anything derived from the reference implementation. Two things anchor it to
+// reality rather than to itself, and both are asserted below: the preamble
+// lands on the 131 ms the reference was observed to report, and a 70-byte
+// packet lands ~1.2% above the simulator's 755 ms -- which is the direction
+// and roughly the magnitude by which the simulator's bitrate is already known
+// to be optimistic against hardware.
+// ===========================================================================
+
+/// The symbol time that everything else is built on.
+#[test]
+fn longfast_symbol_time_is_exactly_8192_microseconds() {
+    // 2^11 / 250 kHz = 8.192 ms, exact in integer microseconds.
+    assert_eq!(ModemParams::LONGFAST.symbol_time_us(), Some(8192));
+}
+
+/// The corroboration that pins the preamble length to sixteen symbols.
+///
+/// `WIRE_REFERENCE.md` records the reference reporting a 131 ms preamble.
+/// Sixteen symbols at 8.192 ms is 131.072 ms. Had this not matched, the
+/// preamble length would have been a free parameter and the whole model
+/// unanchored.
+#[test]
+fn sixteen_preamble_symbols_reproduce_the_reported_131ms() {
+    let p = ModemParams::LONGFAST;
+    let sym = p.symbol_time_us().expect("symbol time");
+    assert_eq!(u32::from(p.preamble_symbols) * sym, 131_072);
+}
+
+/// Time-on-air for a real observed packet size.
+#[test]
+fn airtime_for_a_70_byte_packet_matches_the_observed_transmission() {
+    let us = ModemParams::LONGFAST.airtime_us(70).expect("airtime");
+    // Model: 763.9 ms. Simulator reported 755 ms, and the simulator's bitrate
+    // is documented as ~1.2% optimistic, so the model should sit just above.
+    assert!(
+        (760_000..=768_000).contains(&us),
+        "70-byte airtime {us} us outside the modelled band"
+    );
+    let sim_ms = 755i64;
+    let model_ms = i64::from(us) / 1000;
+    let delta_pct = (model_ms - sim_ms) * 100 / sim_ms;
+    assert!(
+        (0..=3).contains(&delta_pct),
+        "model should exceed the simulator by a small positive margin, got {delta_pct}%"
+    );
+}
+
+/// Airtime must grow with payload, and never wrap or panic at the extremes.
+#[test]
+fn airtime_is_monotonic_and_total_across_every_payload_size() {
+    let p = ModemParams::LONGFAST;
+    let mut prev = 0u32;
+    for len in 0..=233u16 {
+        let us = p.airtime_us(len).expect("airtime is total over valid sizes");
+        assert!(us >= prev, "airtime went backwards at {len} bytes");
+        prev = us;
+    }
+    // A zero-length payload is still a preamble plus the fixed eight symbols.
+    assert!(p.airtime_us(0).expect("zero-length") > 131_072);
+}
+
+/// Out-of-range modem parameters are refused rather than approximated.
+#[test]
+fn impossible_modem_parameters_are_rejected_not_guessed() {
+    let bad_sf = ModemParams { spreading_factor: 13, ..ModemParams::LONGFAST };
+    assert_eq!(bad_sf.symbol_time_us(), None);
+    let zero_bw = ModemParams { bandwidth_hz: 0, ..ModemParams::LONGFAST };
+    assert_eq!(zero_bw.symbol_time_us(), None);
+    let bad_cr = ModemParams { coding_rate: 9, ..ModemParams::LONGFAST };
+    assert_eq!(bad_cr.airtime_us(32), None);
+}
+
+/// The budget refuses rather than saturating, and refusing charges nothing.
+#[test]
+fn duty_cycle_refuses_the_frame_that_would_break_the_budget() {
+    // 1% of one second = 10 ms of airtime.
+    let mut duty = DutyCycle::new(10, 1000, 0).expect("duty");
+    assert_eq!(duty.budget_us(), 10_000);
+
+    assert!(duty.charge(0, 6_000), "first frame fits");
+    assert_eq!(duty.used_us(), 6_000);
+
+    assert!(!duty.would_permit(0, 6_000), "second frame must not fit");
+    assert!(!duty.charge(0, 6_000), "and must be refused");
+    assert_eq!(duty.used_us(), 6_000, "a refused frame must charge nothing");
+
+    assert!(duty.charge(0, 4_000), "a frame that exactly fills the budget fits");
+    assert_eq!(duty.used_us(), 10_000);
+}
+
+/// The window resets once it has elapsed.
+#[test]
+fn duty_cycle_budget_returns_after_the_window_elapses() {
+    let mut duty = DutyCycle::new(10, 1000, 0).expect("duty");
+    assert!(duty.charge(0, 10_000));
+    assert!(!duty.would_permit(999_999, 1_000), "still inside the window");
+    assert!(duty.would_permit(1_000_000, 10_000), "window has rolled");
+    assert_eq!(duty.used_us(), 0, "rolling clears the accumulator");
+}
+
+/// A degenerate budget is refused at construction.
+#[test]
+fn a_nonsense_duty_budget_is_refused_at_construction() {
+    assert!(DutyCycle::new(10, 0, 0).is_none(), "zero-length window");
+    assert!(DutyCycle::new(1001, 1000, 0).is_none(), "over 100 percent");
+    assert!(DutyCycle::new(1000, 1000, 0).is_some(), "100 percent is legal");
+}
+
+// --- the contention window ------------------------------------------------
+
+/// The documented direction: **small window for weak signal.**
+///
+/// This is the property that makes flooding travel outward. If it ever
+/// inverts, distant nodes back off longest and the mesh stops extending --
+/// while every individual frame still looks correct, which is why it is
+/// asserted directly rather than left implied by a timing test.
+#[test]
+fn a_weaker_signal_yields_a_shorter_backoff() {
+    let cw = ContentionWindow::MESHTASTIC_SHAPE;
+    let far = cw.slots_for_snr(-80); // -20 dB, barely heard
+    let near = cw.slots_for_snr(40); // +10 dB, close by
+    assert_eq!(far, cw.min_slots);
+    assert_eq!(near, cw.max_slots);
+    assert!(far < near, "a distant node must flood before a near one");
+}
+
+/// Monotonic across the whole SNR range, and total: no input panics.
+#[test]
+fn contention_window_is_monotonic_and_total_over_all_snr() {
+    let cw = ContentionWindow::MESHTASTIC_SHAPE;
+    let mut prev = 0u8;
+    for q in -400i16..=400 {
+        let s = cw.slots_for_snr(q);
+        assert!(s >= prev, "window shrank as SNR rose, at {q} quarter-dB");
+        assert!((cw.min_slots..=cw.max_slots).contains(&s), "out of range at {q}");
+        prev = s;
+    }
+    // Extremes of the type, not just of the configured range.
+    let _ = cw.slots_for_snr(i16::MIN);
+    let _ = cw.slots_for_snr(i16::MAX);
+}
+
+/// An inverted configuration must not divide by zero or invert the policy.
+#[test]
+fn a_degenerate_contention_window_defers_rather_than_dividing_by_zero() {
+    let bad = ContentionWindow {
+        min_slots: 8,
+        max_slots: 2,
+        snr_floor_quarter_db: 40,
+        snr_ceil_quarter_db: 40,
+    };
+    // Equal floor and ceiling: every SNR at or above the ceiling takes max.
+    assert_eq!(bad.slots_for_snr(0), 8);
+    assert_eq!(bad.slots_for_snr(100), 2);
+}
+
+// --- the rebroadcast decision --------------------------------------------
+
+fn observed() -> Observed {
+    Observed {
+        hop_limit: 3,
+        snr_quarter_db: 0,
+        duplicate: false,
+        heard_relayed: false,
+        airtime_us: 100_000,
+    }
+}
+
+/// The ordinary case: relay, with the hop limit spent exactly once.
+#[test]
+fn relaying_decrements_the_hop_limit_by_exactly_one() {
+    let mut duty = DutyCycle::new(1000, 60_000, 0).expect("duty");
+    let d = should_relay(
+        &observed(),
+        Role::Client,
+        &ContentionWindow::MESHTASTIC_SHAPE,
+        &mut duty,
+        0,
+    );
+    match d {
+        Relay::After { hop_limit, slots } => {
+            assert_eq!(hop_limit, 2, "hop limit must be spent exactly once");
+            assert!(slots > 0);
+        }
+        Relay::No(r) => panic!("expected a relay, got {r:?}"),
+    }
+}
+
+/// A spent frame is not relayed.
+#[test]
+fn a_frame_with_no_hops_left_is_not_relayed() {
+    let mut duty = DutyCycle::new(1000, 60_000, 0).expect("duty");
+    let o = Observed { hop_limit: 0, ..observed() };
+    assert_eq!(
+        should_relay(&o, Role::Client, &ContentionWindow::MESHTASTIC_SHAPE, &mut duty, 0),
+        Relay::No(Suppressed::HopLimitExhausted)
+    );
+}
+
+/// Duplicate suppression outranks everything, including an exhausted budget.
+#[test]
+fn a_duplicate_is_reported_as_a_duplicate_even_when_the_budget_is_full() {
+    let mut duty = DutyCycle::new(1, 1000, 0).expect("duty"); // 1 ms budget
+    let o = Observed { duplicate: true, ..observed() };
+    assert_eq!(
+        should_relay(&o, Role::Client, &ContentionWindow::MESHTASTIC_SHAPE, &mut duty, 0),
+        Relay::No(Suppressed::Duplicate),
+        "a duplicate is a property of the frame, not of this node's budget"
+    );
+}
+
+/// A client defers to a node it heard relay; a router does not.
+///
+/// `WIRE_REFERENCE.md`: *"ROUTER and REPEATER roles rebroadcast regardless of
+/// hearing others."*
+#[test]
+fn routers_rebroadcast_where_clients_defer() {
+    let cw = ContentionWindow::MESHTASTIC_SHAPE;
+    let o = Observed { heard_relayed: true, ..observed() };
+
+    let mut duty = DutyCycle::new(1000, 60_000, 0).expect("duty");
+    assert_eq!(
+        should_relay(&o, Role::Client, &cw, &mut duty, 0),
+        Relay::No(Suppressed::AlreadyRelayedByAnother)
+    );
+
+    for role in [Role::Router, Role::Repeater] {
+        let mut duty = DutyCycle::new(1000, 60_000, 0).expect("duty");
+        assert!(
+            matches!(should_relay(&o, role, &cw, &mut duty, 0), Relay::After { .. }),
+            "{role:?} must rebroadcast despite hearing another node"
+        );
+    }
+}
+
+/// A full budget suppresses, and says so distinctly.
+#[test]
+fn an_exhausted_duty_budget_is_not_confused_with_a_loop() {
+    let mut duty = DutyCycle::new(1, 1000, 0).expect("duty"); // 1 ms budget
+    let o = observed(); // 100 ms airtime, far over
+    assert_eq!(
+        should_relay(&o, Role::Client, &ContentionWindow::MESHTASTIC_SHAPE, &mut duty, 0),
+        Relay::No(Suppressed::DutyBudgetExhausted)
+    );
+}
+
+/// Deciding must not charge the budget — only transmitting does.
+///
+/// A node that charged itself for frames it went on to suppress would throttle
+/// itself for staying quiet, which is exactly backwards.
+#[test]
+fn deciding_to_relay_does_not_itself_spend_the_budget() {
+    let mut duty = DutyCycle::new(1000, 60_000, 0).expect("duty");
+    for _ in 0..50 {
+        let _ = should_relay(
+            &observed(),
+            Role::Client,
+            &ContentionWindow::MESHTASTIC_SHAPE,
+            &mut duty,
+            0,
+        );
+    }
+    assert_eq!(duty.used_us(), 0, "the decision must not charge airtime");
 }

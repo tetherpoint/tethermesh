@@ -244,6 +244,14 @@ These are commonly asserted in secondary descriptions and are **not** confirmed 
 4. ~~**The PKI/DM scheme details**~~ — **RESOLVED 2026-08-16** by capturing and decrypting a real direct message, above. The docs had confirmed Curve25519 and mentioned "AES-CTR or AES-CCM" without saying which, nor the KDF, the tag size, or where the extra nonce travels. All four are now measured.
 5. ~~**The raw sync-word register value**~~ — **RESOLVED 2026-08-16**: `0x0740 = 0x24`, `0x0741 = 0xB4`, confirmed by decoding real traffic.
 6. **Preset SF/BW/CR parameters** — **LongFast resolved** (SF11 / BW250 / CR4/5); sixteen presets remain, including the 62.5 kHz and 20 kHz variants.
+7. **Contention-window bounds** — **the direction is documented, the numbers are not.** The official documentation says only *"The CW size is small for a low SNR, such that nodes that are further away are more likely to flood first."* No primary source read so far gives `CW_MIN`, `CW_MAX`, or the SNR range they map across. `meshtastic/core/routing.rs` implements the documented direction with **our own** parameterisation, marked as ours in that module rather than presented as theirs. Frames stay identical and suppression still works, so this does not affect interoperability — but our *timing* will not match a stock node's, so we may win or lose races we would otherwise have lost or won. Settling it needs a timed capture of several nodes relaying one frame.
+
+**Airtime, and what is actually established about it.** `meshtastic/core/airtime.rs` computes time-on-air from **Semtech's** published LoRa formula — the radio vendor's, not the reference implementation's. Two things anchor it here rather than to itself:
+
+- **The preamble lands exactly.** At SF11/BW250 the symbol time is 8.192 ms, so sixteen preamble symbols are 131.07 ms — matching the **131 ms** recorded below from oracle observation. That pins the preamble at sixteen symbols, which would otherwise have been a free parameter.
+- **The residual points the right way.** A 70-byte packet models at 763.9 ms where the *simulator* reported 755 ms, +1.18%. The simulator's bitrate is separately measured as ~1.2% optimistic against silicon, so the formula disagrees with the simulator by very nearly the amount the simulator is already known to be wrong by — and therefore agrees with hardware.
+
+**That is corroboration from a single observed packet, not a measurement.** A direct hardware sweep across payload sizes is still wanted, and until then airtime is *checked against someone else's answer* rather than verified.
 
 **Only item 6 remains.** Items 1–5 are resolved above, each by capture or observation rather than by assertion. Sixteen presets are outstanding, and they are bounded rather than unknown: the method that resolved LongFast works unchanged.
 
