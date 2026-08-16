@@ -129,6 +129,12 @@ A side effect worth recording: the oracle **loaded a `ChannelFile` we hand-encod
 
 **Packet identifiers are 32-bit and re-randomised per packet** — the node logs `Initial packet id`, then `Partially randomized packet id` for each transmission. Relevant to the L2 packet-id discipline: under CTR a repeated `(packet_id, sender)` pair leaks the XOR of two plaintexts.
 
+**LongFast is bandwidth 250 kHz, spreading factor 11, coding rate 4/5** — on real hardware, from the firmware's own mouth. This is the first hard data against draft item 6.
+
+Method matters here, because it is what makes this evidence rather than another assertion. A `LoRaConfig` was written to a Heltec V3 running `2.7.26.54e0d8d` with `use_preset = true`, `modem_preset = LONG_FAST`, and the bandwidth, spreading-factor and coding-rate fields **absent** — proto3 default, i.e. zero. Reading the config back returned `bandwidth = 250`, `spread_factor = 11`, `coding_rate = 5`. The firmware populated them, so these are its values for the preset and not an echo of anything we supplied.
+
+It covers **one preset of seventeen**. The commonly repeated table happens to agree for this row; that is now checked rather than assumed for LongFast alone, and says nothing about the other sixteen — including the 62.5 kHz and 20 kHz variants that made the draft's 7-row table impossible in the first place. The bench was found running `VLongSlow` at 62.5 kHz, so that row is reachable the same way.
+
 **The simulator and real silicon disagree on airtime, by about 1.2%.** Same firmware version (`2.7.26.54e0d8d`), same preset, same region UNSET, same 104 × 250 kHz, same 906.875 MHz, same 28 ms slot and 131 ms preamble — and different computed bitrates:
 
 | build | reported bitrate |
