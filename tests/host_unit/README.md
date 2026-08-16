@@ -44,6 +44,30 @@ that can catch an endianness or nonce error, because everything else in the
 suite is checked against something we produced ourselves and would agree with
 a wrong implementation perfectly.
 
+## The check that passed without checking
+
+Worth reading before trusting any gate here. `check_rust_rules.sh --binary`
+existed from the start and was **vacuous in three independent ways at once**,
+each of which produced a confident pass:
+
+1. Pointed at an `.rlib` it saw 4 symbols, none of them ours — an rlib is
+   mostly metadata, not linked object code.
+2. `--emit=obj` under the release profile emits **LLVM bitcode**, which `nm`
+   reads as an empty symbol table. LTO has to be off to get an ELF object.
+3. Its patterns were written for **legacy symbol mangling**. This toolchain
+   uses v0, where `core..panicking` never appears — and panic paths often
+   surface as specialised symbols like `len_mismatch_fail` that contain no
+   form of the word "panic" at all.
+
+When it was fixed it immediately failed: `frame::encode` had a live panic path
+through `copy_from_slice`. So the crate's headline promise was untrue for as
+long as the check was broken, and nothing said so.
+
+The check now refuses bitcode, refuses an artifact with too few symbols to be
+meaningful, and tests for **undefined references outside a compiler-intrinsic
+allowlist** rather than for names containing "panic". `check_all.sh` builds a
+suitable object and runs it every time.
+
 ## What has been observed red
 
 Per the rule above, recorded rather than claimed:
@@ -64,6 +88,8 @@ Per the rule above, recorded rather than claimed:
 | header codec, flag bits | read `hop_start` from bits 3-5 instead of 5-7 | `hop_start should match the original hop_limit` |
 | CTR nonce byte order | big-endian `packet_id` in the nonce | captured frame decrypted to `fbd305d3…` instead of the text |
 | PSK expansion | treated a one-byte PSK as a literal key | captured frames failed to decrypt, and the vector test failed |
+| panic-free artifact | reintroduced a `copy_from_slice` with unprovable lengths | `references machinery outside the crate: …copy_from_slice_impl17len_mismatch_fail` |
+| panic-free check, vacuity | pointed the check at the `.rlib` | `REFUSING: only 2 symbol(s)` |
 
 The header rows are the ones that justify capturing real frames at all. A
 big-endian header round-trips through our own encoder perfectly — it is only

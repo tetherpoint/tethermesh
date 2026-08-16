@@ -174,7 +174,9 @@ impl<'a> Reader<'a> {
             1 => {
                 let bytes = self.take(8)?;
                 let mut out = [0u8; 8];
-                out.copy_from_slice(bytes);
+                for (d, s) in out.iter_mut().zip(bytes.iter()) {
+                    *d = *s;
+                }
                 Value::Fixed64(out)
             }
             2 => {
@@ -184,7 +186,9 @@ impl<'a> Reader<'a> {
             5 => {
                 let bytes = self.take(4)?;
                 let mut out = [0u8; 4];
-                out.copy_from_slice(bytes);
+                for (d, s) in out.iter_mut().zip(bytes.iter()) {
+                    *d = *s;
+                }
                 Value::Fixed32(out)
             }
             // 3 and 4 are the deprecated group encoding; 6 and 7 were never
@@ -236,7 +240,9 @@ impl<'a> Writer<'a> {
     fn put_slice(&mut self, bytes: &[u8]) -> Result<(), Error> {
         let end = self.pos.checked_add(bytes.len()).ok_or(Error::BufferTooSmall)?;
         let dst = self.buf.get_mut(self.pos..end).ok_or(Error::BufferTooSmall)?;
-        dst.copy_from_slice(bytes);
+        for (d, s) in dst.iter_mut().zip(bytes.iter()) {
+            *d = *s;
+        }
         self.pos = end;
         Ok(())
     }

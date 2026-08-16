@@ -64,7 +64,9 @@ That single capture resolved four open L0 items at once. The 16-byte header layo
 
 Two notes on how it was built. The AES core needs variable indexing and index arithmetic on every line, which the crate denies outright; rather than suppress the lints for one file, every access goes through total accessors and wrapping index arithmetic. And a stored PSK is an **index, not a key** — feeding the stored bytes to AES computes a different key for the most common channel on the network, silently. Both the nonce byte order and that expansion were observed red against captured frames.
 
-**L2 is complete apart from framing the two halves together.**
+`meshtastic/core/frame.rs` frames the two halves together, and the gate for it is the strongest one available: **a captured frame decodes and re-encodes byte for byte.** If our encoder reproduces exactly what a stock node put on the air, then the header layout, endianness, flag packing, PSK expansion, nonce construction and CTR counter semantics are all simultaneously right.
+
+**L2 is complete.**
 
 **Gate:** a real captured frame decrypts to parseable payload bytes. *Met.*
 
@@ -101,7 +103,11 @@ The layer that actually proves compatibility:
 
 The second is the direction that fails in the field, and the one a lenient decoder hides.
 
-**Gate:** both directions clean across the corpus, plus fuzzing that reaches the panic-free requirement — `tools/check_rust_rules.sh --binary` showing no panic machinery linked. That is the evidence for the safety claim; fuzzing alone only shows nothing crashed today.
+**2026-08-16 — the panic-free half of this gate is met, and the check that was supposed to prove it turned out to prove nothing.** `check_rust_rules.sh --binary` was vacuous three ways over: an `.rlib` exposes almost no symbols, `--emit=obj` under LTO produces bitcode that reads as an empty symbol table, and the patterns matched legacy mangling while the toolchain emits v0 — where panic paths appear as names like `len_mismatch_fail` containing no form of the word "panic".
+
+Fixed, it failed immediately: `frame::encode` had a live panic path through `copy_from_slice`. Every such call is now an iterator zip, and the artifact has **no undefined references at all** — not even `memcpy`. The check refuses bitcode and refuses artifacts too bare to be meaningful, `check_all.sh` runs it on every invocation, and both the panic path and the vacuity were observed red.
+
+**Gate:** both directions clean across the corpus, plus fuzzing that reaches the panic-free requirement — `tools/check_rust_rules.sh --binary` showing no panic machinery linked. That is the evidence for the safety claim; fuzzing alone only shows nothing crashed today. *Panic-free half met and continuously enforced; conformance and fuzzing outstanding.*
 
 ## L5 — routing
 

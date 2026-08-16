@@ -314,12 +314,16 @@ pub fn expand_psk(stored: &[u8]) -> Option<Psk> {
         }
         16 => {
             let mut key = [0u8; 16];
-            key.copy_from_slice(stored.get(..16)?);
+            for (d, s) in key.iter_mut().zip(stored.iter()) {
+                *d = *s;
+            }
             Some(Psk::Aes128(key))
         }
         32 => {
             let mut key = [0u8; 32];
-            key.copy_from_slice(stored.get(..32)?);
+            for (d, s) in key.iter_mut().zip(stored.iter()) {
+                *d = *s;
+            }
             Some(Psk::Aes256(key))
         }
         _ => None,

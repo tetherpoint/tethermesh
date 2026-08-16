@@ -48,6 +48,7 @@
 
 pub mod channel;
 pub mod crypto;
+pub mod frame;
 pub mod header;
 pub mod history;
 pub mod message;

@@ -26,11 +26,6 @@ if [ "${1:-}" = "--pending" ]; then
 Checks that exist as requirements but cannot run until there is something to
 check. Each is listed here so the gap is visible rather than forgotten.
 
-  panic-free binary     needs a built staticlib.
-                        tools/check_rust_rules.sh --binary <lib.a>
-                        Verifies no panic machinery is linked — the evidence
-                        that no path can panic on hostile input.
-
   size budget           needs a built staticlib and an agreed ceiling.
                         A protocol codec that lands at 100 KB is unusable on
                         the targets it is meant for; the ceiling is set once
@@ -68,6 +63,37 @@ head "crate rules (panic-free, no alloc, no global state)"
     # reported rather than hidden. It is not a pass and not a failure.
     [ "$s" = 3 ] || rc=1
 }
+
+head "panic-free artifact (no path can fail on hostile input)"
+# Built here rather than left to a --pending note, because this is the claim
+# DISTRIBUTION.md leads with and it went unverified for as long as it was
+# somebody's job to remember. LTO must be off or the emitted artifact is
+# bitcode, which reads as an empty symbol table and passes without inspecting
+# anything — see the note in check_rust_rules.sh.
+if command -v cargo >/dev/null 2>&1 && [ -f "$ROOT/Cargo.toml" ]; then
+    objdir="$ROOT/target/objcheck"
+    rm -rf "$objdir"; mkdir -p "$objdir"
+    if ( cd "$ROOT" && CARGO_PROFILE_RELEASE_LTO=false \
+            cargo rustc --release --lib -- --emit=obj -o "$objdir/tm.o" ) >/dev/null 2>&1; then
+        # A glob, not `ls | head -1`: this script defines its own `head`
+        # function for section headings, so piping into head calls THAT,
+        # discards stdin and kills the pipeline with SIGPIPE under pipefail.
+        obj=""
+        for f in "$objdir"/*.o; do
+            [ -f "$f" ] || continue
+            obj="$f"; break
+        done
+        if [ -n "$obj" ]; then
+            "$ROOT/tools/check_rust_rules.sh" --binary "$obj" || rc=1
+        else
+            printf '\033[31m[check] object emit produced nothing\033[0m\n' >&2; rc=1
+        fi
+    else
+        printf '\033[31m[check] could not build an object to inspect\033[0m\n' >&2; rc=1
+    fi
+else
+    printf '\033[33m[check] cargo not available — panic-free artifact NOT verified\033[0m\n' >&2
+fi
 
 head "summary"
 if [ "$rc" = 0 ]; then

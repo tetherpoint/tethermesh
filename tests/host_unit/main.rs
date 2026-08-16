@@ -13,6 +13,7 @@ use std::path::PathBuf;
 
 use tethermesh::channel::channel_hash;
 use tethermesh::crypto::{ctr_apply, expand_psk, nonce, Aes128, Psk, DEFAULT_KEY};
+use tethermesh::frame;
 use tethermesh::header::{Header, HEADER_LEN};
 use tethermesh::history::{PacketHistory, Seen};
 use tethermesh::message::{ChannelSettings, Data, PortNum, User};
@@ -959,4 +960,99 @@ fn short_psk_indices_expand_to_the_documented_keys() {
     assert!(matches!(expand_psk(&[0u8; 16]), Some(Psk::Aes128(_))));
     assert!(matches!(expand_psk(&[0u8; 32]), Some(Psk::Aes256(_))));
     assert_eq!(expand_psk(&[0u8; 7]), None, "undefined length must be rejected");
+}
+
+/// End to end against real traffic: parse a captured frame, and rebuild it.
+///
+/// This is the whole of L2 in one assertion. If our encoder reproduces the
+/// exact bytes a stock node put on the air, then the header layout, the
+/// endianness, the flag packing, the PSK expansion, the nonce construction
+/// and the CTR counter semantics are all simultaneously right.
+#[test]
+fn a_captured_frame_survives_decode_then_encode_byte_for_byte() {
+    let doc = fs::read_to_string(captures_dir().join("on_air_frames.json")).unwrap();
+    let mut raws = Vec::new();
+    let mut from = 0usize;
+    while let Some(hit) = doc[from..].find("\"raw_hex\"") {
+        let abs = from + hit;
+        if let Some(s) = json_str(&doc[abs..], "raw_hex") {
+            raws.push(s.to_string());
+        }
+        from = abs + 9;
+    }
+    assert!(raws.len() >= 3);
+
+    let Psk::Aes128(key) = expand_psk(&[0x01]).unwrap() else { panic!() };
+
+    for (i, hex) in raws.iter().enumerate() {
+        let original = hex_to_bytes(hex);
+
+        let mut work = original.clone();
+        let (hdr, plain) = frame::decode_in_place(&mut work, &key, 0).expect("decode failed");
+        let plain = plain.to_vec();
+
+        assert_eq!(
+            Data::decode(&plain).unwrap().payload,
+            format!("sniff-probe-{i}").as_bytes()
+        );
+
+        let mut rebuilt = vec![0u8; frame::MAX_FRAME];
+        let n = frame::encode(&hdr, &plain, &key, 0, &mut rebuilt).expect("encode failed");
+        assert_eq!(
+            &rebuilt[..n],
+            &original[..],
+            "frame {i} did not rebuild to the bytes that were on the air"
+        );
+    }
+}
+
+/// A relay reads the header without a key, because it may not have one.
+#[test]
+fn a_relay_reads_the_header_without_any_key() {
+    let doc = fs::read_to_string(captures_dir().join("on_air_frames.json")).unwrap();
+    let hex = json_str(&doc[doc.find("\"raw_hex\"").unwrap()..], "raw_hex").unwrap();
+    let f = hex_to_bytes(hex);
+
+    let hdr = frame::peek_header(&f).expect("a relay must be able to read any header");
+    assert_eq!(hdr.channel, 0x08);
+    assert_eq!(hdr.hop_limit, 3);
+
+    // The ciphertext is untouched by peeking — a relay forwards it verbatim.
+    assert_eq!(frame::payload(&f).unwrap(), &f[HEADER_LEN..]);
+
+    let relayed = hdr.relayed_by(0x336a_0d28).unwrap();
+    let mut out = vec![0u8; frame::MAX_FRAME];
+    let n = frame::encode(&relayed, frame::payload(&f).unwrap(), &key_none(), 0, &mut out);
+    // Encoding with the wrong key would re-encrypt; a real relay re-emits the
+    // ciphertext as-is. Assert only that the header half is right.
+    assert!(n.is_ok());
+    assert_eq!(&out[..HEADER_LEN], &relayed.encode()[..]);
+}
+
+fn key_none() -> [u8; 16] { [0u8; 16] }
+
+#[test]
+fn frame_size_limits_are_enforced_not_assumed() {
+    let key = key_none();
+    let h = Header::default();
+    let mut out = vec![0u8; frame::MAX_FRAME];
+
+    assert_eq!(frame::encode(&h, &[0u8; 233], &key, 0, &mut out), Ok(frame::MAX_FRAME));
+    assert_eq!(
+        frame::encode(&h, &[0u8; 234], &key, 0, &mut out),
+        Err(frame::Error::PayloadTooLong),
+        "233 is DATA_PAYLOAD_LEN; 237 is the figure usually quoted and is wrong"
+    );
+
+    let mut tiny = [0u8; 8];
+    assert_eq!(
+        frame::encode(&h, &[1, 2, 3], &key, 0, &mut tiny),
+        Err(frame::Error::BufferTooSmall)
+    );
+
+    for n in 0..HEADER_LEN {
+        let mut short = vec![0u8; n];
+        assert_eq!(frame::decode_in_place(&mut short, &key, 0).map(|_| ()), Err(frame::Error::TooShort));
+        assert_eq!(frame::peek_header(&short), Err(frame::Error::TooShort));
+    }
 }
