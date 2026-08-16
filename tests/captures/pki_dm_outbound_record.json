@@ -1,0 +1,51 @@
+{
+  "corpus": "pki_dm_outbound_record",
+  "boundary": "a stock Meshtastic node's own log, receiving a PKI direct message built entirely by tethermesh",
+  "what_this_proves": "L6's second direction: emitting a direct message an unmodified reference node accepts. The first direction (decrypting one they sent) is covered by pki_dm_record.json.",
+  "provenance": {
+    "captured": "2026-08-16",
+    "transmitter": "Heltec V3 running bench/firmware/heltec_v3_sniffer, an independently written SX1262 driver; frame bytes produced by tests/host_unit emit_pki_dm_frame_for_the_bench",
+    "receiver": "Heltec V3, stock Meshtastic 2.7.26.54e0d8d, unmodified, region US, LongFast",
+    "radio": "906.875 MHz, SF11, BW 250 kHz, CR 4/5, preamble 16, sync 0x24 0xB4",
+    "note": "Our two nodes, our own text. No third-party traffic. Publishable under TESTING.md.",
+    "clean_room_note": "Evidence is the reference node's own log output - black-box observation from outside. No reference source was read."
+  },
+  "our_frame": {
+    "hex": "64e769330100577e210dad0b6300000147...  (48 bytes; id and extra_nonce vary per run)",
+    "len": 48,
+    "to": "0x3369e764",
+    "from": "0x7e570001",
+    "id": "0x0bad0d21",
+    "channel_byte": "0x00 - the PKI marker",
+    "layout": "header(16) || ciphertext || tag(8) || extra_nonce(4)"
+  },
+  "confirmations": [
+    {
+      "what": "nonce construction, confirmed from the far side",
+      "detail": "The receiver logged the nonce it used: 21 0d ad 0b | 21 0d 00 52 | 01 00 57 7e | 00. That is packet_id LE (0x0bad0d21), extra_nonce LE (0x52000d21), from LE (0x7e570001), then 0x00 - exactly the construction WIRE_REFERENCE.md records, now observed being reconstructed independently by the reference implementation."
+    },
+    {
+      "what": "shared secret agreement",
+      "detail": "The receiver logged its derived key prefix as d8 85 d2 24 e6 cc 3d e0, identical to the value already recorded in WIRE_REFERENCE.md from the inbound direction. Our X25519 and SHA-256 KDF produce the same key a stock node does, now demonstrated in BOTH directions."
+    },
+    {
+      "what": "acceptance and display",
+      "detail": "PKI Decryption worked! / Packet decrypted using PKI! / Received text msg from=0x7e570001, id=0xbad0d21, msg=tethermesh-pki-1 - decoded at Portnum=1 and marked PKI."
+    }
+  ],
+  "incidental_observation": {
+    "what": "SNR-scaled contention window, one sample",
+    "detail": "On relaying our broadcast NodeInfo the node logged: 'rx_snr found. hop_limit:2 rx_snr:6.750000' then 'rx_snr found in packet. Setting tx delay:3360'. At 6.75 dB SNR it chose a 3360 ms transmit delay, which at the 28 ms slot time is 120 slots.",
+    "why_this_is_not_a_resolution": "One sample cannot separate a deterministic delay from a single draw out of a random window, and gives no second point to fit a slope. It bounds nothing on its own. Recorded because it is the first direct observation of the mechanism WIRE_REFERENCE.md item 7 lists as unverified, and because a sweep across SNR would settle that item."
+  },
+  "log_excerpt": [
+    "[Router] Lora RX (id=0x0bad0d21 fr=0x7e570001 to=0x3369e764, transport = 0, WantAck=0, HopLim=3 Ch=0x0 encrypted len=48 rxSNR=6.25 rxRSSI=-48 hopStart=3 relay=0x1)",
+    "[Router] Attempt PKI decryption",
+    "[Router] Attempt decrypt with nonce:  21 0d ad 0b 21 0d 00 52 01 00 57 7e 00",
+    "[Router] Attempt decrypt with shared_key starting with:  d8 85 d2 24 e6 cc 3d e0",
+    "[Router] PKI Decryption worked!",
+    "[Router] Packet decrypted using PKI!",
+    "[Router] decoded message (id=0x0bad0d21 fr=0x7e570001 to=0x3369e764, transport = 1, WantAck=0, HopLim=3 Ch=0x0 Portnum=1 PKI rxSNR=6.25 rxRSSI=-48 hopStart=3 relay=0x1)",
+    "[Router] Received text msg from=0x7e570001, id=0xbad0d21, msg=tethermesh-pki-1"
+  ]
+}

@@ -227,7 +227,26 @@ That completes the chain in our own code, with no dependencies: **key agreement 
 
 The first attempt was wrong in a way worth recording: `fe_sub` biased by p instead of 2p, and the final reduction was muddled. The result was a field implementation that is entirely self-consistent — it adds, multiplies, inverts and round-trips happily — and disagrees with the published vectors. No property test would have found it.
 
-**Gate:** decrypt a captured direct message; produce one the reference accepts. *First half met and now fully in our own code. The second half — emitting a DM they accept — needs an outbound test on the bench.*
+**2026-08-16 — THE SECOND HALF IS MET. A stock node accepted a PKI direct message built entirely by our code.** An unmodified Heltec V3 on `2.7.26.54e0d8d` logged:
+
+```
+[Router] Attempt PKI decryption
+[Router] Attempt decrypt with nonce:  21 0d ad 0b 21 0d 00 52 01 00 57 7e 00
+[Router] Attempt decrypt with shared_key starting with:  d8 85 d2 24 e6 cc 3d e0
+[Router] PKI Decryption worked!
+[Router] Packet decrypted using PKI!
+[Router] Received text msg from=0x7e570001, id=0xbad0d21, msg=tethermesh-pki-1
+```
+
+Record in `tests/captures/pki_dm_outbound_record.json`. Three things are confirmed at once, and the second and third are worth more than the headline:
+
+- **The nonce construction, verified from the far side.** The receiver logged the nonce it reconstructed: `21 0d ad 0b | 21 0d 00 52 | 01 00 57 7e | 00` — packet id LE, extra nonce LE, `from` LE, then `0x00`. Until now that layout was read off a message *they* sent; it has now been independently rebuilt by the reference from a message *we* sent.
+- **The shared secret agrees in both directions.** Their derived key prefix, `d8 85 d2 24 e6 cc 3d e0`, is byte-identical to the value already recorded in `WIRE_REFERENCE.md` from the inbound exchange. Our X25519 and our SHA-256 KDF produce the key a stock node produces, now demonstrated **both ways** rather than once.
+- **It reached the application layer**, decoded at `Portnum=1`, marked `PKI`, and rendered as text.
+
+**Gate:** decrypt a captured direct message; produce one the reference accepts. ***Both halves met.***
+
+**One incidental observation, recorded but not promoted.** While relaying our broadcast NodeInfo the node logged `rx_snr found. hop_limit:2 rx_snr:6.750000` and then `Setting tx delay:3360` — a 3360 ms delay at 6.75 dB, which is 120 slots at the 28 ms slot time. That is the first direct sight of the contention-window mechanism `WIRE_REFERENCE.md` item 7 lists as unverified. **It settles nothing:** one sample cannot distinguish a deterministic delay from a single draw out of a random window, and gives no second point to fit a slope. A sweep across SNR would.
 
 ## L7 — the extension suite
 
@@ -249,7 +268,7 @@ The C ABI surface, `cbindgen` header, and the artifact discipline `DISTRIBUTION.
 
 **The physical layer — mostly closed, and by exactly the route predicted.** The claim here was that the sync word and per-preset modulation parameters could not be established without real silicon. That held, and silicon settled them: the sync word is resolved (`0x0740=0x24`, `0x0741=0xB4`, confirmed by decoding real traffic) and LongFast's parameters with it. **Sixteen presets remain** — bounded, mechanical, same method.
 
-**The interoperability gate — three and a half of four.** A physical, unmodified device must show our node, render our text, accept a direct message, and list us in a route trace. As of 2026-08-16 a stock Heltec on `2.7.26.54e0d8d` shows us as a peer, renders our text, and answers an addressed traceroute. The fourth is done **for channel encryption only**: an addressed, non-broadcast packet was accepted and answered. **The PKI direct-message path is the remaining half**, and it is L6's open gate.
+**The interoperability gate — ALL FOUR, on hardware.** A physical, unmodified device must show our node, render our text, accept a direct message, and list us in a route trace. As of 2026-08-16 a stock Heltec on `2.7.26.54e0d8d` shows us as a peer, renders our text, answers an addressed traceroute, **and accepts a PKI direct message** — decrypting it with a shared secret it derived independently and matching ours byte for byte. The last of these was L6's open half and closed on 2026-08-16; see that section for the log.
 
 Simulation green is not interoperability green, and treating it as such is the most likely way this project fools itself. That warning is retained deliberately — the items above were closed on hardware, which is the only reason they may be marked closed.
 
