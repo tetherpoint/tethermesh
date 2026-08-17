@@ -21,6 +21,15 @@
 //! what a bounded test samples badly and a proof settles outright. The curve
 //! arithmetic remains out of scope for the reason below.
 //!
+//! **Delivery joined that scope on 2026-08-17**, and for a different reason
+//! than the rest. A retransmission defect corrupts nothing and panics nowhere —
+//! it makes this node antisocial to an entire mesh. Retries spend *shared*
+//! airtime, and on a flood mesh each one is rebroadcast by every neighbour that
+//! hears it, so the cost multiplies by local node count and lands on nodes that
+//! gain nothing. The symptom appears in somebody else's capture, not ours,
+//! which is precisely the failure a bounded test is worst at catching and a
+//! proof over arbitrary clocks settles.
+//!
 //! Scope, stated honestly. This proves things about the **parse path**, which
 //! is where attacker-controlled bytes arrive and where a panic would be a
 //! remote denial of service. It proves nothing about the curve arithmetic in
@@ -38,6 +47,7 @@
 
 use crate::airtime::{DutyCycle, ModemParams};
 use crate::channel::channel_hash;
+use crate::delivery::{Outbox, RetryPolicy};
 use crate::routing::{should_relay, ContentionWindow, Observed, Relay, Role};
 use crate::frame;
 use crate::header::{Header, HEADER_LEN};
@@ -259,4 +269,97 @@ fn should_relay_is_total_and_spends_exactly_one_hop() {
         assert!(o.hop_limit > 0, "relayed a frame with no hops left");
         assert!(hop_limit == o.hop_limit - 1, "hop limit not spent exactly once");
     }
+}
+
+/// Retransmission can never exceed the configured ceiling.
+///
+/// This is the airtime-safety property, and it is the one with a cost attached.
+/// `PLAN.md` fixes upstream's retry behaviour as a **ceiling, never a target**,
+/// because retransmission spends *shared* airtime: on a flood mesh every retry
+/// is rebroadcast by every neighbour that hears it, so the cost multiplies by
+/// local node count and is borne by nodes that gain nothing from it. A
+/// scheduling bug here does not corrupt a frame — it makes this node antisocial
+/// to an entire mesh, quietly, in a way only somebody else's capture would show.
+///
+/// [`Outbox::track`] records the caller's own first transmission as attempt one,
+/// so [`Outbox::next_due`] may hand out at most `max_attempts - 1` further
+/// frames. Proven over **arbitrary times**, including times that run backwards
+/// or repeat, because nothing constrains a caller's clock and a monotonicity
+/// assumption is exactly the kind a real system violates after a reboot.
+#[kani::proof]
+fn retransmission_never_exceeds_the_configured_ceiling() {
+    let max: u8 = kani::any();
+    kani::assume(max >= 1 && max <= 4);
+    let interval: u32 = kani::any();
+
+    let mut ob: Outbox<1> = Outbox::new(RetryPolicy {
+        max_attempts: max,
+        interval_us: interval,
+    });
+    // 100% of the window, so the duty budget never refuses. That is the HARDER
+    // case: a budget that refused would only reduce the count and could hide a
+    // ceiling defect behind an unrelated limit.
+    let Some(mut duty) = DutyCycle::new(1000, 3_600_000, 0) else { return };
+
+    let frame: [u8; HEADER_LEN] = kani::any();
+    if ob.track(&frame, 0).is_err() {
+        return;
+    }
+
+    // Ask more often than the ceiling could ever allow.
+    let mut handed: u32 = 0;
+    for _ in 0..5u8 {
+        let now: u64 = kani::any();
+        if ob.next_due(now, 1, &mut duty).is_some() {
+            handed = handed.saturating_add(1);
+        }
+    }
+
+    assert!(
+        handed <= u32::from(max).saturating_sub(1),
+        "the outbox handed out more transmissions than the policy allows, \
+         counting the caller's own first send"
+    );
+}
+
+/// An acknowledged entry is never retransmitted, and both are total.
+///
+/// The safety half of delivery: once an answer arrives the frame must stop, or
+/// a node keeps spending shared airtime on a message that has already landed.
+/// [`Outbox::acknowledge`] takes only a request id — **no status** — which is
+/// what makes a rejection retire an entry exactly as an acceptance does. Proven
+/// here for an arbitrary id rather than the one tracked, so an implementation
+/// that retired the wrong slot, or every slot, fails.
+///
+/// [`Outbox::reap`] is exercised at an arbitrary time in the same harness to
+/// establish it is total: it is called in a loop by callers until it answers
+/// `None`, so a panic there is a hang or a crash in the retransmission path.
+#[kani::proof]
+fn an_acknowledged_entry_is_never_retransmitted() {
+    let mut ob: Outbox<1> = Outbox::new(RetryPolicy::MEASURED_CEILING);
+    let Some(mut duty) = DutyCycle::new(1000, 3_600_000, 0) else { return };
+
+    let frame: [u8; HEADER_LEN] = kani::any();
+    if ob.track(&frame, 0).is_err() {
+        return;
+    }
+    let tracked = Header::decode(&frame).map(|h| h.id);
+
+    // Total for ANY id, matched or not.
+    let id: u32 = kani::any();
+    let hit = ob.acknowledge(id);
+
+    if hit {
+        assert!(tracked == Some(id), "retired an entry the id did not name");
+        assert!(ob.is_empty(), "an acknowledged outbox still holds something");
+        let now: u64 = kani::any();
+        assert!(
+            ob.next_due(now, 1, &mut duty).is_none(),
+            "retransmitted a frame that had already been acknowledged"
+        );
+    }
+
+    // Total at any time, including one before the entry was tracked.
+    let t: u64 = kani::any();
+    let _ = ob.reap(t);
 }

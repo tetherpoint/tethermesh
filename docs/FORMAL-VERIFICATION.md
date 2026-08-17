@@ -51,6 +51,8 @@ proof that does not terminate proves nothing.
 | `a_duty_cycle_can_never_be_charged_beyond_its_budget` | no accepted sequence of charges overruns the budget |
 | `the_contention_window_is_total_and_stays_within_its_bounds` | every SNR yields a window inside the configured bounds; a degenerate range still answers |
 | `should_relay_is_total_and_spends_exactly_one_hop` | relaying decrements `hop_limit` by exactly one and never relays a spent frame |
+| `retransmission_never_exceeds_the_configured_ceiling` | the outbox never hands out more transmissions than the policy allows, counting the caller's own first send — over arbitrary times, including clocks that run backwards |
+| `an_acknowledged_entry_is_never_retransmitted` | an acknowledgement retires only the entry its id names, and nothing is retransmitted afterwards; `acknowledge` and `reap` are total |
 
 **Why this matters more than the artifact check.** `check_rust_rules.sh`
 inspects the built object for panic machinery. That is evidence — it says the
