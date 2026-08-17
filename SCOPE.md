@@ -11,13 +11,15 @@ That makes this document a gate, not a preference. It is easier to keep somethin
 
 > **If it is not part of a Meshtastic-compatible protocol implementation or its extensions, it does not belong here.**
 
+And narrower than that reads on its own: this repository **tracks Meshtastic**. Ongoing work here is aligning with upstream protocol features, not growing a parallel feature set. An extension qualifies only if it is pure protocol — message formats and state, no hardware source — which is what removing location and ranging on 2026-08-17 settled in practice.
+
 Everything in this repository should make sense to someone who has never heard of the products that consume it, and should be usable by them.
 
 ## In scope
 
 - The Meshtastic on-air protocol: frame header, channel hashing, channel and PKI cryptography, the protobuf codec.
 - Routing behaviour needed for compatibility: managed flooding, duplicate suppression, hop-limit handling, duty-cycle accounting.
-- The extension suite and its specification — the wire format, its cryptographic construction, and its rationale.
+- The extension suite and its specification — the wire format, its cryptographic construction, and its rationale. **Bundles that need a hardware source do not qualify**; location and ranging were specified here and moved out on 2026-08-17 for exactly that reason. A bundle must be message formats and state, testable with no hardware.
 - `WIRE_REFERENCE.md`: on-air facts with sources, verified separated from unverified.
 - Host-side tests and on-air capture fixtures.
 - Tooling that operates on the above without hardware — for example the clean-room checker.
@@ -90,7 +92,7 @@ keeps passing after the crate it named is deleted.
 
 ## Adding an extension bundle as a crate
 
-The suite is planned as **one crate per bundle** — groups in one, ranging in another — so a consumer takes the core plus only the bundles they want. Two things must hold, and both were verified on 2026-08-16 against a throwaway second crate rather than assumed:
+The suite is planned as **one crate per bundle**, so a consumer takes the core plus only the bundles they want. `groups` is the first and currently the only one — location and ranging were specified here and moved out on 2026-08-17, because both need a hardware source and the exclusion above always said so. Two things must hold, and both were verified on 2026-08-16 against a throwaway second crate rather than assumed:
 
 **Every crate is gated, not just the first.** Three checks silently assumed a single crate and were fixed before any bundle existed: `check_rust_rules.sh` took the first `lib.rs` it found, `check_all.sh` inspected one `--lib` object, and `check_docs.sh` read one hardcoded `proofs.rs`. All three would have **passed while proving less** the moment a second crate arrived — the failure mode `check_rust_rules.sh`'s own header records being caught by three times. They now cover every crate root, every library artifact, and every file carrying harnesses.
 

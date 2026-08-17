@@ -7,7 +7,13 @@ Extensions ride the same mesh as ordinary Meshtastic traffic, on a private PortN
 
 The boundary is fixed and non-negotiable: **extensions live in the payload and the channel/PortNum space. The 16-byte header and the modem preset are never touched**, because changing either stops stock nodes relaying — which would cost the one property that makes extensions viable.
 
-Nothing here is implemented yet. This file records what the set is and why, so the shape is settled before code exists.
+## What this set is, and what it is not
+
+**Anything needing a hardware source belongs to a consuming product, not here.** Location and ranging were both specified in this file and are both gone as of 2026-08-17: one needed a GNSS receiver, the other ranging silicon, and neither is something a portable protocol library can carry. `SCOPE.md` said as much all along — *"source implementations that require particular hardware — a GNSS driver, a ranging driver — are out of scope here"* — and the specifications drifted across that line before the implementations could.
+
+What is left is what this repository can hold honestly: extensions that are **message formats and state**, testable on any machine, with no hardware precondition. `groups` is one. A future bundle qualifies on the same test.
+
+This repository otherwise tracks Meshtastic. New work here should be **aligning with upstream protocol features**, not growing a parallel feature set.
 
 ## Design rules
 
@@ -45,33 +51,6 @@ The extension adds an **owner, a member roster, invitation, and revocation via a
 
 This is the largest genuine gap in the protocol as it stands and nothing upstream addresses it.
 
-## 3. Location, with pluggable sources
-
-Meshtastic has `POSITION_APP` for GNSS fixes and `ZPS_APP` for position estimation without GPS, but no notion of measured distance between nodes.
-
-The extension defines **how location information is requested, carried and distributed** — subscription-gated, so a node emits only while somebody is actively interested, because both the measurement and the traffic cost airtime.
-
-**The measurement source is pluggable, and this is the point of the design.** Two sources, interchangeable in purpose and different in shape:
-
-| source | produces | needs |
-|---|---|---|
-| **GNSS** | absolute coordinates, altitude, precise time, velocity and heading, and a fix-quality estimate | a receiver, available to anyone |
-| **Radio time-of-flight** | pairwise distance to a named peer | silicon that supports ranging |
-
-They are not interchangeable in data. GNSS yields considerably more than a coordinate pair, and the extension should carry it as a **record of optional fields** rather than a fixed position struct — each source populates what it actually has, and a consumer uses whatever arrives. Ranging fills in distance; GNSS fills in coordinates, altitude, time, motion and accuracy; a node with both fills in both.
-
-Three of the GNSS fields are worth calling out because they are not merely "extra position detail":
-
-- **Precise time.** A GNSS fix carries time far more accurate than anything a mesh node can otherwise obtain, which is a foundation for anything time-coordinated — and a possible aid to ranging itself.
-- **Velocity and heading.** These meshes are mobile. A stale position from a moving node is worse than no position; motion is what tells a consumer how fast a fix decays.
-- **Fix quality.** Without an accuracy estimate a consumer cannot tell a surveyed position from a poor urban fix, and will present both with equal confidence.
-
-Sparseness is not a nicety here. Every optional field costs airtime at roughly 7.7 ms per byte on LongFast, so a location record must send only what was asked for and only what changed — which is the same argument that makes the whole exchange subscription-gated.
-
-Two consequences worth stating plainly. A ranging exchange needs the radio to itself for a bounded window, so the extension must define a **radio yield** that is bounded, counted and charged against the duty budget — an unbounded yield is a mesh outage. And because GNSS is available to any implementer while ranging silicon is not, **the specification is useful and implementable with GNSS alone**. A ranging source is an optimisation, not a prerequisite.
-
----
-
 ## Not in this repository
 
 Source implementations that require particular hardware — a GNSS driver, a ranging driver — are out of scope here, as is any radio driver. This repository specifies the protocol and provides a portable implementation of it. See `SCOPE.md`.
@@ -83,37 +62,12 @@ The suite is **one crate per bundle**, so a consumer takes the core plus only wh
 | bundle | depends on | can be specified now? |
 |---|---|---|
 | **groups** | nothing beyond the core | **yes** — pure protocol |
-| ~~**ranging (RTToF)**~~ | — | **moved out of this repository, 2026-08-17 — see below** |
 
 ### groups
 
 Owner, member roster and revocation, over authenticated channels. No hardware precondition: it is message formats and state, testable against the existing bench and provable with the same Kani harnesses the core uses. A roster under the no-allocation rule is a caller-provided fixed-capacity collection — the pattern `PacketHistory` and `delivery::Outbox` already use, so this is a known shape rather than an open question.
 
 **This is the bundle to specify first**, because nothing gates it.
-
-### ranging (RTToF) — **no longer a bundle here**
-
-**Moved to the consuming product, 2026-08-17.** The reasoning below is kept
-because it is still correct about the *technology*; what changed is where the
-mesh-level half belongs.
-
-Round-trip time of flight measures distance from the time a signal takes to travel there and back. **It requires the radio to do the timing**, because the radio timestamps at sample level with calibration. Doing it in software fails badly: LoRa demodulation latency and processing jitter are milliseconds, and light covers 300 m per microsecond, so a millisecond of jitter is hundreds of kilometres of error.
-
-A ranging protocol has two layers: the radio exchange, which the hardware performs, and the mesh-level carriage — requesting a range, reporting a result, associating it with a node. Only the second is protocol.
-
-**The driver half now exists** — `a companion radio driver-hal/rttof/`, against Semtech's a companion radio driver, with the exchange sequence recorded from a working reference. The SX1262 this bench was built around has no ranging hardware at all.
-
-**Why the mesh-level half is NOT a bundle here, despite being protocol.** A
-consuming product may replace this library with a different, third-party one
-that speaks a similar protocol over the same LoRa radio. A ranging extension
-living here would be lost in that swap; living beside the application it serves,
-it survives one. That is a stronger reason than portability — this repository
-could carry a hardware-neutral carriage format, but it would be carrying it for
-a consumer that might not be using this library by the time it matters.
-
-So: **groups here, ranging in the product.** The earlier plan said "ranging after the port"; the port happened, and the answer to *where* changed with it.
-
----
 
 ## Licence and patent pledge
 
