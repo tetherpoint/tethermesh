@@ -30,7 +30,7 @@ use tethermesh::crypto::{
 use tethermesh::frame;
 use tethermesh::header::{Header, HEADER_LEN};
 use tethermesh::history::{PacketHistory, Seen};
-use tethermesh::message::{ChannelSettings, Data, NodeInfo, PortNum, User};
+use tethermesh::message::{ChannelSettings, Data, MeshPacket, NodeInfo, PortNum, User};
 use tethermesh::packet_id::{NextId, PacketIdSource};
 use tethermesh::protobuf::{Error as ProtoError, Reader, Value, Writer};
 use tethermesh::routing::{
@@ -430,6 +430,52 @@ fn nodeinfo_wrapper_round_trips_reference_bytes() {
          case is the reason NodeInfo.position is an Option of a slice rather \
          than a slice; if the fixture changed, re-adjudicate before relaxing it"
     );
+}
+
+/// `MeshPacket` against real datagrams a stock node put on the wire.
+///
+/// The hazard this pins is the encoding, not the field numbers. `from`, `to`
+/// and `id` are **`fixed32`**, where the obvious guess for an integer field is
+/// varint — and the packed LoRa header that `header.rs` handles carries the same
+/// three as raw little-endian words in fixed positions. A wrapper that reached
+/// for varint here produces bytes that parse as a different message entirely,
+/// and would still look perfectly reasonable in isolation.
+///
+/// `relay_node` gets checked against the property that identifies it rather than
+/// against a stored constant: it is the low byte of the sender's node number.
+/// Both datagrams satisfy it, which is what makes the field's meaning evidence
+/// rather than a label.
+#[test]
+fn meshpacket_wrapper_round_trips_reference_datagrams() {
+    let path = captures_dir().join("udp_mesh_capture.json");
+    let doc = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+
+    let mut seen = 0usize;
+    for hex in all_hex(&doc) {
+        let bytes = hex_to_bytes(hex);
+        let pkt = MeshPacket::decode(&bytes).expect("reference MeshPacket failed to decode");
+
+        assert_ne!(pkt.from, 0, "decoded MeshPacket has no sender");
+        assert!(!pkt.encrypted.is_empty(), "decoded MeshPacket carries no ciphertext");
+        assert_eq!(pkt.channel, 8, "the corpus is LongFast with the default PSK");
+        assert_eq!(
+            pkt.relay_node,
+            pkt.from & 0xFF,
+            "relay_node must be the low byte of the sender's node number — the \
+             property that identifies the field, checked rather than assumed"
+        );
+
+        let mut out = vec![0u8; bytes.len()];
+        let n = pkt.encode(&mut out).expect("re-encoding MeshPacket failed");
+        assert_eq!(
+            (n, &out[..n]),
+            (bytes.len(), &bytes[..]),
+            "MeshPacket did not re-encode to the reference bytes"
+        );
+        seen = seen.saturating_add(1);
+    }
+    assert_eq!(seen, 2, "the capture holds two datagrams; a changed fixture needs adjudicating");
 }
 
 #[test]

@@ -525,3 +525,143 @@ impl<'a> NodeInfo<'a> {
         Ok(w.len())
     }
 }
+
+/// A packet in its **protobuf** form, as it travels over UDP multicast and the
+/// device API.
+///
+/// # This is not the packed LoRa frame, and confusing the two is the hazard
+///
+/// [`crate::header`] handles the sixteen packed bytes that go on the air. This
+/// is a different representation of an overlapping set of fields, and they
+/// disagree about encoding in a way that is easy to get wrong: here `from`,
+/// `to` and `id` are **`fixed32`** (wire type 5), where the packed header
+/// carries them as raw little-endian words in fixed positions. A wrapper that
+/// assumed varint — the obvious guess for an integer field — produces bytes
+/// that parse as a different message entirely.
+///
+/// `tests/captures/udp_mesh_capture.json` records the boundary explicitly:
+/// *"The payload is the protobuf MeshPacket, not the packed LoRa frame. Nothing
+/// here settles wire layout."*
+///
+/// # What the capture establishes
+///
+/// Two datagrams from a stock node, fields in ascending order:
+///
+/// | field | wire type | meaning |
+/// |---|---|---|
+/// | 1 | fixed32 | `from` |
+/// | 2 | fixed32 | `to` |
+/// | 3 | varint | `channel` — the one-byte channel hash, 8 for LongFast |
+/// | 5 | len | `encrypted` |
+/// | 6 | fixed32 | `id` |
+/// | 11 | varint | `priority` |
+/// | 19 | varint | `relay_node` |
+///
+/// `relay_node` is corroborated rather than assumed: it is the low byte of the
+/// sender's node number in both datagrams — `0x266cbc2b` → `0x2b` and
+/// `0x2f7f90dc` → `0xdc` — which independently reproduces the same finding made
+/// earlier from log output.
+///
+/// # What is carried, and what is deliberately left out
+///
+/// `WIRE_REFERENCE.md` § `MeshPacket` records the **whole** field set, read from
+/// the schema as specification — `hop_limit = 9`, `want_ack = 10`,
+/// `hop_start = 15`, `next_hop = 18` and the rest. Their numbers are not in
+/// doubt. What is carried here is narrower on purpose: the fields **observed on
+/// the wire**, so that every one of them is pinned by a byte-identical
+/// round-trip rather than by a reading of the schema.
+///
+/// `hop_limit` and `hop_start` are absent from both datagrams, meaning zero. The
+/// consequence is recorded in the capture's own findings and is worth repeating:
+/// a packet with no hops left is not a rebroadcast candidate, so **this
+/// transport never reaches the managed-flooding decision** — two nodes
+/// exchanging over UDP demonstrate delivery, not relay.
+///
+/// Field 4 (`decoded`) never appears either; a packet carries one of decoded or
+/// encrypted, and only the encrypted arm was observed.
+///
+/// Adding the rest is mechanical once traffic exercises them. Adding them *now*
+/// would mean shipping fields whose encoding nothing has confirmed, in a type
+/// whose entire value is that its bytes match the reference's.
+///
+/// **No field was observed carrying a zero**, so whether this encoder omits a
+/// zero the way proto3 normally does is *unverified here*. Zeros are omitted
+/// below, which is the proto3 rule and round-trips every captured datagram. Note
+/// that [`Routing`] deviates from exactly that rule, and only capture revealed
+/// it — so this is an assumption flagged as one, not a settled fact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MeshPacket<'a> {
+    /// Field 1, `fixed32`.
+    pub from: u32,
+    /// Field 2, `fixed32`.
+    pub to: u32,
+    /// Field 3. The one-byte channel hash.
+    pub channel: u32,
+    /// Field 5, undecoded ciphertext.
+    pub encrypted: &'a [u8],
+    /// Field 6, `fixed32`.
+    pub id: u32,
+    /// Field 11.
+    pub priority: u32,
+    /// Field 19. The low byte of the sending node's number.
+    pub relay_node: u32,
+}
+
+impl<'a> MeshPacket<'a> {
+    /// Decode from protobuf bytes.
+    ///
+    /// # Errors
+    ///
+    /// [`Error`] if the input is not well-formed protobuf.
+    pub fn decode(bytes: &'a [u8]) -> Result<Self, Error> {
+        let mut out = Self::default();
+        let mut reader = Reader::new(bytes);
+        while let Some(field) = reader.next_field()? {
+            match (field.number, field.value) {
+                (1, Value::Fixed32(b)) => out.from = u32::from_le_bytes(b),
+                (2, Value::Fixed32(b)) => out.to = u32::from_le_bytes(b),
+                (3, Value::Varint(v)) => out.channel = truncate_u32(v),
+                (5, Value::Len(b)) => out.encrypted = b,
+                (6, Value::Fixed32(b)) => out.id = u32::from_le_bytes(b),
+                (11, Value::Varint(v)) => out.priority = truncate_u32(v),
+                (19, Value::Varint(v)) => out.relay_node = truncate_u32(v),
+                _ => {}
+            }
+        }
+        Ok(out)
+    }
+
+    /// Encode into `buf`, returning the number of bytes written.
+    ///
+    /// Fields ascend, which is what the captured datagrams do and what makes a
+    /// bit-identical re-encode reachable rather than merely equivalent.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::BufferTooSmall`] if `buf` cannot hold the result.
+    pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
+        let mut w = Writer::new(buf);
+        if self.from != 0 {
+            w.field(1, &Value::Fixed32(self.from.to_le_bytes()))?;
+        }
+        if self.to != 0 {
+            w.field(2, &Value::Fixed32(self.to.to_le_bytes()))?;
+        }
+        if self.channel != 0 {
+            w.field(3, &Value::Varint(u64::from(self.channel)))?;
+        }
+        if !self.encrypted.is_empty() {
+            w.field(5, &Value::Len(self.encrypted))?;
+        }
+        if self.id != 0 {
+            w.field(6, &Value::Fixed32(self.id.to_le_bytes()))?;
+        }
+        if self.priority != 0 {
+            w.field(11, &Value::Varint(u64::from(self.priority)))?;
+        }
+        if self.relay_node != 0 {
+            w.field(19, &Value::Varint(u64::from(self.relay_node)))?;
+        }
+        Ok(w.len())
+    }
+}
