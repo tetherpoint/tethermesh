@@ -83,7 +83,7 @@ The suite is **one crate per bundle**, so a consumer takes the core plus only wh
 | bundle | depends on | can be specified now? |
 |---|---|---|
 | **groups** | nothing beyond the core | **yes** — pure protocol |
-| **ranging (RTToF)** | a radio with hardware ranging | **no** — see below |
+| ~~**ranging (RTToF)**~~ | — | **moved out of this repository, 2026-08-17 — see below** |
 
 ### groups
 
@@ -91,15 +91,27 @@ Owner, member roster and revocation, over authenticated channels. No hardware pr
 
 **This is the bundle to specify first**, because nothing gates it.
 
-### ranging (RTToF)
+### ranging (RTToF) — **no longer a bundle here**
+
+**Moved to the consuming product, 2026-08-17.** The reasoning below is kept
+because it is still correct about the *technology*; what changed is where the
+mesh-level half belongs.
 
 Round-trip time of flight measures distance from the time a signal takes to travel there and back. **It requires the radio to do the timing**, because the radio timestamps at sample level with calibration. Doing it in software fails badly: LoRa demodulation latency and processing jitter are milliseconds, and light covers 300 m per microsecond, so a millisecond of jitter is hundreds of kilometres of error.
 
-**The SX1262 has no ranging hardware**, so the current bench cannot exercise this at all. Semtech's a companion radio driver does, and the bundle becomes reachable once this library has a driver for a ranging-capable part.
+A ranging protocol has two layers: the radio exchange, which the hardware performs, and the mesh-level carriage — requesting a range, reporting a result, associating it with a node. Only the second is protocol.
 
-**Do not specify it before then, and the reason is not merely convenience.** A ranging protocol has two layers: the radio exchange, which the hardware performs, and the mesh-level carriage — requesting a range, reporting a result, associating it with a node. Only the second is protocol, and it *could* be drafted now. But the message format should follow what the radio actually reports, and designing the container before knowing what goes in it is how a format ends up carrying the wrong quantities at the wrong precision. This project has twice had a parameter written from documentation alone turn out wrong on contact with hardware; a whole message format is a larger bet of the same kind.
+**The driver half now exists** — `a companion radio driver-hal/rttof/`, against Semtech's a companion radio driver, with the exchange sequence recorded from a working reference. The SX1262 this bench was built around has no ranging hardware at all.
 
-So: **groups now, ranging after the port.**
+**Why the mesh-level half is NOT a bundle here, despite being protocol.** A
+consuming product may replace this library with a different, third-party one
+that speaks a similar protocol over the same LoRa radio. A ranging extension
+living here would be lost in that swap; living beside the application it serves,
+it survives one. That is a stronger reason than portability — this repository
+could carry a hardware-neutral carriage format, but it would be carrying it for
+a consumer that might not be using this library by the time it matters.
+
+So: **groups here, ranging in the product.** The earlier plan said "ranging after the port"; the port happened, and the answer to *where* changed with it.
 
 ---
 
