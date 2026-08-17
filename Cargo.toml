@@ -1,6 +1,19 @@
 # SPDX-FileCopyrightText: 2026 The tethermesh Authors
 # SPDX-License-Identifier: Apache-2.0
 
+# The FFI crates are workspace MEMBERS so that `cargo metadata` reports them and
+# every gate covers them automatically -- check_all.sh inspects each package with
+# a library target, and a crate outside the workspace would be invisible to it
+# while still shipping. That is the "gate narrows silently" failure this repo has
+# been bitten by three times.
+#
+# No [workspace.package] inheritance. DEPS.md records why: libcrux could not be
+# used as a path dependency because its manifest inherits workspace keys that
+# cannot be parsed from outside its workspace, which breaks resolution for
+# downstream consumers. Each crate declares its own keys.
+[workspace]
+members = ["ffi"]
+
 [package]
 name = "tethermesh"
 version = "0.0.0"

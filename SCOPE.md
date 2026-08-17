@@ -44,6 +44,50 @@ It qualifies on all four counts, and a future instrument must qualify on all fou
 
 **The bench tooling exclusion below still stands in full.** Build and flash scripts, device discovery, probe identification, hardware inventories and test runners remain outside this repository, because they drive the reference implementation's binaries. The distinction is not "hardware versus not" — it is **does it interact with their material**.
 
+## The C ABI crate, and why it is in scope
+
+`ffi/` builds `libtmffi.a` plus `include/tethermesh.h`: the protocol library with
+a C API, so a consumer can link it from a C build **without a Rust toolchain at
+all**. That is the second of the two things this repository ships, and
+`DISTRIBUTION.md` makes promises about it — a declared target set, a stable ABI
+within a major version, a size budget, artifact-level testing.
+
+**It belongs here because the repository making those promises should own the
+artifact they are about.** It lived in a consuming product until 2026-08-17,
+which meant this repository committed to an ABI it did not build, could not
+gate, and could not version. `PLAN.md` L8 had described the correct shape from
+the start — *"tethermesh as an rlib, plus a thin FFI crate carrying the
+staticlib, the panic handler and the C ABI"* — and the multi-crate gate work was
+done specifically so that crate would be held to the same rules automatically.
+
+It passes the scope rule on its own terms: every exported symbol is protocol
+(`tm_ctx_*`, `tm_rx_observe`, `tm_frame_decrypt`, `tm_outbox_*`), and it names no
+product, board, radio or bench. That was checked before the move rather than
+assumed — a single doc comment referencing a consuming project's task number was
+found and removed, which is exactly the *"arrives inside otherwise reasonable
+prose"* category this document warns about.
+
+**Two rules bend for it, both narrowly and both recorded in the gate itself:**
+
+1. **`no_std` may be written `#![cfg_attr(not(test), no_std)]`, and only that
+   form.** A crate carrying a `#[panic_handler]` cannot host `cargo test` while
+   unconditionally `no_std`, because the harness links std and brings its own
+   handler. `not(test)` covers every build that ships. Any other predicate is
+   refused, since `not(feature = "x")` would let a flag quietly make a shipped
+   artifact `std`.
+2. **`deny(unsafe_code)` is not required of it.** An FFI boundary cannot exist
+   without `unsafe`. `forbid(unsafe_op_in_unsafe_fn)` is required instead — and
+   see that crate's own header for an honest note on how much that currently
+   buys, which is less than it looks.
+
+**The undefined-reference check also had to learn about workspace siblings.** A
+shim calls its own library constantly, so `tethermesh::frame::encode` appears
+undefined in `ffi`'s object. Those are now allowed *because every workspace crate
+is inspected by the same check*, a panicking generic instantiated here would be a
+defined symbol and still caught, and the linked image is checked separately. The
+crate list is derived from `cargo metadata`, never typed in — a hardcoded name
+keeps passing after the crate it named is deleted.
+
 ## Adding an extension bundle as a crate
 
 The suite is planned as **one crate per bundle** — groups in one, ranging in another — so a consumer takes the core plus only the bundles they want. Two things must hold, and both were verified on 2026-08-16 against a throwaway second crate rather than assumed:

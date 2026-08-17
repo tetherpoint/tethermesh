@@ -101,7 +101,25 @@ else
         n_libs=$((n_libs+1))
         rel="${LIB#"$ROOT"/}"
         for a in "${REQUIRED_ATTRS[@]}"; do
-            grep -qF "#![$a]" "$LIB" || fail "$rel is missing #![$a]"
+            if grep -qF "#![$a]" "$LIB"; then
+                continue
+            fi
+            # `no_std` may also appear as `#![cfg_attr(not(test), no_std)]`, and
+            # ONLY in that exact form. A crate carrying a #[panic_handler] --
+            # the FFI shim does, because a linked program may have exactly one
+            # -- cannot host `cargo test` while unconditionally no_std: the test
+            # harness links std and brings a handler of its own.
+            #
+            # This is not a hole. `not(test)` means the attribute applies to
+            # every build that is not a test binary, which is every build that
+            # ships. Any other predicate is refused, because `cfg_attr(not(
+            # feature = "x"), no_std)` would let a feature flag quietly turn a
+            # shipped artifact into a std one.
+            if [ "$a" = "no_std" ] \
+               && grep -qF '#![cfg_attr(not(test), no_std)]' "$LIB"; then
+                continue
+            fi
+            fail "$rel is missing #![$a]"
         done
     done <<< "$libs"
     say "crate roots checked: $n_libs"
@@ -254,8 +272,57 @@ if [ "${1:-}" = "--binary" ]; then
     #                       arithmetic. Without these the gate reports a false
     #                       violation on that target -- found by actually
     #                       cross-compiling rather than by reading this list.
+    # A SECOND legitimate class arrived with the FFI crate on 2026-08-17:
+    # references to OTHER CRATES IN THIS WORKSPACE. tmffi is a shim, so nearly
+    # every line it contains calls tethermesh -- `frame::encode`, `Header::decode`
+    # and so on appear as undefined in its object and are resolved at link time.
+    #
+    # THIS IS NOT A WIDENING TO MAKE SOMETHING PASS, and the distinction matters
+    # because this file's own header forbids exactly that. The guarantee is
+    # preserved by construction:
+    #
+    #   * every workspace crate is inspected by this same check -- check_all.sh
+    #     iterates `cargo metadata` and runs it per package, so a panic path in
+    #     tethermesh fails on tethermesh's own object rather than hiding here;
+    #   * a panicking generic INSTANTIATED in this crate is a DEFINED symbol in
+    #     this object, not an undefined one, so it is still caught by the
+    #     panic-machinery scan above;
+    #   * and the linked image -- the only place the question has a final answer
+    #     -- is checked separately by check_artifact_link.sh.
+    #
+    # What stays refused is anything satisfied by NEITHER an intrinsic nor a
+    # crate we gate. The crate list is derived, never hardcoded: a name typed in
+    # here would keep passing after the crate it named was deleted.
+    #
+    # v0 mangling embeds the crate name length-prefixed, so `10tethermesh`
+    # identifies tethermesh unambiguously inside a symbol.
+    ws_crates=$(cd "$ROOT" && cargo metadata --no-deps --format-version 1 2>/dev/null \
+        | python3 -c 'import json,sys
+try: m = json.load(sys.stdin)
+except Exception: sys.exit(0)
+for p in m.get("packages", []):
+    if "/third_party/" in p.get("manifest_path", ""):
+        continue
+    n = p["name"].replace("-", "_")
+    print("%d%s" % (len(n), n))' 2>/dev/null || true)
+
     undef=$("$NM" -u "$LIBA" 2>/dev/null | awk '{print $NF}' \
         | grep -vE '^(memcpy|memset|memmove|memcmp|bcmp|__aeabi_[a-z0-9_]+|__[a-z]+[dsq]i[23]|__clz[sd]i2|__ctz[sd]i2|__popcount[sd]i2)$' || true)
+
+    if [ -n "$ws_crates" ] && [ -n "$undef" ]; then
+        keep=""
+        while IFS= read -r sym; do
+            [ -n "$sym" ] || continue
+            internal=0
+            while IFS= read -r c; do
+                [ -n "$c" ] || continue
+                case "$sym" in *"$c"*) internal=1; break ;; esac
+            done <<< "$ws_crates"
+            [ "$internal" = 1 ] || keep="$keep$sym
+"
+        done <<< "$undef"
+        undef=$(printf '%s' "$keep")
+    fi
     if [ -n "$undef" ]; then
         fail "$LIBA references machinery outside the crate — every one of these is a
               path that can fail, and several panic entry points are named things

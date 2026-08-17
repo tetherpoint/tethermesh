@@ -366,6 +366,36 @@ A staticlib was built for `thumbv8m.main-none-eabihf` — the RP2350's Cortex-M3
 
 **The linked `.text` is 164 bytes.** The whole library is 13,596 bytes on that target, so a consumer calling only `channel_hash` sheds everything else — including the entire 5.4 KB X25519 block. That is the artifact-size answer `DISTRIBUTION.md` wants: what a consumer pays is what a consumer reaches. `nm -u` on an *archive* reports per-member undefined symbols that other members of the same archive satisfy, so `rust_begin_unwind` appears as both defined and undefined in the same `.a`. The question only has an answer in the linked image — which is what this phase's own gate already specifies.
 
+**2026-08-17 — the FFI crate now exists, here, and is gated.** `ffi/` builds
+`libtmffi.a` and `include/tethermesh.h`. It had been living in a consuming
+product, which meant this repository promised an ABI it did not build, could not
+gate and could not version. Moving it in cost three gate corrections, each of
+which was the gate finding a real gap rather than an inconvenience:
+
+- The **source rules** applied to it immediately (`crate roots checked: 2`) and
+  it failed seven of them, exactly as the multi-crate work intended.
+- The **undefined-reference check** flagged every call the shim makes into this
+  library. That check assumes a self-contained crate; for a shim, every line is
+  an outside reference. It now allows references satisfied by a workspace
+  sibling — safe because each sibling is inspected by the same check, an
+  instantiated generic would be a *defined* symbol and still caught, and the
+  linked image is checked separately.
+- The **firmware check** counted internal Rust symbol names as a proxy for "the
+  library is linked". Inheriting the workspace's `lto = true` halved that count,
+  33 → 17, with nothing lost. Benign, and a warning about the measure: it moves
+  for reasons unrelated to what it claims. It now also asserts the `tm_*` ABI
+  surface, which is what a consumer links and does not move when an optimisation
+  setting does. Red-tested.
+
+**One claim made a day earlier turned out to be false and is corrected here.**
+The FFI crate was said to be structurally untestable — staticlib plus
+`#[panic_handler]` means `cargo test` links std and brings its own handler. That
+led to splitting out a second crate to hold testable logic. The premise was
+wrong: `#![cfg_attr(not(test), no_std)]` with `#[cfg(not(test))]` on the handler
+lets the staticlib host its own tests directly. The second crate was merged back
+— it had 3 symbols and this repository's own rule refuses *"a crate too small to
+produce a meaningful object"*. 8 tests now live in the FFI crate itself.
+
 **The crate stays `rlib` for a different and better reason:** a library defining a `#[panic_handler]` forces it on every consumer, and only one may exist per linked program. The handler belongs to whoever builds the artifact. So the shape is **tethermesh as an rlib, plus a thin FFI crate** carrying the staticlib, the panic handler and the C ABI — and the multi-crate gate work done the same day holds that crate to the same rules automatically.
 
 **One FFI design lesson, from getting it wrong in the test harness.** The first C consumer passed the *short PSK index* `{1}` where `channel_hash` wants the *expanded 16-byte key*, and got `0x0b` instead of `0x08` — silently, with no error. A C surface that accepts a byte pointer and a length cannot distinguish them. The ABI should either expand internally or take a distinct type, because this is precisely the mistake a consumer will make and the failure is a wrong channel hash rather than a crash.
