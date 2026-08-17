@@ -39,6 +39,14 @@
 //! any listener can forge one. `hop_limit`, `channel` and `relay_node` are
 //! routing hints, never evidence. The extension suite's AEAD tag exists to
 //! bind the header to the payload precisely because nothing here does.
+//!
+//! **It binds the invariant subset, not all sixteen bytes**, and the
+//! distinction is load-bearing rather than pedantic. `hop_limit`, `next_hop`
+//! and `relay_node` change legitimately in transit — every relay decrements
+//! the first and stamps the last — so a tag covering them verifies only for a
+//! packet nobody has relayed. Even with the suite, **hop fields stay
+//! unauthenticated**: origin and content are covered, path is not. See
+//! `suite/groups/SPEC.md` § 3.1.
 
 /// Bytes on the wire before the ciphertext begins.
 pub const HEADER_LEN: usize = 16;

@@ -23,7 +23,9 @@ Nothing here is implemented yet. This file records what the set is and why, so t
 
 Meshtastic channel messages carry no authentication. Anyone holding the pre-shared key can send as any node — and, because the cipher is CTR with no tag, an attacker who can deduce a known plaintext can forge by reusing a `(node, packet_id)` pair **without holding the key at all**. Bit-flips in ciphertext are bit-flips in plaintext, undetectably.
 
-The extension adds an AEAD tag and, crucially, **binds it to the 16-byte cleartext header as additional authenticated data**. That costs zero extra bytes and authenticates `from`, `to`, `packet_id`, channel and hop fields — so a forged sender or a tampered hop count fails verification. An 8-byte tag is roughly 10 % airtime on LongFast.
+The extension adds an AEAD tag and, crucially, **binds it to the cleartext header as additional authenticated data**. That costs zero extra bytes — the header is already on the wire — and authenticates `from`, `to`, `packet_id` and channel, so a **forged sender** fails verification. An 8-byte tag is roughly 10 % airtime on LongFast.
+
+> **Corrected 2026-08-17, while writing `groups/SPEC.md`.** This paragraph said the tag binds *the 16-byte header* and that "a tampered hop count fails verification". Both are wrong, and implementing them as written would have broken the extension in the field while it worked on the bench. `hop_limit`, `next_hop` and `relay_node` **legitimately change in transit** — every relay decrements the first and stamps the last — so a tag covering them verifies only for a packet that has never been relayed, and fails on every multi-hop delivery. The AAD is therefore the *invariant subset* of the header, and hop fields are **not authenticated and cannot be**. `header.rs` already says routing fields are "hints, never evidence"; this suite authenticates origin and content, not path. See `groups/SPEC.md` § 3.1.
 
 Deliberately *not* included: per-message author signatures. Upstream is adding XEdDSA signing in 2.8.x — same primitive family, same 64-byte cost — so this would be duplication rather than extension.
 

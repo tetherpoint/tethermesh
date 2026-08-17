@@ -344,6 +344,14 @@ Record in `tests/captures/pki_dm_outbound_record.json`. Three things are confirm
 
 Writing the spec first is not process for its own sake — the spec is the deliverable that adoption runs on, and an implementation written before it will quietly become the specification by default.
 
+**2026-08-17 — the `groups` bundle is specified: `suite/groups/SPEC.md`.** It was chosen first because nothing gates it: message formats and state, no hardware precondition. It needs **no new primitive** — AES-CCM, SHA-256 and X25519 are all already in the core, and `CCM_TAG_LEN` is already the 8 bytes the suite's airtime costing assumed.
+
+**Writing it immediately paid for itself by contradicting the design it was written from.** `suite/README.md` said the AEAD tag binds "the 16-byte cleartext header" and that "a tampered hop count fails verification". Both are wrong. `hop_limit`, `next_hop` and `relay_node` legitimately change in transit — every relay decrements the first and stamps the last — so a tag over all sixteen bytes verifies only for a packet nobody has relayed, and fails on **every multi-hop delivery**. The failure would have appeared as "works on the bench, not in the field", which is the worst place to find it, and only on a mesh larger than the two-node bench that exists.
+
+The AAD is therefore the invariant subset, and the honest consequence is now stated in all three places that discuss it: **hop fields are not authenticated and cannot be.** The suite authenticates origin and content, never path. `README.md`, `header.rs` and the spec agree.
+
+That is the argument for spec-first in one instance: the error was in prose that had been read several times and looked right, and it surfaced the moment someone had to write down exactly which bytes go into the AAD.
+
 **Gate:** two instances exchange authenticated extension traffic that an unmodified reference node relays without reading; a forged sender fails the tag; a node without the extension falls back and still communicates.
 
 ## L8 — release engineering
