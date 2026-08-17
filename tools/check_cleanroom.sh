@@ -44,7 +44,13 @@
 #   - running a code generator over their .proto — the output is derived from
 #     a GPL input. This is why PLAN.md specifies a hand-written ~300-line
 #     protobuf codec instead of nanopb: licence-safe as well as dependency-light.
-#   - linking RadioLib, or any GPL component
+#   - linking any GPL component
+#   - linking or deriving from RadioLib. NOTE THE DIFFERENT REASON: RadioLib is
+#     MIT, so this one is not about copyleft at all. It is refused because
+#     WIRE_REFERENCE.md's byte-level entries rest on "our own SX1262 receiver,
+#     written from the datasheet, not RadioLib", and that evidence stops being
+#     true the moment anything is taken from there. This file said "GPL-3.0"
+#     until 2026-08-17, which was simply wrong about somebody else's project.
 #
 # THE RULE WHEN TEMPTED: if you find yourself wanting to copy a routing
 # decision or a state machine, STOP. That means the spec is under-documented,
