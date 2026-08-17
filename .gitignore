@@ -47,3 +47,7 @@ CLAUDE.md
 instruments/**/build/
 instruments/**/sdkconfig
 instruments/**/sdkconfig.old
+
+# Release artifacts. Built on demand by tools/release.sh, never committed --
+# a binary in git is a binary nobody rebuilt.
+/dist/

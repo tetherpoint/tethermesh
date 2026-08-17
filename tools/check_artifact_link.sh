@@ -136,11 +136,22 @@ EOF
 say "compiling and linking a C consumer with --gc-sections"
 # shellcheck disable=SC2086
 "$CC" $MFLAGS -ffunction-sections -fdata-sections -O2 -c "$WORK/entry.c" -o "$WORK/entry.o" 2>/dev/null
+# --no-warn-rwx-segments only SILENCES A WARNING, and it arrived in binutils
+# 2.39. Passing it unconditionally makes this check fail outright on an older
+# linker -- the Zephyr SDK here ships 2.38 -- with "unrecognized option", which
+# reads as a broken artifact rather than a missing flag. Probed, not assumed.
+RWX=""
+if echo 'int main(void){return 0;}' > "$WORK/probe.c" \
+   && "$CC" $MFLAGS -nostdlib -nostartfiles -Wl,--no-warn-rwx-segments \
+        -Wl,-e,main "$WORK/probe.c" -o "$WORK/probe.elf" >/dev/null 2>&1; then
+    RWX="-Wl,--no-warn-rwx-segments"
+fi
+
 # shellcheck disable=SC2086
 "$CC" $MFLAGS -nostdlib -nostartfiles -Wl,--gc-sections -Wl,-e,_start \
-      -Wl,--no-warn-rwx-segments -Ttext=0x10000000 \
-      "$WORK/entry.o" "$A" -o "$WORK/linked.elf" 2>/dev/null \
-    || { fail "link failed"; exit 1; }
+      $RWX -Ttext=0x10000000 \
+      "$WORK/entry.o" "$A" -o "$WORK/linked.elf" 2>"$WORK/link.err" \
+    || { fail "link failed:"; sed 's/^/                /' "$WORK/link.err" >&2; exit 1; }
 
 # ── 1. the library must actually be in there ───────────────────────────────
 lib_syms=$("$NM" "$WORK/linked.elf" 2>/dev/null | grep -c 'tethermesh' || true)

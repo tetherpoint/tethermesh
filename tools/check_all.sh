@@ -29,27 +29,41 @@ if [ "${1:-}" = "--pending" ]; then
 Checks that exist as requirements but cannot run until there is something to
 check. Each is listed here so the gap is visible rather than forgotten.
 
-  size budget           needs a built staticlib and an agreed ceiling.
-                        A protocol codec that lands at 100 KB is unusable on
-                        the targets it is meant for; the ceiling is set once
-                        the first real build exists, then regressions fail.
+  ABI stability         needs a RELEASED header to compare against. The pieces
+                        exist now that the ABI crate is in this repository --
+                        tm_abi_version() is callable and tm_check_layout()
+                        compares the C side's sizeof against the Rust one --
+                        but "unchanged within a major version" needs a previous
+                        version on record, and there has been no release. The
+                        first release is what makes this checkable, not more code.
 
-  reproducible build    needs a release pipeline. Build twice in clean
-                        environments, compare hashes. This is what makes
-                        "rebuild it yourself and compare" a real option rather
-                        than a slogan, and it is the only thing that makes
-                        shipping a crypto binary defensible.
+  artifact test         PARTIAL. tools/check_artifact_link.sh links a real C
+                        consumer and inspects the linked image, and passes on
+                        Cortex-M33 and Cortex-M4. It is not yet driven across
+                        the whole declared target set: RISC-V has no cross-gcc
+                        installed here, so that row cannot be linked at all.
+                        Reported rather than skipped quietly.
 
-  ABI stability         needs a released header. tm_abi_version() present,
-                        struct layouts unchanged within a major version.
-                        An ABI break fails at runtime, in the field.
+Implemented since this list was written, and no longer pending:
 
-  artifact test         needs release archives. Build a minimal C consumer
-                        against each released .a for each target. Otherwise
-                        the binaries are validated only in a form nobody uses.
+  reproducible build    tools/check_reproducible.sh builds twice -- the second
+                        time from a COPY AT A DIFFERENT PATH, which is what a
+                        third party actually does -- and compares sha256. It
+                        catches embedded-path and build-ordering
+                        nondeterminism. It does NOT prove reproducibility
+                        across machines or toolchains; that is a release
+                        pipeline's job, and the script says so.
 
-  conformance vectors   needs the codec and captured frames. Decode real
-                        traffic, re-encode, compare bit-for-bit.
+  size budget           tools/check_size_budget.sh, driven by targets.conf.
+                        Every declared target must BUILD, and crate-object
+                        .text must stay under its ceiling. Both red-tested.
+
+  conformance vectors   met by the host suite: every_captured_frame_rebuilds_
+                        byte_for_byte decodes real captured traffic and
+                        re-encodes it bit-for-bit across the whole on-air
+                        corpus -- 29 to 102 bytes, three portnums -- and the
+                        fromradio corpus does the same for 43 protobuf
+                        messages. That is exactly what this line asked for.
 EOF
     exit 0
 fi
@@ -153,6 +167,17 @@ for p in m.get("packages", []):
 else
     printf '\033[33m[check] cargo not available — panic-free artifact NOT verified\033[0m\n' >&2
 fi
+
+head "size budget across the declared target set"
+# DISTRIBUTION.md promises this is gated rather than discovered on a device.
+# Cheap on a warm cargo cache; the first run after a clean builds each target.
+"$ROOT/tools/check_size_budget.sh" || rc=1
+
+head "reproducible build"
+# DISTRIBUTION.md calls "rebuild it yourself and compare" the only thing that
+# makes shipping a crypto binary defensible. It was a slogan until nothing had
+# ever built it twice.
+"$ROOT/tools/check_reproducible.sh" || rc=1
 
 head "summary"
 if [ "$rc" = 0 ]; then
