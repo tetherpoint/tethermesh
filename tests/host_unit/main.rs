@@ -24,7 +24,8 @@ use tethermesh::delivery::{
 use tethermesh::message::{Routing, RoutingStatus};
 use tethermesh::crypto::{
     Aes256,
-    ccm_decrypt_in_place, ccm_encrypt_in_place, ctr_apply, expand_psk, nonce, Aes128, CcmError,
+    ccm_decrypt_in_place, ccm_decrypt_in_place_aad, ccm_encrypt_in_place,
+    ccm_encrypt_in_place_aad, ctr_apply, expand_psk, nonce, Aes128, CcmError,
     Psk, CCM_TAG_LEN, DEFAULT_KEY,
 };
 use tethermesh::frame;
@@ -1938,6 +1939,97 @@ fn ccm_matches_an_independent_implementation() {
         let n2 = ccm_decrypt_in_place(&key, &nonce, &mut buf[..total], CCM_TAG_LEN).unwrap();
         assert_eq!(&buf[..n2], &plain[..]);
     }
+}
+
+/// AES-256-CCM **with AAD**, against a different implementation.
+///
+/// The committed CCM vectors all use an EMPTY aad, so they say nothing about
+/// the AAD framing added for `suite/groups`. Checking that framing by its own
+/// round trip would be worthless: an encrypt and a decrypt that build the MAC
+/// input wrongly in the same way agree perfectly.
+///
+/// So these come from elsewhere — `python cryptography`'s `AESCCM`, which wraps
+/// OpenSSL. The generator is itself cross-checked: its empty-AAD case
+/// reproduces `52baa6a959b7378917`, byte-identical to the vector already
+/// committed in `ccm_matches_an_independent_implementation`. A generator that
+/// disagreed with the existing corpus would be the first thing to distrust.
+///
+/// One case carries a **14-byte** AAD, which is the exact shape the groups
+/// bundle uses: `header[0..12] ‖ (header[12] & 0xF8) ‖ header[13]`.
+#[test]
+fn ccm_with_aad_matches_an_independent_implementation() {
+    let doc = fs::read_to_string(captures_dir().join("ccm_aad_vectors.json"))
+        .expect("cannot read ccm_aad_vectors.json");
+
+    let key_hex = json_str(&doc, "key").expect("key");
+    let nonce_hex = json_str(&doc, "nonce").expect("nonce");
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&hex_to_bytes(&key_hex));
+    let nonce = hex_to_bytes(&nonce_hex);
+
+    let mut checked = 0usize;
+    let mut saw_14 = false;
+    let mut rest = doc.as_str();
+    while let Some(i) = rest.find("\"aad\":") {
+        rest = &rest[i + 6..];
+        let block_end = rest.find('}').unwrap_or(rest.len());
+        let block = &rest[..block_end];
+        let field = |k: &str| -> Option<String> {
+            let pat = format!("\"{k}\":");
+            let j = block.find(&pat)? + pat.len();
+            let tail = block[j..].trim_start();
+            let t = tail.strip_prefix('"')?;
+            Some(t[..t.find('"')?].to_string())
+        };
+        // The first field of the block is `aad` itself, already consumed.
+        let aad_hex = {
+            let tail = block.trim_start();
+            let t = tail.strip_prefix('"').expect("aad value");
+            t[..t.find('"').expect("aad end")].to_string()
+        };
+        let (Some(pt_hex), Some(want)) = (field("plaintext"), field("ciphertext_and_tag"))
+        else { continue };
+
+        let aad = hex_to_bytes(&aad_hex);
+        let plain = hex_to_bytes(&pt_hex);
+        if aad.len() == 14 {
+            saw_14 = true;
+        }
+
+        let mut buf = vec![0u8; plain.len() + CCM_TAG_LEN];
+        buf[..plain.len()].copy_from_slice(&plain);
+        let total = ccm_encrypt_in_place_aad(&key, &nonce, &aad, &mut buf, plain.len(), CCM_TAG_LEN)
+            .expect("encrypt");
+        assert_eq!(
+            buf[..total].iter().map(|b| format!("{b:02x}")).collect::<String>(),
+            want,
+            "aad={aad_hex:?} pt={pt_hex:?} disagreed with the reference"
+        );
+
+        let n = ccm_decrypt_in_place_aad(&key, &nonce, &aad, &mut buf[..total], CCM_TAG_LEN)
+            .expect("decrypt");
+        assert_eq!(&buf[..n], &plain[..], "round trip lost the plaintext");
+
+        // The property the whole construction exists for: a DIFFERENT aad must
+        // fail exactly as a corrupted ciphertext does. Without this the AAD
+        // could be ignored entirely and every vector above would still pass.
+        if !aad.is_empty() {
+            let mut tampered = aad.clone();
+            tampered[0] ^= 0x01;
+            let mut buf2 = vec![0u8; plain.len() + CCM_TAG_LEN];
+            buf2[..plain.len()].copy_from_slice(&plain);
+            let t2 = ccm_encrypt_in_place_aad(&key, &nonce, &aad, &mut buf2, plain.len(), CCM_TAG_LEN)
+                .expect("encrypt");
+            assert_eq!(
+                ccm_decrypt_in_place_aad(&key, &nonce, &tampered, &mut buf2[..t2], CCM_TAG_LEN),
+                Err(CcmError::Unauthentic),
+                "a modified aad must not verify — otherwise binding the header buys nothing"
+            );
+        }
+        checked += 1;
+    }
+    assert!(checked >= 5, "expected the vector set; checked {checked}");
+    assert!(saw_14, "the 14-byte case is the groups AAD shape and must be covered");
 }
 
 /// The domain red list requires that a wrong channel hash must not decrypt.

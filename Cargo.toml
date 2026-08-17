@@ -12,7 +12,7 @@
 # cannot be parsed from outside its workspace, which breaks resolution for
 # downstream consumers. Each crate declares its own keys.
 [workspace]
-members = ["ffi"]
+members = ["ffi", "suite/groups"]
 
 [package]
 name = "tethermesh"

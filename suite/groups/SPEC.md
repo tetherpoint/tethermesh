@@ -3,9 +3,11 @@
 
 # groups — authenticated channels with membership
 
-**Status: specification, 2026-08-17. Nothing here is implemented.** Written first
-on purpose: an implementation written before its specification quietly *becomes*
-the specification, and the spec is the deliverable adoption runs on.
+**Status: specified and implemented, 2026-08-17.** `suite/groups/`, 9 tests,
+gated like every other crate. The spec was written first on purpose — an
+implementation written before its specification quietly *becomes* the
+specification — and that ordering paid for itself twice: see § 3 and § 3.1 for
+the two design errors writing code against this document exposed.
 
 Read `../README.md` first for why the suite exists and what it may not touch.
 The licence and patent pledge there cover this document.
@@ -65,10 +67,26 @@ AEAD.
 
 ## 3. The AEAD construction
 
-**Cipher: AES-CCM**, which `meshtastic/core/crypto.rs` already provides
-(`ccm_encrypt_in_place`, `ccm_decrypt_in_place`), with `CCM_TAG_LEN = 8` and
-`CCM_NONCE_LEN = 13`. No new primitive is required, which matters: a suite that
-needed a new cipher would need a new audit.
+**Cipher: AES-CCM**, which `meshtastic/core/crypto.rs` provides, with
+`CCM_TAG_LEN = 8` and `CCM_NONCE_LEN = 13`. No new *cipher* is required — a
+suite needing one would need a new audit.
+
+> **It did require extending the existing one, 2026-08-17.** The CCM here had
+> **no AAD support at all**: `cbc_mac` covered only the payload, and the flags
+> byte carried a comment reading "no additional data here". Since this bundle's
+> central security property is binding the header as AAD, the spec was not
+> implementable as written.
+>
+> `ccm_encrypt_in_place_aad` / `ccm_decrypt_in_place_aad` now implement
+> RFC 3610 §2.2 framing; the original functions delegate with an empty AAD and
+> are byte-identical to before, which the committed vectors confirm.
+>
+> **Verified against someone else's answer, not our own round trip.** A new
+> corpus, `tests/captures/ccm_aad_vectors.json`, was generated with `python
+> cryptography`'s `AESCCM` (OpenSSL) and includes the exact 14-byte AAD shape
+> below. The generator is itself cross-checked: its empty-AAD case reproduces a
+> vector already committed. Both an unset Adata flag and an omitted AAD were
+> injected and observed to fail.
 
 ### 3.1 What the tag covers — and the correction that matters
 
@@ -132,15 +150,21 @@ fresh epoch.
 
 ### 3.3 Key
 
-The group key is a 128-bit AES key derived per epoch:
+A 256-bit AES key derived per epoch:
 
 ```
-K_epoch = SHA-256( K_group ‖ "tethermesh-groups-v1" ‖ epoch[1] )[0..16]
+K_epoch = SHA-256( K_group ‖ "tethermesh-groups-v1" ‖ epoch[1] )
 ```
 
-`sha256` is already present. Truncating to 128 bits keeps the cipher AES-128,
-matching what the core already links, and 128 bits is not the weak link in a
-protocol whose messages are 233 bytes.
+`sha256` is already present, and its 32-byte output is exactly an AES-256 key —
+no truncation step, so no opportunity to truncate inconsistently.
+
+> **Corrected 2026-08-17, at implementation.** This said the key was truncated
+> to 128 bits "matching what the core already links". Wrong: `crypto.rs`'s CCM
+> is **AES-256 only** — `ccm_encrypt_in_place` takes `&[u8; 32]` and builds an
+> `Aes256` internally. A 16-byte key was not merely suboptimal, it would not
+> have compiled. Second spec error found by writing code against it; see § 3.1
+> for the first, which was worse.
 
 ## 4. Envelope
 

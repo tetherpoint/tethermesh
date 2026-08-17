@@ -424,7 +424,7 @@ pub const CCM_TAG_LEN: usize = 8;
 /// Nonce length used by Meshtastic direct messages, in bytes.
 pub const CCM_NONCE_LEN: usize = 13;
 
-fn ccm_blocks(nonce: &[u8], msg_len: usize, tag_len: usize) -> Result<([u8; BLOCK], [u8; BLOCK]), CcmError> {
+fn ccm_blocks(nonce: &[u8], msg_len: usize, tag_len: usize, has_aad: bool) -> Result<([u8; BLOCK], [u8; BLOCK]), CcmError> {
     if nonce.len() != CCM_NONCE_LEN {
         return Err(CcmError::BadNonce);
     }
@@ -433,9 +433,12 @@ fn ccm_blocks(nonce: &[u8], msg_len: usize, tag_len: usize) -> Result<([u8; BLOC
     // the wire allows anyway.
     let l: usize = 2;
     let mut b0 = [0u8; BLOCK];
-    // flags = 64*has_aad + 8*((t-2)/2) + (L-1); no additional data here.
+    // flags = 64*has_aad + 8*((t-2)/2) + (L-1). The Adata bit is what tells a
+    // decrypter to expect the AAD blocks in the MAC; setting it wrongly in
+    // either direction produces a tag mismatch rather than silent acceptance.
     let t_field = tag_len.saturating_sub(2) / 2;
-    set(&mut b0, 0, ((t_field as u8) << 3) | ((l as u8).saturating_sub(1)));
+    let adata: u8 = if has_aad { 0x40 } else { 0x00 };
+    set(&mut b0, 0, adata | ((t_field as u8) << 3) | ((l as u8).saturating_sub(1)));
     for (i, b) in nonce.iter().enumerate() {
         set(&mut b0, i.wrapping_add(1), *b);
     }
@@ -450,9 +453,44 @@ fn ccm_blocks(nonce: &[u8], msg_len: usize, tag_len: usize) -> Result<([u8; BLOC
     Ok((b0, a0))
 }
 
-fn cbc_mac(aes: &Aes256, b0: &[u8; BLOCK], plaintext: &[u8]) -> [u8; BLOCK] {
+fn cbc_mac(aes: &Aes256, b0: &[u8; BLOCK], aad: &[u8], plaintext: &[u8]) -> [u8; BLOCK] {
     let mut x = *b0;
     aes.encrypt_block(&mut x);
+
+    // Additional authenticated data, RFC 3610 section 2.2: a length prefix,
+    // then the data, then zero padding to a block boundary. Two bytes of
+    // big-endian length covers 0 < l(a) < 2^16 - 2^8, which every caller here
+    // is far inside -- the wire allows 233 bytes total.
+    //
+    // AAD is AUTHENTICATED AND NOT TRANSMITTED. That is the whole reason the
+    // extension suite can bind the cleartext header for free: it is already on
+    // the wire, so covering it costs no airtime.
+    if !aad.is_empty() {
+        let mut blk = [0u8; BLOCK];
+        set(&mut blk, 0, ((aad.len() >> 8) & 0xFF) as u8);
+        set(&mut blk, 1, (aad.len() & 0xFF) as u8);
+        let mut n: usize = 2;
+        for b in aad {
+            if n == BLOCK {
+                for i in 0..BLOCK {
+                    let cur = at(&x, i);
+                    set(&mut x, i, cur ^ at(&blk, i));
+                }
+                aes.encrypt_block(&mut x);
+                blk = [0u8; BLOCK];
+                n = 0;
+            }
+            set(&mut blk, n, *b);
+            n = n.wrapping_add(1);
+        }
+        // The final block, zero-padded by construction.
+        for i in 0..BLOCK {
+            let cur = at(&x, i);
+            set(&mut x, i, cur ^ at(&blk, i));
+        }
+        aes.encrypt_block(&mut x);
+    }
+
     for chunk in plaintext.chunks(BLOCK) {
         for (i, b) in chunk.iter().enumerate() {
             let cur = at(&x, i);
@@ -495,8 +533,30 @@ pub fn ccm_decrypt_in_place(
     buf: &mut [u8],
     tag_len: usize,
 ) -> Result<usize, CcmError> {
+    ccm_decrypt_in_place_aad(key, nonce, &[], buf, tag_len)
+}
+
+/// Decrypt and verify, with additional authenticated data.
+///
+/// `aad` is **authenticated but not transmitted**. That is what lets the
+/// extension suite bind the 16-byte cleartext header for zero extra bytes: the
+/// header is already on the wire, so covering it costs no airtime.
+///
+/// A different `aad` fails exactly as a corrupted ciphertext does —
+/// [`CcmError::Unauthentic`], and the plaintext must not be used.
+///
+/// # Errors
+///
+/// [`CcmError`] on a short buffer, a bad nonce, or a tag that does not verify.
+pub fn ccm_decrypt_in_place_aad(
+    key: &[u8; 32],
+    nonce: &[u8],
+    aad: &[u8],
+    buf: &mut [u8],
+    tag_len: usize,
+) -> Result<usize, CcmError> {
     let msg_len = buf.len().checked_sub(tag_len).ok_or(CcmError::TooShort)?;
-    let (b0, a0) = ccm_blocks(nonce, msg_len, tag_len)?;
+    let (b0, a0) = ccm_blocks(nonce, msg_len, tag_len, !aad.is_empty())?;
     let aes = Aes256::new(key);
 
     // Recover the tag first: it is encrypted with counter 0.
@@ -514,7 +574,7 @@ pub fn ccm_decrypt_in_place(
     let body = buf.get_mut(..msg_len).ok_or(CcmError::TooShort)?;
     ctr_xor(&aes, &a0, body);
 
-    let expect = cbc_mac(&aes, &b0, body);
+    let expect = cbc_mac(&aes, &b0, aad, body);
     // Constant-time-ish comparison: no early exit on the first differing byte.
     let mut diff = 0u8;
     for i in 0..tag_len {
@@ -541,15 +601,34 @@ pub fn ccm_encrypt_in_place(
     msg_len: usize,
     tag_len: usize,
 ) -> Result<usize, CcmError> {
+    ccm_encrypt_in_place_aad(key, nonce, &[], buf, msg_len, tag_len)
+}
+
+/// Encrypt and authenticate, with additional authenticated data.
+///
+/// See [`ccm_decrypt_in_place_aad`] for what `aad` buys and what it costs
+/// (nothing, on the wire).
+///
+/// # Errors
+///
+/// [`CcmError`] on a short buffer or a bad nonce.
+pub fn ccm_encrypt_in_place_aad(
+    key: &[u8; 32],
+    nonce: &[u8],
+    aad: &[u8],
+    buf: &mut [u8],
+    msg_len: usize,
+    tag_len: usize,
+) -> Result<usize, CcmError> {
     let total = msg_len.checked_add(tag_len).ok_or(CcmError::TooShort)?;
     if buf.len() < total {
         return Err(CcmError::TooShort);
     }
-    let (b0, a0) = ccm_blocks(nonce, msg_len, tag_len)?;
+    let (b0, a0) = ccm_blocks(nonce, msg_len, tag_len, !aad.is_empty())?;
     let aes = Aes256::new(key);
 
     let body = buf.get_mut(..msg_len).ok_or(CcmError::TooShort)?;
-    let tag = cbc_mac(&aes, &b0, body);
+    let tag = cbc_mac(&aes, &b0, aad, body);
     ctr_xor(&aes, &a0, body);
 
     let mut s0 = a0;

@@ -674,6 +674,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "tethermesh_groups"
+version = "0.1.0"
+dependencies = [
+ "tethermesh",
+]
+
+[[package]]
 name = "tmffi"
 version = "0.1.0"
 dependencies = [

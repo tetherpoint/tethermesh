@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 The tethermesh Authors
+# SPDX-License-Identifier: Apache-2.0
+[package]
+name = "tethermesh_groups"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+rust-version = "1.75"
+
+# One crate per bundle, so a consumer takes the core plus only what they want.
+# SCOPE.md: a bundle crate inherits the whole regime -- the crate-level denies,
+# the panic-free artifact check, SPDX, clean-room and the proof table.
+#
+# Keys are DECLARED, never inherited from the workspace. DEPS.md records why:
+# libcrux could not be used as a path dependency because its manifest inherits
+# workspace keys that cannot be parsed from outside its workspace, which breaks
+# resolution for downstream consumers -- in THEIR build, not ours.
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+tethermesh = { path = "../.." }

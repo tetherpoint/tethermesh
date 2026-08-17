@@ -1,0 +1,45 @@
+{
+  "corpus": "ccm_aad_vectors",
+  "boundary": "AES-256-CCM with additional authenticated data, tag 8 bytes, nonce 13 bytes",
+  "why": "suite/groups/SPEC.md binds the cleartext header as AAD. Our CCM had no AAD support at all, and the committed AES-256-CCM vectors all use EMPTY aad -- so adding AAD would have been validated only by its own round trip, which cannot catch an encrypt and decrypt that are wrong in the same way. These come from elsewhere.",
+  "provenance": {
+    "generated_by": "python cryptography 46.0.6 AESCCM (OpenSSL)",
+    "generated": "2026-08-17",
+    "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "nonce": "a0a1a2a3a4a5a6a7a8a9aaabac",
+    "tag_len": 8,
+    "note": "Independent implementation, not ours. The 14-byte AAD case is the exact shape the groups bundle uses: header[0..12] + (header[12] & 0xF8) + header[13]."
+  },
+  "cases": [
+    {
+      "aad": "",
+      "plaintext": "01",
+      "ciphertext_and_tag": "52baa6a959b7378917"
+    },
+    {
+      "aad": "00",
+      "plaintext": "01",
+      "ciphertext_and_tag": "52d44757b5230753db"
+    },
+    {
+      "aad": "0102030405060708090a0b0c0d0e",
+      "plaintext": "01",
+      "ciphertext_and_tag": "52f41c2d5c75c094b4"
+    },
+    {
+      "aad": "0102030405060708090a0b0c0d0e",
+      "plaintext": "",
+      "ciphertext_and_tag": "c594272e0942d1c7"
+    },
+    {
+      "aad": "0102030405060708090a0b0c0d0e",
+      "plaintext": "0102030405060708090a0b0c0d0e0f1011",
+      "ciphertext_and_tag": "52d2e1e101497002f79fbe31fdb600df6ab1a07b0e9372dfa8"
+    },
+    {
+      "aad": "00112233445566778899aabbccddeeff00112233",
+      "plaintext": "deadbeefcafe",
+      "ciphertext_and_tag": "8d7d5c0aceb1411c0ef6a7dc5071"
+    }
+  ]
+}
