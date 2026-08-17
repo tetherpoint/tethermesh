@@ -42,6 +42,9 @@
 #![deny(unsafe_code)]
 #![deny(missing_docs)]
 
+#[cfg(kani)]
+mod proofs;
+
 use tethermesh::crypto::{
     ccm_decrypt_in_place_aad, ccm_encrypt_in_place_aad, CcmError, CCM_NONCE_LEN, CCM_TAG_LEN,
 };
@@ -518,6 +521,17 @@ impl<const N: usize> Roster<N> {
         let next = self.epoch.checked_add(1).ok_or(Error::EpochExhausted)?;
         self.epoch = next;
         Ok(next)
+    }
+
+    /// Set the epoch directly. **Proof harnesses only.**
+    ///
+    /// Reaching an arbitrary epoch by bumping needs 255 iterations, which a
+    /// model checker must unroll. This lets the wrap proof start anywhere. It is
+    /// `#[cfg(kani)]`, so a shipped build cannot reach it and the only way to
+    /// move the epoch there is through `bump_epoch`'s owner check.
+    #[cfg(kani)]
+    pub fn set_epoch_for_proof(&mut self, epoch: u8) {
+        self.epoch = epoch;
     }
 
     /// Iterate the members currently held.

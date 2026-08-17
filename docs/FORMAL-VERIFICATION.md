@@ -54,6 +54,28 @@ proof that does not terminate proves nothing.
 | `retransmission_never_exceeds_the_configured_ceiling` | the outbox never hands out more transmissions than the policy allows, counting the caller's own first send — over arbitrary times, including clocks that run backwards |
 | `an_acknowledged_entry_is_never_retransmitted` | an acknowledgement retires only the entry its id names, and nothing is retransmitted afterwards; `acknowledge` and `reap` are total |
 
+### `suite/groups` — the extension bundle
+
+`SCOPE.md` requires a bundle crate to inherit the whole regime, and the proof
+table is part of it. Run with `cargo kani -p tethermesh_groups`.
+
+| harness | property |
+|---|---|
+| `parsing_an_envelope_never_panics` | no input panics the parser — the attacker-reachable path, which runs **before** the tag is checked and so cannot be protected by it |
+| `a_short_envelope_is_refused_not_read_past` | every under-length input is refused rather than read past |
+| `the_aad_ignores_every_mutable_header_field` | two headers differing only in `hop_limit`, `next_hop` or `relay_node` produce the identical AAD — so a relayed frame authenticates as the one that was sent |
+| `the_aad_covers_every_immutable_header_field` | and changing any immutable field *does* change the tag input. Not redundant: an AAD that returned a constant would satisfy the row above perfectly while authenticating nothing |
+| `the_epoch_never_wraps_from_any_starting_value` | from any epoch, a bump either advances by exactly one or refuses at 255. A wrap would reproduce epoch 0's key and reuse every nonce under it |
+| `nonce_construction_is_total_and_carries_the_epoch` | total, 13 bytes, and the epoch reaches the nonce |
+
+**What these do not cover, stated because the gap is easy to misread.** Nothing
+here proves the AEAD is sound — that is AES-CCM's property, checked instead
+against an independent implementation's answers in
+`tests/captures/ccm_aad_vectors.json`. And `epoch_key` is deliberately absent:
+proving anything about a digest's output means modelling SHA-256, and an earlier
+draft of that harness asserted "distinct epochs derive distinct keys" — SHA-256
+injectivity — which did not terminate.
+
 **Why this matters more than the artifact check.** `check_rust_rules.sh`
 inspects the built object for panic machinery. That is evidence — it says the
 compiler emitted no panic path *it could see*, on one target, at one
