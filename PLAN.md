@@ -142,7 +142,9 @@ The honest state of the four:
 
 **Evidence needed, and what a third node would and would not help.** Position needs a node broadcasting one, which needs no GPS — a fixed position set by config produces the same bytes, and `TESTING.md` names positions as identifying data, so a synthetic coordinate is the *right* choice rather than a compromise. `Routing` fields 1–2 and richer `RouteDiscovery` routes are the only items here a third node would unblock, and they are the ones nothing currently needs.
 
-**Gate:** every message in the corpus round-trips decode→encode bit-identically. *The corpus now exists — `tests/captures/fromradio_corpus.json`, 43 messages, 9 variants — and their encoder was measured to be canonical, so the gate is reachable. This is unblocked and ready to implement against.*
+**Gate:** every message in the corpus round-trips decode→encode bit-identically. ***Met.*** `tests/host_unit/main.rs::every_corpus_message_round_trips_bit_identically` runs it over `tests/captures/fromradio_corpus.json`, and `nested_messages_round_trip_bit_identically` recurses into every length-delimited field rather than stopping at the top level — a message can round-trip while a nested one inside it does not.
+
+*(This line read "unblocked and ready to implement against" until 2026-08-17, for work that was already implemented and passing. Recorded rather than quietly edited: it is the same residue the 2026-08-16 audit chased through three other documents — a true statement added, its predecessor left standing. `check_docs.sh` cross-references documents against code, and cannot catch a document that is merely out of date about itself.)*
 
 ## L4 — conformance, both directions
 
