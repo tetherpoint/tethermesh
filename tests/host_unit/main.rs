@@ -2660,6 +2660,58 @@ fn every_measured_modem_preset_agrees_with_our_airtime_model() {
 
 /// The measured contention window, tied to the constant that claims it.
 ///
+/// A second, independent measurement agrees on the window's upper bound.
+///
+/// The original corpus was gathered by transmitting at varying power and reading
+/// a stock node's relays. This one harvested the reference's own reported
+/// backoff while it relayed a *third* node's broadcasts — different session,
+/// different apparatus, nothing shared. Agreement across two methods is evidence;
+/// a second run of the same method would only be repetition.
+///
+/// **It does not settle `min_slots`, and this test does not pretend otherwise.**
+/// All nodes were within a few metres, so the SNR axis failed exactly as it did
+/// the first time. Twenty-eight uniform draws from a single ~143-slot window land
+/// where these landed, so the smallest observed value is a *draw*, not a bound.
+#[test]
+fn an_independent_replication_agrees_on_the_window_ceiling() {
+    let doc = fs::read_to_string(captures_dir().join("contention_window.json"))
+        .expect("cannot read contention_window.json");
+
+    let key = "\"samples_ms\":";
+    let start = doc.find(key).expect("replication samples missing from the fixture");
+    let tail = &doc[start + key.len()..];
+    let end = tail.find(']').expect("unterminated samples array");
+    let mut delays: Vec<u32> = Vec::new();
+    for tok in tail[..end].split(',') {
+        let t = tok.trim().trim_start_matches('[').trim();
+        if let Ok(v) = t.parse::<u32>() {
+            delays.push(v);
+        }
+    }
+    assert!(
+        delays.len() >= 25,
+        "expected the replication sample, got {}",
+        delays.len()
+    );
+
+    // Same slot quantisation as the first corpus. Two independent samples both
+    // landing on 28 ms multiples is what justifies counting slots at all.
+    for d in &delays {
+        assert_eq!(d % 28, 0, "delay {d} ms is not a multiple of the 28 ms slot");
+    }
+
+    let hi = *delays.iter().max().expect("max");
+    let seen = u8::try_from(hi / 28).expect("slot count fits");
+    assert_eq!(
+        seen,
+        ContentionWindow::MESHTASTIC_SHAPE.max_slots,
+        "the replication observed {seen} slots where the constant says {}; \
+         two independent measurements disagreeing means one of them is wrong, \
+         and the constant is the one that has to move",
+        ContentionWindow::MESHTASTIC_SHAPE.max_slots
+    );
+}
+
 /// `tests/captures/contention_window.json` records 33 relays observed off a
 /// stock node. This asserts the two properties that measurement settled and
 /// that `ContentionWindow::MESHTASTIC_SHAPE` now depends on, so the constant

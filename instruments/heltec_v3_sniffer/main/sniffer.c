@@ -439,9 +439,27 @@ void app_main(void)
                        (uint8_t)(mask >> 8), (uint8_t)mask, 0, 0, 0, 0 };
     sx_cmd(CMD_SET_DIO_IRQ_PARAMS, irq, 8);
 
+    /* This reports 0x0020 on every boot, which is bit 5 -- XOSC_START_ERR --
+     * and it is expected rather than a fault.
+     *
+     * CMD_CALIBRATE above is issued immediately after CMD_SET_DIO3_AS_TCXO,
+     * which asks for a 5 ms TCXO startup. Calibration therefore begins before
+     * the oscillator has settled and the part records that it did. The 20 ms
+     * delay that follows lets it settle, but nothing re-runs calibration or
+     * clears the flag, so the stale bit is still set when this reads it.
+     *
+     * It is benign here and demonstrably so: this receiver decoded a 24-frame
+     * corpus byte-for-byte in agreement with an independent receiver. Left as
+     * an observation rather than "fixed" by clearing the word, because a
+     * cleared error word would say nothing and this one says something true.
+     *
+     * If a clean banner is ever wanted the documented remedy is
+     * ClearDeviceErrors followed by a second Calibrate, after the startup
+     * delay -- not before it. */
     uint8_t errs[2] = {0};
     sx_read(CMD_GET_DEVICE_ERRORS, errs, 2);
-    ESP_LOGI(TAG, "device errors: %02X%02X", errs[0], errs[1]);
+    ESP_LOGI(TAG, "device errors: %02X%02X (0020 = XOSC_START_ERR, expected: "
+                  "Calibrate runs before the TCXO's 5 ms startup)", errs[0], errs[1]);
 
     uint8_t rxcont[3] = { 0xFF, 0xFF, 0xFF };            /* continuous RX */
     sx_cmd(CMD_SET_RX, rxcont, 3);

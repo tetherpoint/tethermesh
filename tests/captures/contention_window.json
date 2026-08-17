@@ -253,5 +253,45 @@
       "rx_snr_db": 6.5,
       "tx_delay_ms": 3248
     }
-  ]
+  ],
+  "replication_2026_08_17": {
+    "why": "An independent second measurement, different session and different method. The original corpus was gathered by transmitting at varying power and reading a stock node's relays; this one harvested the reference's own 'Setting tx delay:N' log line while it relayed a third node's broadcasts. Nothing about the two shares apparatus, so agreement is evidence rather than repetition.",
+    "boundary": "a stock node's own log line reporting the backoff it chose, while relaying broadcasts originated by a second stock node",
+    "samples_ms": [
+      448,
+      532,
+      868,
+      1064,
+      1316,
+      1372,
+      1428,
+      1428,
+      1456,
+      1484,
+      1904,
+      2016,
+      2044,
+      2184,
+      2296,
+      2408,
+      2492,
+      2660,
+      2660,
+      3164,
+      3248,
+      3332,
+      3528,
+      3696,
+      3808,
+      3864,
+      3976,
+      4004
+    ],
+    "min_ms": 448,
+    "max_ms": 4004,
+    "count": 28,
+    "max_slots_at_28ms": 143,
+    "agreement": "max 4004 ms = 143.0 slots exactly, matching max_slots = 143 set from the first corpus.",
+    "what_it_does_NOT_settle": "min_slots. All three nodes were within a few metres, so the SNR axis did not vary here either -- the same failure the original corpus records. Twenty-eight uniform draws from a single ~143-slot window land 16..143 exactly as observed, so the 448 ms minimum is a DRAW, not a window bound. Measuring the low-SNR end still needs real attenuation."
+  }
 }
