@@ -181,7 +181,11 @@ Fixed, it failed immediately: `frame::encode` had a live panic path through `cop
 *Status, stated precisely, because "ACHIEVED" above and "outstanding" here have read as a contradiction:*
 
 - *their encoder → our decoder* — **met across the corpus**, 43/43 bit-identical (L3).
-- *our encoder → their decoder* — **demonstrated, not yet corpus-wide.** A stock node accepted our text frame, our `User`, and answered our traceroute. That is three constructed frames, not a systematic sweep of every corpus message back at them.
+- *our encoder → their decoder* — **now covers every portnum in the corpus, 2026-08-17.** A stock node accepted our text frame (portnum 1), our `User` (4), answered our traceroute, and — the one that was missing — **accepted, decoded and acted on a `ROUTING` acknowledgement (5)**: it matched our `request_id` to an outstanding `want_ack` DM and stopped retransmitting. Acceptance that changes the peer's behaviour is stronger than acceptance that merely logs. `payloadlen=2` in its log confirms the `18 00` literal in the *emitting* direction, where it had only been measured in the receiving one. Record in `tests/captures/conformance_record.json` § `routing_ack`.
+
+  On the host side the byte-identical rebuild is now swept across the whole on-air corpus rather than the text frames alone — `every_captured_frame_rebuilds_byte_for_byte`, 29 to 102 bytes, three portnums. Red-tested with a length-dependent fault that **passes** the older text-only test and fails this one, which is the evidence it adds coverage rather than repeating it.
+
+  **The first run of the routing test was confounded, and the confound is the more useful finding.** With phase0 relaying, the stock node stopped retransmitting after hearing its *own* packet rebroadcast — Meshtastic treats a relayed copy as an implicit acknowledgement. The log said `Received a ACK ... stopping retransmissions` while our frame never appeared in it: the acking packet was the node talking to itself. Reading the verdict line alone would have recorded a pass for a frame that was never received.
 - *panic-free artifact* — **met and continuously enforced** by `check_all.sh`.
 - *fuzzing* — **met 2026-08-16**, and deliberately scoped as complementary rather than as the evidence.
 

@@ -86,5 +86,32 @@
     "render our text": "DONE \u2014 'tethermesh-conformance-1' displayed and relayed",
     "accept a direct message": "DONE for channel encryption \u2014 an addressed, non-broadcast packet was accepted and answered; PKI untested",
     "list us in a route trace": "DONE \u2014 traceroute answered with our request_id and an SNR reading"
+  },
+  "routing_ack": {
+    "date": "2026-08-17",
+    "question": "Does a stock node accept, decode and ACT ON a ROUTING acknowledgement built by our encoder?",
+    "why_it_completes_the_sweep": "The corpus spans portnums 1 (text), 4 (NodeInfo) and 5 (Routing). Text and NodeInfo were already accepted in the emitting direction. Routing was not, and it is the one carrying a payload this project had to MEASURE rather than derive.",
+    "frame_hex": "64e769330100577e31acad0b620800286eeb010ab9a3b9bc4bc238",
+    "frame_fields": {
+      "from": "0x7e570001",
+      "to": "0x3369e764",
+      "id": "0x0badac31",
+      "portnum": 5,
+      "request_id": "0x7d91addc",
+      "payload": "18 00 -- Routing field 3 = 0, encoded EXPLICITLY",
+      "len": 27
+    },
+    "stock_node_log": [
+      "[RadioIf] Lora RX (id=0x0badac31 fr=0x7e570001 to=0x3369e764, WantAck=0, HopLim=2 Ch=0x8 encrypted len=27 rxSNR=6.25 rxRSSI=-68)",
+      "[Router] Received routing from=0x7e570001, id=0xbadac31, portnum=5, payloadlen=2",
+      "[Router] Received a ACK for 0x7d91addc, stopping retransmissions"
+    ],
+    "verdict": "Accepted and ACTED ON. The stock node had a want_ack DM outstanding, matched our request_id to it, and stopped retransmitting. Acceptance that changes the peer's behaviour is stronger evidence than acceptance that merely logs.",
+    "payloadlen_2_is_the_point": "delivery.rs carries ACK_PAYLOAD as a LITERAL [0x18, 0x00] because a stock node encodes the zero status explicitly where proto3 would omit it -- an acknowledgement built from first principles is empty. That was measured in the RECEIVING direction. `payloadlen=2` here confirms it in the EMITTING direction: the two bytes are what their decoder expects, not merely what it sends.",
+    "the_first_attempt_was_confounded_and_the_confound_is_worth_recording": "Run once with phase0 relaying, the stock node stopped retransmitting after hearing its OWN packet rebroadcast -- Meshtastic treats a relayed copy as an IMPLICIT acknowledgement. The log read as success ('Received a ACK ... stopping retransmissions') while our frame never appeared in it at all: the acking packet was fr=0x3369e764 to=0x3369e764, the node talking to itself. Reading only the verdict line would have recorded a pass for a frame that was never received. The second run filtered talker at phase0 so no relay path existed, leaving our frame the only possible source.",
+    "not_proven_here": [
+      "That a stock node will ORIGINATE a direct message to phase0 (0x7e5701a1). It refuses with 'Error=39, return NAK and drop packet' and never transmits, because phase0 has published no NodeInfo and has no X25519 identity -- so there is no public key to address it with. Node 0x7e570001 works precisely because emit_nodeinfo_frame_for_the_bench publishes one for it.",
+      "Consequently phase0's own tm_ack_encode path is still unexercised against a stock decoder; this validated the same encoder driven from the host."
+    ]
   }
 }

@@ -1184,6 +1184,75 @@ fn a_captured_frame_survives_decode_then_encode_byte_for_byte() {
     }
 }
 
+/// The same rebuild, swept across **every** frame in the corpus.
+///
+/// `a_captured_frame_survives_decode_then_encode_byte_for_byte` filters to the
+/// text frames, so it proved the rebuild for one portnum out of three. That is
+/// the same shape as L4's remaining gap — "three constructed frames, not a
+/// systematic sweep" — one level down, and it is why this exists separately
+/// rather than as a widened filter: the text-frame test also asserts the
+/// decrypted payload is the string that was transmitted, which is a claim only
+/// those frames can support.
+///
+/// The corpus spans 29 to 102 bytes across portnums 1 (text), 4 (NodeInfo) and
+/// 5 (Routing), and one of them is addressed to us rather than broadcast. A
+/// length- or portnum-dependent encoding fault survives the text-only test and
+/// fails here.
+#[test]
+fn every_captured_frame_rebuilds_byte_for_byte() {
+    let frames = on_air_frames();
+    assert!(frames.len() >= 5, "expected the widened corpus; got {}", frames.len());
+
+    let Psk::Aes128(key) = expand_psk(&[0x01]).unwrap() else { panic!() };
+
+    let mut portnums = std::collections::BTreeSet::new();
+    let mut shortest = usize::MAX;
+    let mut longest = 0usize;
+
+    for (portnum, hex) in &frames {
+        let original = hex_to_bytes(hex);
+        shortest = shortest.min(original.len());
+        longest = longest.max(original.len());
+
+        let mut work = original.clone();
+        let (hdr, plain) = frame::decode_in_place(&mut work, &key, 0)
+            .unwrap_or_else(|e| panic!("portnum {portnum}, {} bytes: decode failed: {e:?}",
+                                       original.len()));
+        let plain = plain.to_vec();
+
+        assert_eq!(
+            Data::decode(&plain).expect("payload is not a Data").portnum,
+            *portnum,
+            "the corpus records portnum {portnum} but the decrypted payload disagrees"
+        );
+        portnums.insert(*portnum);
+
+        let mut rebuilt = vec![0u8; frame::MAX_FRAME];
+        let n = frame::encode(&hdr, &plain, &key, 0, &mut rebuilt)
+            .unwrap_or_else(|e| panic!("portnum {portnum}: encode failed: {e:?}"));
+        assert_eq!(
+            &rebuilt[..n],
+            &original[..],
+            "portnum {portnum}, {} bytes: did not rebuild to the bytes that were \
+             on the air",
+            original.len()
+        );
+    }
+
+    // Guard the breadth itself. A fixture quietly narrowed back to one portnum
+    // would leave this test passing while proving what the older one already did.
+    assert!(
+        portnums.len() >= 3,
+        "the sweep covered only portnums {portnums:?} — its whole value is spanning \
+         more than one"
+    );
+    assert!(
+        longest - shortest > 50,
+        "the sweep covered {shortest}..{longest} bytes; a length-dependent fault \
+         needs a wider spread than that to show"
+    );
+}
+
 /// A relay reads the header without a key, because it may not have one.
 #[test]
 fn a_relay_reads_the_header_without_any_key() {
