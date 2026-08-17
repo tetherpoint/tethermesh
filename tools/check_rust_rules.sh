@@ -116,7 +116,8 @@ else
             # feature = "x"), no_std)` would let a feature flag quietly turn a
             # shipped artifact into a std one.
             if [ "$a" = "no_std" ] \
-               && grep -qF '#![cfg_attr(not(test), no_std)]' "$LIB"; then
+               && { grep -qF '#![cfg_attr(not(test), no_std)]' "$LIB" \
+                    || grep -qF '#![cfg_attr(not(any(test, kani)), no_std)]' "$LIB"; }; then
                 continue
             fi
             fail "$rel is missing #![$a]"

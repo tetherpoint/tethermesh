@@ -57,7 +57,14 @@ proof that does not terminate proves nothing.
 ### `suite/groups` — the extension bundle
 
 `SCOPE.md` requires a bundle crate to inherit the whole regime, and the proof
-table is part of it. Run with `cargo kani -p tethermesh_groups`.
+table is part of it. Run with `cargo kani --workspace`, which covers both crates.
+
+> **Not bare `cargo kani`.** That builds the workspace's default member only
+> and reports 13 harnesses — every one passing, and silently missing this
+> table entirely. `--workspace` failed with a duplicate `panic_handler` until
+> the FFI crate's was gated on `not(any(test, kani))`, so the command that
+> covered everything did not work and the one that worked did not cover
+> everything.
 
 | harness | property |
 |---|---|

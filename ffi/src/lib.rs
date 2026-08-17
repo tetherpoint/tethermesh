@@ -63,7 +63,7 @@
 //! FreeRTOS's `configMINIMAL_STACK_SIZE` (512 bytes) is smaller than a single
 //! CCM decrypt.
 
-#![cfg_attr(not(test), no_std)]
+#![cfg_attr(not(any(test, kani)), no_std)]
 // The same crate rules the protocol library lives by. An FFI shim is where they
 // matter most: it is the surface a C consumer reaches, and a panic here aborts
 // their firmware rather than ours.
@@ -99,7 +99,13 @@ use tethermesh::airtime::DutyCycle;
 use tethermesh::history::Seen;
 use tethermesh::routing::{self, ContentionWindow, Observed, Relay, Role};
 
-#[cfg(not(test))]
+// Not under `test` OR `kani`: both link a harness that brings its own handler,
+// and only one may exist per program. `cargo kani --workspace` failed with
+// E0152 (duplicate lang item) until this covered kani too -- which meant the
+// documented verification command could not include this crate at all.
+//
+// Neither predicate can reach a shipped build.
+#[cfg(not(any(test, kani)))]
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
     // Unreachable by construction -- the crate rules forbid panicking paths and
