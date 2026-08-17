@@ -381,6 +381,20 @@ Three further observations, recorded as observed rather than explained:
 
 That is the direction that matters. Everything before it proved we can *read* an acknowledgement; this proves we can *write* one they accept. It also confirms the `18 00` payload is right: had it been the empty payload proto3 would generate, the ladder would have continued and the failure would have looked like a radio problem.
 
+**A stock node acknowledges a `want_ack` direct message that we originate — measured 2026-08-17.** Everything above tested the other direction: a stock node sent, and we replied in a form it accepted. This is the reverse, and it is a separate claim, because it depends on our *request* being well-formed rather than our *reply*.
+
+An addressed message with `want_ack` set was encoded here and transmitted. The destination replied, and the reply decoded on the receiving hardware as:
+
+```
+08 05            Data.portnum = 5   ROUTING
+12 02 18 00      Data.payload = Routing{ field 3 = 0 }   accepted
+35 06 00 00 51   Data.request_id = 0x51000006            our packet's id
+```
+
+`request_id` matching the transmitted packet is the part that matters: it is the whole matching key, so an acknowledgement that carried anything else would be unattributable even though it decoded.
+
+**What this does NOT establish, and the distinction is easy to lose.** The reply above reached us over a two-hop path — but the topology was imposed in software, by dropping frames that arrived directly from the destination, rather than by RF range. All three nodes were in mutual range throughout. That is sound for protocol questions, because nothing in the protocol can distinguish a filtered frame from an unheard one, and it is worth nothing for RF questions. **Per-hop retry behaviour therefore remains unsettled**: observing it needs a stock node retransmitting across a path it genuinely cannot shortcut, and no such path existed. The position taken in `core/delivery.rs` — that none is taken — still stands.
+
 **The enum name for status 6 is not established here.** Naming it needs the schema read as specification. The plausible cause — the destination holds our public key and expects PKI for direct messages, and the probe was channel-encrypted — is inference and is not claimed.
 
 ---
