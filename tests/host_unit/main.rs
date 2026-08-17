@@ -3077,6 +3077,51 @@ fn acknowledging_retires_the_entry_and_stops_retransmission() {
     assert!(!ob.acknowledge(0xDEAD_BEEF), "an unmatched ack is ordinary, not an error");
 }
 
+/// A rejection retires the entry **exactly** as an acceptance does.
+///
+/// `delivery.rs` states this and it was confirmed on hardware on 2026-08-17: a
+/// stock node answered a channel-encrypted DM with status 6, and the entry was
+/// retired with no retransmission. Nothing pinned it, though. The property held
+/// *by construction* — `Outbox::acknowledge` takes only a `request_id`, so the
+/// status cannot reach it — and a property that holds only by construction goes
+/// red for nobody when the construction changes.
+///
+/// The failure this guards is at the seam, not in the outbox: a caller that
+/// reads the status and skips `acknowledge` on a rejection. That reads like
+/// caution and is a retransmission loop, because no further attempt will ever be
+/// accepted either. So both statuses are driven through the whole path,
+/// `acknowledges()` into `acknowledge()`, and asserted to end identically.
+#[test]
+fn a_rejection_retires_the_entry_exactly_as_an_acceptance_does() {
+    for (label, payload, accepted) in [
+        ("ACK", &[0x18u8, 0x00][..], true),
+        ("NAK", &[0x18u8, 0x06][..], false),
+    ] {
+        let mut ob: Outbox<2> = Outbox::new(RetryPolicy::MEASURED_CEILING);
+        let mut duty = wide_duty();
+        let id = 0xAA00_0007;
+        ob.track(&probe_frame(id), 0).unwrap();
+
+        let data = Data {
+            portnum: PortNum::ROUTING_APP.0,
+            payload,
+            request_id: id,
+            ..Data::default()
+        };
+        let ack = acknowledges(&data)
+            .unwrap_or_else(|| panic!("{label}: a rejection is still an answer"));
+        assert_eq!(ack.status.is_accepted(), accepted, "{label}: status misread");
+
+        assert!(ob.acknowledge(ack.request_id), "{label}: must retire the entry");
+        assert!(ob.is_empty(), "{label}: must leave nothing pending");
+        assert!(
+            ob.next_due(7_000_000, 100_000, &mut duty).is_none(),
+            "{label}: must stop retransmission — no further attempt can be \
+             accepted, so retrying a rejection only spends shared airtime"
+        );
+    }
+}
+
 /// Giving up is reported, not silent.
 #[test]
 fn exhausting_the_attempts_reports_the_give_up() {
