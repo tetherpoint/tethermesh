@@ -30,7 +30,7 @@ use tethermesh::crypto::{
 use tethermesh::frame;
 use tethermesh::header::{Header, HEADER_LEN};
 use tethermesh::history::{PacketHistory, Seen};
-use tethermesh::message::{ChannelSettings, Data, PortNum, User};
+use tethermesh::message::{ChannelSettings, Data, NodeInfo, PortNum, User};
 use tethermesh::packet_id::{NextId, PacketIdSource};
 use tethermesh::protobuf::{Error as ProtoError, Reader, Value, Writer};
 use tethermesh::routing::{
@@ -374,6 +374,62 @@ fn user_wrapper_round_trips_reference_bytes() {
         }
     }
     assert!(seen >= 1, "corpus contained no NodeInfo.user to test against");
+}
+
+/// `NodeInfo` against real bytes the reference produced.
+///
+/// The load-bearing case is field 3. The captured message carries `1a 00` — a
+/// PRESENT, ZERO-LENGTH submessage — and a wrapper that skipped empty
+/// submessages the way `User` skips empty byte fields would re-encode two bytes
+/// short. Semantic equality would not notice; only byte identity does.
+///
+/// That is the same defect class as `User.macaddr` (deprecated in the schema,
+/// still on the wire, still required for a bit-identical re-encode). Twice now
+/// the schema has said what a field means and the wire has decided whether it is
+/// transmitted, so this test asserts against the wire.
+#[test]
+fn nodeinfo_wrapper_round_trips_reference_bytes() {
+    let path = captures_dir().join("fromradio_corpus.json");
+    let doc = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+
+    let mut seen = 0usize;
+    let mut saw_empty_position = false;
+    for hex in all_hex(&doc) {
+        let msg = hex_to_bytes(hex);
+        let mut reader = Reader::new(&msg);
+        while let Ok(Some(field)) = reader.next_field() {
+            // FromRadio.node_info = 4
+            let Value::Len(node_info) = field.value else { continue };
+            if field.number != 4 {
+                continue;
+            }
+
+            let ni = NodeInfo::decode(node_info).expect("reference NodeInfo failed to decode");
+            assert_ne!(ni.num, 0, "decoded NodeInfo has no node number");
+            assert!(ni.user.is_some(), "decoded NodeInfo carries no User");
+
+            if ni.position == Some(&[][..]) {
+                saw_empty_position = true;
+            }
+
+            let mut out = vec![0u8; node_info.len()];
+            let n = ni.encode(&mut out).expect("re-encoding NodeInfo failed");
+            assert_eq!(
+                (n, &out[..n]),
+                (node_info.len(), node_info),
+                "NodeInfo did not re-encode to the reference bytes"
+            );
+            seen = seen.saturating_add(1);
+        }
+    }
+    assert!(seen >= 1, "corpus contained no NodeInfo to test against");
+    assert!(
+        saw_empty_position,
+        "the corpus NodeInfo no longer carries a present-but-empty field 3. That \
+         case is the reason NodeInfo.position is an Option of a slice rather \
+         than a slice; if the fixture changed, re-adjudicate before relaxing it"
+    );
 }
 
 #[test]
@@ -2576,11 +2632,17 @@ fn emit_pki_dm_frame_for_the_bench() {
 /// 125/250/500 kHz is a far stronger constraint, and a symbol-time formula
 /// that was accidentally right at one spreading factor will not survive it.
 ///
-/// Coding rate is deliberately absent from the fixture and so is absent here.
-/// The node does not report it, and the reported bitrate cannot invert to it:
-/// the ratio of bitrate to `SF*BW/2^SF` drifts with SF (0.697 at SF11, 0.725
-/// at SF7), so that figure carries packet overhead of a shape we have not
-/// established. Guessing it would be assuming a formula to manufacture a fact.
+/// Coding rate **was** absent from the fixture when this test was written, and
+/// that paragraph stood here after it was measured. It is measured now — 4/5 on
+/// every valid preset, by timing — and checked below. The reasoning that kept it
+/// out is still worth keeping, because it is why the figure was not guessed: the
+/// node does not report CR, and the reported bitrate cannot invert to it, since
+/// the ratio of bitrate to `SF*BW/2^SF` drifts with SF (0.697 at SF11, 0.725 at
+/// SF7) and so carries packet overhead of a shape we had not established.
+///
+/// The named `ModemParams` constants are checked against the fixture rows here
+/// too. A constant that drifts from the measurement it claims is the failure
+/// `routing.rs`'s `max_slots` already had once.
 #[test]
 fn every_measured_modem_preset_agrees_with_our_airtime_model() {
     let doc = fs::read_to_string(captures_dir().join("modem_presets.json"))
@@ -2647,6 +2709,52 @@ fn every_measured_modem_preset_agrees_with_our_airtime_model() {
         assert_eq!(
             ModemParams::LONGFAST.coding_rate, 1,
             "LONGFAST must stay at the measured 4/5 (coding_rate index 1)"
+        );
+
+        // Tie the named constant for this preset to the row that measured it.
+        // `block` begins immediately after the `"preset":` key, so the preset
+        // number is the leading integer.
+        let preset: u8 = block
+            .trim_start()
+            .split(|c: char| !c.is_ascii_digit())
+            .next()
+            .and_then(|s| s.parse().ok())
+            .expect("preset number");
+        let named = match preset {
+            0 => ModemParams::LONGFAST,
+            1 => ModemParams::LONGSLOW,
+            3 => ModemParams::MEDIUMSLOW,
+            4 => ModemParams::MEDIUMFAST,
+            5 => ModemParams::SHORTSLOW,
+            6 => ModemParams::SHORTFAST,
+            7 => ModemParams::LONGMOD,
+            8 => ModemParams::SHORTTURBO,
+            9 => ModemParams::LONGTURBO,
+            other => panic!("preset {other} is valid in the fixture but has no named constant"),
+        };
+        assert_eq!(
+            named.spreading_factor, sf as u8,
+            "preset {preset}: constant says SF{}, fixture measured SF{sf}",
+            named.spreading_factor
+        );
+        assert_eq!(
+            named.bandwidth_hz, (bw_khz * 1000.0) as u32,
+            "preset {preset}: constant says {} Hz, fixture measured {bw_khz} kHz",
+            named.bandwidth_hz
+        );
+        assert_eq!(named.coding_rate, 1, "preset {preset}: every preset measured 4/5");
+
+        // LDRO is not a free choice: it is required once the symbol time passes
+        // ~16 ms, which is the rule the field's own documentation states. Deriving
+        // the expectation rather than copying the fixture's flag means a constant
+        // and the rule cannot disagree silently.
+        let ldro_required = named.symbol_time_us().expect("symbol time") > 16_000;
+        assert_eq!(
+            named.low_data_rate_optimize, ldro_required,
+            "preset {preset}: symbol time {} us {} LDRO, constant says {}",
+            named.symbol_time_us().unwrap_or(0),
+            if ldro_required { "requires" } else { "does not require" },
+            named.low_data_rate_optimize
         );
         checked += 1;
     }

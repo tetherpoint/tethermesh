@@ -431,3 +431,97 @@ impl Routing {
         Ok(w.len())
     }
 }
+
+/// A node database entry, as the reference emits it.
+///
+/// # What is established, and what is not
+///
+/// The layout below is read off `tests/captures/fromradio_corpus.json`'s
+/// `node_info` message — their encoder's bytes. It establishes that fields 1, 2,
+/// 3 and 10 exist and their wire types. It does **not** establish field 10's
+/// meaning: one capture showing a varint `1` names nothing, no primary document
+/// here records it, and guessing from a remembered schema is the kind of
+/// self-consistent invention this project exists to avoid. So it is carried
+/// under a name that describes its position rather than a purpose it has not
+/// been shown to have. Naming it costs a capture, not a rewrite.
+///
+/// Fields 4–9 do not appear in the corpus at all and are therefore **not
+/// carried**. The consequence is worth stating plainly rather than discovering:
+/// a `NodeInfo` that used them would lose them across decode-then-encode. That
+/// is a real limitation, and the honest one — a field number invented here would
+/// corrupt a neighbour's record rather than drop it.
+///
+/// # Why `position` is an `Option` of a possibly-empty slice
+///
+/// The captured message carries `1a 00` — field 3, present, zero bytes. A
+/// wrapper that skipped empty submessages the way [`User`] skips empty byte
+/// fields would drop those two bytes and fail to re-encode bit-identically.
+/// `None` means absent and `Some(&[])` means present-and-empty, because the wire
+/// distinguishes them. This is the same lesson as [`User::macaddr`]: the schema
+/// says what a field means, not whether it is transmitted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct NodeInfo<'a> {
+    /// Field 1. The node number — `0x021e81dd` in the corpus message, matching
+    /// the `!021e81dd` in its own [`User::id`].
+    pub num: u32,
+    /// Field 2, undecoded. Feed to [`User::decode`]; kept as raw bytes so this
+    /// type does not force that cost on a caller that only wants `num`.
+    pub user: Option<&'a [u8]>,
+    /// Field 3, undecoded. `Some(&[])` when present and empty — see the type
+    /// note, that case is in the corpus and is load-bearing.
+    pub position: Option<&'a [u8]>,
+    /// Field 10, a varint flag, observed as `1`. **Its meaning is not
+    /// established** — see the type note.
+    pub flag_10: Option<bool>,
+}
+
+impl<'a> NodeInfo<'a> {
+    /// Decode from protobuf bytes.
+    ///
+    /// # Errors
+    ///
+    /// [`Error`] if the input is not well-formed protobuf.
+    pub fn decode(bytes: &'a [u8]) -> Result<Self, Error> {
+        let mut out = Self::default();
+        let mut reader = Reader::new(bytes);
+        while let Some(field) = reader.next_field()? {
+            match (field.number, field.value) {
+                (1, Value::Varint(v)) => out.num = truncate_u32(v),
+                (2, Value::Len(b)) => out.user = Some(b),
+                (3, Value::Len(b)) => out.position = Some(b),
+                (10, Value::Varint(v)) => out.flag_10 = Some(v != 0),
+                _ => {}
+            }
+        }
+        Ok(out)
+    }
+
+    /// Encode into `buf`, returning the number of bytes written.
+    ///
+    /// Fields are written in ascending order, which is what the reference's own
+    /// encoder does — `fromradio_corpus.json` records 43 of 43 messages in
+    /// ascending order, and that is why a bit-identical re-encode is reachable
+    /// at all rather than merely semantically equal.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::BufferTooSmall`] if `buf` cannot hold the result.
+    pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
+        let mut w = Writer::new(buf);
+        if self.num != 0 {
+            w.field(1, &Value::Varint(u64::from(self.num)))?;
+        }
+        // Written whenever PRESENT, empty or not. Skipping an empty submessage
+        // is what would break the round-trip; see the type note.
+        if let Some(b) = self.user {
+            w.field(2, &Value::Len(b))?;
+        }
+        if let Some(b) = self.position {
+            w.field(3, &Value::Len(b))?;
+        }
+        if let Some(flag) = self.flag_10 {
+            w.field(10, &Value::Varint(u64::from(flag)))?;
+        }
+        Ok(w.len())
+    }
+}

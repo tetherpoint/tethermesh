@@ -134,11 +134,28 @@ A side effect worth recording: the oracle **loaded a `ChannelFile` we hand-encod
 
 **Packet identifiers are 32-bit and re-randomised per packet** — the node logs `Initial packet id`, then `Partially randomized packet id` for each transmission. Relevant to the L2 packet-id discipline: under CTR a repeated `(packet_id, sender)` pair leaks the XOR of two plaintexts.
 
+**An empty submessage is transmitted, and dropping it breaks byte identity.** The corpus `NodeInfo` carries `1a 00` — field 3, present, zero bytes. proto3 omits an empty scalar, and this project's own `User` encoder omits empty byte fields on exactly that reasoning; applied to a submessage the same rule re-encodes two bytes short. So *absent* and *present-but-empty* are distinct on this wire and a wrapper has to represent both — `meshtastic/core/message.rs` uses `Option<&[u8]>`, where `None` is absent and `Some(&[])` is present-and-empty.
+
+This is the **second** instance of one pattern, which is what makes it a rule rather than a quirk: `User.macaddr` is deprecated in the schema and still emitted, and field 3 here is empty in the schema's terms and still emitted. **The schema says what a field means; the wire decides whether it is transmitted.** Anything reproducing reference bytes must be checked against bytes, because semantic equality passes both of these and byte identity fails them.
+
+**`NodeInfo` layout, as measured.** From `tests/captures/fromradio_corpus.json`:
+
+| field | wire type | observed | established? |
+|---|---|---|---|
+| 1 | varint | `0x021e81dd`, matching the `!021e81dd` in its own nested `User.id` | yes — value corroborated twice within the message |
+| 2 | len | a `User` | yes |
+| 3 | len | **zero bytes** | present; contents never observed non-empty |
+| 10 | varint | `1` | **the field exists; its meaning does not follow.** One capture of a varint `1` names nothing, and no primary document read here records it |
+
+Fields 4–9 do not appear. That is not evidence they do not exist — this corpus is one node's own record on a local simulation, so a field only populated by a heard neighbour would be absent for that reason alone. The wrapper carries 1, 2, 3 and 10 and drops the rest, which is recorded in its own documentation as a limitation rather than presented as completeness.
+
 **LongFast is bandwidth 250 kHz, spreading factor 11, coding rate 4/5** — on real hardware, from the firmware's own mouth. This is the first hard data against draft item 6.
 
 Method matters here, because it is what makes this evidence rather than another assertion. A `LoRaConfig` was written to a Heltec V3 running `2.7.26.54e0d8d` with `use_preset = true`, `modem_preset = LONG_FAST`, and the bandwidth, spreading-factor and coding-rate fields **absent** — proto3 default, i.e. zero. Reading the config back returned `bandwidth = 250`, `spread_factor = 11`, `coding_rate = 5`. The firmware populated them, so these are its values for the preset and not an echo of anything we supplied.
 
-It covers **one preset of seventeen**. The commonly repeated table happens to agree for this row; that is now checked rather than assumed for LongFast alone, and says nothing about the other sixteen — including the 62.5 kHz and 20 kHz variants that made the draft's 7-row table impossible in the first place. The bench was found running `VLongSlow` at 62.5 kHz, so that row is reachable the same way.
+~~It covers **one preset of seventeen**. The commonly repeated table happens to agree for this row; that is now checked rather than assumed for LongFast alone, and says nothing about the other sixteen — including the 62.5 kHz and 20 kHz variants that made the draft's 7-row table impossible in the first place. The bench was found running `VLongSlow` at 62.5 kHz, so that row is reachable the same way.~~
+
+**Struck 2026-08-17.** Written while this was the only measured row, and left standing when the sweep closed item 6. There are **nine valid presets, not seventeen**, and all nine are measured — see item 6 below for the table and the method. The paragraph is kept because the caution in it was right: the commonly repeated table was not evidence, and checking it is what revealed that seven of its rows do not exist.
 
 **The simulator and real silicon disagree on airtime, by about 1.2%.** Same firmware version (`2.7.26.54e0d8d`), same preset, same region UNSET, same 104 × 250 kHz, same 906.875 MHz, same 28 ms slot and 131 ms preamble — and different computed bitrates:
 
@@ -165,7 +182,9 @@ That the frames arrived at all resolves two items by construction: **nothing dec
 
 ### Item 6 — modem parameters, for LongFast
 
-**SF 11, BW 250 kHz, CR 4/5, preamble 16 symbols, explicit header, CRC on, standard IQ**, at 906.875 MHz. Confirmed twice over: the firmware reported them through `get_config`, and a receiver configured with them decodes real frames. Still one preset of seventeen.
+**SF 11, BW 250 kHz, CR 4/5, preamble 16 symbols, explicit header, CRC on, standard IQ**, at 906.875 MHz. Confirmed twice over: the firmware reported them through `get_config`, and a receiver configured with them decodes real frames.
+
+This section covers LongFast only because LongFast is the row with two independent derivations behind it. That is no longer the extent of what is measured — the sweep below covers **all nine valid presets**. The sentence "Still one preset of seventeen" stood here until 2026-08-17; there are nine, and they are all measured.
 
 ### Item 1 — the 16-byte header
 
@@ -246,7 +265,7 @@ These are commonly asserted in secondary descriptions and are **not** confirmed 
 3. ~~**The channel hash function**~~ — **RESOLVED 2026-08-15** by oracle observation, above. It is `xor_fold(name) ^ xor_fold(psk)`.
 4. ~~**The PKI/DM scheme details**~~ — **RESOLVED 2026-08-16** by capturing and decrypting a real direct message, above. The docs had confirmed Curve25519 and mentioned "AES-CTR or AES-CCM" without saying which, nor the KDF, the tag size, or where the extra nonce travels. All four are now measured.
 5. ~~**The raw sync-word register value**~~ — **RESOLVED 2026-08-16**: `0x0740 = 0x24`, `0x0741 = 0xB4`, confirmed by decoding real traffic.
-6. ~~**Preset SF/BW/CR parameters**~~ — **SF and BW RESOLVED 2026-08-16 for every valid preset**, by writing each one to a stock node and reading back what it programmed. Coding rate remains unmeasured; see below. Full table in `tests/captures/modem_presets.json`.
+6. ~~**Preset SF/BW/CR parameters**~~ — **RESOLVED 2026-08-16 for every valid preset.** SF and BW by writing each preset to a stock node and reading back what it programmed; **coding rate by timing**, and it is 4/5 on all nine — see below. Full table in `tests/captures/modem_presets.json`. (This line read "coding rate remains unmeasured" until 2026-08-17; it was written between the two measurements and not revisited.)
 
 **The count in this item was wrong, and the correction is the more useful finding.** It said "sixteen presets remain". There are **eight** further valid presets beyond LongFast, not sixteen. Presets 2 and 10–16 are not presets at all: the node reports `name=Invalid` and **silently serves LongFast parameters**. Preset 2 is the deprecated `VERY_LONG_SLOW`; 10–16 are past the end of the enum. A node configured to an out-of-range preset does not fail — it quietly runs LongFast, which is worth knowing before attributing a mismatch to something else.
 
@@ -306,7 +325,9 @@ These are commonly asserted in secondary descriptions and are **not** confirmed 
 
 **That is corroboration from a single observed packet, not a measurement.** A direct hardware sweep across payload sizes is still wanted, and until then airtime is *checked against someone else's answer* rather than verified.
 
-**Only item 6 remains.** Items 1–5 are resolved above, each by capture or observation rather than by assertion. Sixteen presets are outstanding, and they are bounded rather than unknown: the method that resolved LongFast works unchanged.
+~~**Only item 6 remains.** Items 1–5 are resolved above, each by capture or observation rather than by assertion. Sixteen presets are outstanding, and they are bounded rather than unknown: the method that resolved LongFast works unchanged.~~
+
+**Struck 2026-08-17 — all six items are resolved.** Items 1–5 by capture or observation; item 6 by the preset sweep on 2026-08-16, SF and BW read back from a stock node and coding rate settled by timing. The prediction in the struck sentence held exactly: the method that resolved LongFast did work unchanged. Only the count was wrong, and there were eight further presets to find rather than sixteen.
 
 ~~**Resolving these needs either an authoritative byte-level document or a first capture.** Item 3 is now resolved. Items 1 and 2 remain, and the route to them is narrower than this document previously assumed.~~ **Struck 2026-08-16** — this sentence and the three-routes analysis below it were written while items 1 and 2 were open, and were left standing when the capture closed them. The analysis is kept because it is *how* they were closed: the first of the three routes is the one that worked.
 

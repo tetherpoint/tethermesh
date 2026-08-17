@@ -58,8 +58,17 @@ pub type Micros = u32;
 /// The modem settings that determine time-on-air.
 ///
 /// Constructed explicitly rather than defaulted. A wrong preset silently
-/// yields a wrong budget, and `WIRE_REFERENCE.md` records that only LongFast
-/// has been confirmed against hardware — the other sixteen presets are open.
+/// yields a wrong budget, so there is no `Default` to fall into: the caller
+/// states which modem it is modelling.
+///
+/// **All nine valid presets are measured**, on a stock node on 2026-08-16, and
+/// committed as `tests/captures/modem_presets.json`; `WIRE_REFERENCE.md`
+/// § item 6 carries the table. This comment previously said only LongFast had
+/// been confirmed and that "the other sixteen presets are open" — both were
+/// left standing after the measurement landed. There are **nine** valid
+/// presets, not seventeen: presets 2 and 10–16 report `name=Invalid` and
+/// silently serve LongFast parameters, so a node set out of range does not
+/// fail, it quietly runs LongFast.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ModemParams {
     /// Spreading factor, 7..=12.
@@ -82,10 +91,14 @@ pub struct ModemParams {
 }
 
 impl ModemParams {
-    /// LongFast — the only preset confirmed against real silicon.
+    /// LongFast — the default preset, and the one with two independent
+    /// derivations behind it.
     ///
     /// SF11 / BW250 kHz / CR4-5, from `WIRE_REFERENCE.md` § item 6, read off
-    /// a real exchange rather than from a table.
+    /// a real exchange rather than from a table. The other eight valid presets
+    /// are measured too and appear below; LongFast is called out because on-air
+    /// capture and the preamble-time derivation agree on it independently, and
+    /// that agreement is what licenses the derivation for the rest.
     pub const LONGFAST: Self = Self {
         spreading_factor: 11,
         bandwidth_hz: 250_000,
@@ -95,6 +108,41 @@ impl ModemParams {
         implicit_header: false,
         low_data_rate_optimize: false,
     };
+
+    /// LongSlow — preset 1. SF12 / BW125 kHz.
+    pub const LONGSLOW: Self = Self {
+        spreading_factor: 12,
+        bandwidth_hz: 125_000,
+        low_data_rate_optimize: true,
+        ..Self::LONGFAST
+    };
+
+    /// MediumSlow — preset 3. SF10 / BW250 kHz.
+    pub const MEDIUMSLOW: Self = Self { spreading_factor: 10, ..Self::LONGFAST };
+
+    /// MediumFast — preset 4. SF9 / BW250 kHz.
+    pub const MEDIUMFAST: Self = Self { spreading_factor: 9, ..Self::LONGFAST };
+
+    /// ShortSlow — preset 5. SF8 / BW250 kHz.
+    pub const SHORTSLOW: Self = Self { spreading_factor: 8, ..Self::LONGFAST };
+
+    /// ShortFast — preset 6. SF7 / BW250 kHz.
+    pub const SHORTFAST: Self = Self { spreading_factor: 7, ..Self::LONGFAST };
+
+    /// LongMod — preset 7. SF11 / BW125 kHz. Narrow enough that the symbol time
+    /// reaches 16.384 ms, so low-data-rate optimisation is required.
+    pub const LONGMOD: Self = Self {
+        bandwidth_hz: 125_000,
+        low_data_rate_optimize: true,
+        ..Self::LONGFAST
+    };
+
+    /// ShortTurbo — preset 8. SF7 / BW500 kHz. The widest bandwidth in use.
+    pub const SHORTTURBO: Self =
+        Self { spreading_factor: 7, bandwidth_hz: 500_000, ..Self::LONGFAST };
+
+    /// LongTurbo — preset 9. SF11 / BW500 kHz.
+    pub const LONGTURBO: Self = Self { bandwidth_hz: 500_000, ..Self::LONGFAST };
 
     /// Symbol time, in microseconds: `2^SF / BW`.
     ///

@@ -364,7 +364,9 @@ A staticlib was built for `thumbv8m.main-none-eabihf` — the RP2350's Cortex-M3
 
 ## What stays open
 
-**The physical layer — mostly closed, and by exactly the route predicted.** The claim here was that the sync word and per-preset modulation parameters could not be established without real silicon. That held, and silicon settled them: the sync word is resolved (`0x0740=0x24`, `0x0741=0xB4`, confirmed by decoding real traffic) and LongFast's parameters with it. **Sixteen presets remain** — bounded, mechanical, same method.
+**The physical layer — closed, and by exactly the route predicted.** The claim here was that the sync word and per-preset modulation parameters could not be established without real silicon. That held, and silicon settled them: the sync word is resolved (`0x0740=0x24`, `0x0741=0xB4`, confirmed by decoding real traffic), and **all nine valid presets are measured** — SF and BW read back from a stock node, coding rate settled by timing at 4/5 across every one.
+
+This paragraph said "**Sixteen presets remain**" until 2026-08-17, having been written before the sweep and left standing after it. There were never sixteen: presets 2 and 10–16 report `name=Invalid` and silently serve LongFast parameters, so a node set out of range does not fail — it quietly runs LongFast. The nine are carried as named constants in `meshtastic/core/airtime.rs`, each tied to its fixture row by a test so the constants cannot drift from the measurement that justifies them.
 
 **The interoperability gate — ALL FOUR, on hardware.** A physical, unmodified device must show our node, render our text, accept a direct message, and list us in a route trace. As of 2026-08-16 a stock Heltec on `2.7.26.54e0d8d` shows us as a peer, renders our text, answers an addressed traceroute, **and accepts a PKI direct message** — decrypting it with a shared secret it derived independently and matching ours byte for byte. The last of these was L6's open half and closed on 2026-08-16; see that section for the log.
 
