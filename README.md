@@ -136,7 +136,7 @@ The line is **facts versus expression**. Field numbers, wire layouts and transcr
 
 **When tempted, stop.** If a piece of work seems to need a routing decision or a state machine copied from upstream, that means the specification is under-documented. The correct response is to write down our own design and cite the wire behaviour it implements — never to read their source.
 
-Enforced by `tools/check_cleanroom.sh`, which refuses vendored `.proto`, generated `*.pb.*`, GPL licence headers and RadioLib references, and is red-tested against all three.
+Enforced by `tools/check_cleanroom.sh`, which refuses vendored `.proto`, generated `*.pb.*`, GPL licence headers and RadioLib references, and is red-tested against all three. (RadioLib is **MIT**, not GPL — it is refused for independence of implementation, not licence contamination. Documents here said GPL-3.0 until 2026-08-17; that was simply wrong about somebody else's project.)
 
 ### The four sources, and nothing else
 

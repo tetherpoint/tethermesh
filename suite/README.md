@@ -135,8 +135,10 @@ and it is not a warranty: see `LICENSE` §§6-8.
 ### On the reference implementation
 
 `tethermesh` is a clean-room implementation. It derives nothing from the
-Meshtastic firmware, its clients, its protobuf schemas, or from RadioLib — all
-GPL-3.0 — and `tools/check_cleanroom.sh` enforces that on every run. An
+Meshtastic firmware, its clients and its protobuf schemas — all GPL-3.0 — and
+also nothing from RadioLib, which is **MIT** and kept out for a different
+reason: independence of implementation, not licence contamination.
+`tools/check_cleanroom.sh` enforces both on every run. An
 implementer adopting this suite inherits no copyleft obligation from us. See
 `NOTICE`.
 

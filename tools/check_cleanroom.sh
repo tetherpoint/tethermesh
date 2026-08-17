@@ -44,7 +44,7 @@
 #   - running a code generator over their .proto — the output is derived from
 #     a GPL input. This is why PLAN.md specifies a hand-written ~300-line
 #     protobuf codec instead of nanopb: licence-safe as well as dependency-light.
-#   - linking RadioLib or any other GPL component
+#   - linking RadioLib, or any GPL component
 #
 # THE RULE WHEN TEMPTED: if you find yourself wanting to copy a routing
 # decision or a state machine, STOP. That means the spec is under-documented,
@@ -165,7 +165,7 @@ while IFS= read -r f; do
         fail "$f — carries a GPL licence header."
     fi
     if [ "$may_name_it" -eq 0 ] && grep -qiE "\bRadioLib\b" "$p" 2>/dev/null; then
-        fail "$f — references RadioLib (GPL-3.0). This stack carries no radio
+        fail "$f — references RadioLib. This stack carries no radio
               driver; if one is added it must be independently written."
     fi
 done <<< "$files"
