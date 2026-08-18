@@ -399,12 +399,15 @@ pub unsafe extern "C" fn tm_key_from_bytes(psk: *const u8, len: usize, out: *mut
 /// is absent on the wire, and folding the empty string yields `0x02` where real
 /// traffic shows `0x08`. Passing "LongFast" is correct for the default channel.
 #[no_mangle]
-pub unsafe extern "C" fn tm_channel_hash(name: *const u8, name_len: usize, key: *const TmKey) -> u8 { unsafe {
+pub unsafe extern "C" fn tm_channel_hash(name: *const u8, name_len: usize, key: *const TmKey) -> u8 {
     if name.is_null() || key.is_null() {
         return 0;
     }
-    channel::channel_hash(slice::from_raw_parts(name, name_len), unsafe { &(*key).bytes })
-}}
+    channel::channel_hash(
+        unsafe { slice::from_raw_parts(name, name_len) },
+        unsafe { &(*key).bytes },
+    )
+}
 
 // ── Context ─────────────────────────────────────────────────────────────────
 

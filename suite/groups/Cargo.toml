@@ -30,3 +30,6 @@ tethermesh = { path = "../.." }
 # requires a bundle to be "a separate crate the core does not depend on", so
 # that taking the protocol library never means taking the extensions with it.
 tethermesh = { path = "../.." }
+
+[lints]
+workspace = true

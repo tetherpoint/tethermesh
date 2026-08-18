@@ -185,13 +185,55 @@ for p in m.get("packages", []):
         [ -n "$pkg" ] || continue
         objdir="$ROOT/target/objcheck/$pkg"
         rm -rf "$objdir"; mkdir -p "$objdir"
+        # Compiler output is KEPT, not discarded. This build used to send both
+        # streams to /dev/null, so the gate inspected the object while throwing
+        # away everything the compiler said while producing it -- and an
+        # `unused_unsafe` sat in tm_channel_hash unnoticed because of it.
+        #
+        # That warning is not cosmetic here. An unnecessary `unsafe` block is a
+        # false claim that an obligation was discharged, which is the exact
+        # signature of a narrowing done wrong -- and narrowing whole-body blocks
+        # to targeted operations is how this crate keeps its FFI honest. A gate
+        # that reads the object but not the diagnostics misses that whole class.
+        # NO `-o`. It made rustc emit two warnings of its own about the flag
+        # combination ("output file name will be adapted", "ignoring --out-dir
+        # due to -o"), which would keep this check permanently red -- and
+        # filtering two known strings would have been a gate weakened to make
+        # something pass. Without it the object lands in cargo's own out-dir
+        # under a hashed name, which the glob below already handles; the stale
+        # sweep is what keeps a previous build's hash from being inspected
+        # instead of this one's.
+        # NO `-o`. It made rustc emit two warnings of its own about the flag
+        # combination ("output file name will be adapted", "ignoring --out-dir
+        # due to -o"), which would keep the diagnostics check below permanently
+        # red -- and filtering two known strings would have been a gate weakened
+        # to make something pass. Without it the object lands in cargo's own
+        # out-dir under a hashed name, which the glob below handles.
+        #
+        # A DEDICATED TARGET DIR, wiped each run, because the object has to be
+        # there. Sharing the main target/ meant a warm cache made the crate
+        # fresh, rustc never re-ran, and no object was emitted at all -- so this
+        # check would have started reporting "object emit produced nothing"
+        # instead of inspecting anything.
+        buildlog="$objdir/build.log"
         if ( cd "$ROOT" && CARGO_PROFILE_RELEASE_LTO=false \
-                cargo rustc --release -p "$pkg" --lib -- --emit=obj -o "$objdir/tm.o" ) >/dev/null 2>&1; then
+                CARGO_TARGET_DIR="$objdir" \
+                cargo rustc --release -p "$pkg" --lib -- --emit=obj ) >"$buildlog" 2>&1; then
+            # Matched on the PER-CRATE SUMMARY line rustc emits last
+            # ("warning: `tmffi` (lib) generated 3 warnings"), not on every
+            # `^warning`. A dependency's warnings are not ours to fix and would
+            # make this hostage to an upstream bump -- and they appear only on a
+            # cold cache, so a broad grep would be flaky as well as wrong.
+            if grep -qE "^warning: .$pkg. \\(lib\\) generated" "$buildlog"; then
+                printf '\033[31m[check] %s: compiler warnings\033[0m\n' "$pkg" >&2
+                grep -E '^warning' -A6 "$buildlog" >&2
+                rc_obj=1
+            fi
         # A glob, not `ls | head -1`: this script defines its own `head`
         # function for section headings, so piping into head calls THAT,
         # discards stdin and kills the pipeline with SIGPIPE under pipefail.
             obj=""
-            for f in "$objdir"/*.o; do
+            for f in "$objdir"/release/deps/"$pkg"-*.o; do
                 [ -f "$f" ] || continue
                 obj="$f"; break
             done

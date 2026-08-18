@@ -26,3 +26,6 @@ tethermesh = { path = ".." }
 # is checked rather than assumed -- the artifact still links panic-free into a
 # Cortex-M33 image, which is the property that matters and the only one this
 # crate exists to preserve.
+
+[lints]
+workspace = true

@@ -122,8 +122,15 @@ license = "Apache-2.0"
 # for downstream consumers too. That was verified, not assumed.
 fiat-crypto = { path = "third_party/fiat-crypto/fiat-rust", default-features = false }
 
-[lints.rust]
+# `cfg(kani)` is set by the model checker, not by cargo, so cargo cannot know it
+# is legitimate. Declared at the WORKSPACE so every member inherits it: ffi/ and
+# suite/groups/ each carried three of these warnings, and warning noise is what
+# let a real `unused_unsafe` sit unnoticed in tm_channel_hash.
+[workspace.lints.rust]
 unexpected_cfgs = { level = "allow", check-cfg = ['cfg(kani)'] }
+
+[lints]
+workspace = true
 
 [dev-dependencies]
 # The reference X25519 for differential testing ONLY. BSD-3-Clause, audited,
