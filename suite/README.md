@@ -15,7 +15,20 @@ What is left is what this repository can hold honestly: extensions that are **me
 
 The dependency runs one way: `tethermesh_groups` depends on the core, and the core depends on nothing here. So a consumer taking the protocol library gets exactly that, and pays for groups only by asking for it — `cargo build -p tethermesh` does not compile a line of it. An extension that the core depended on would be a parallel feature set wearing a crate boundary; this is the opposite arrangement.
 
-A future bundle qualifies on the same two tests: **no hardware source, and the core must not depend on it.**
+### The third test, and the one that gives this set a point
+
+**A bundle here is a candidate for upstream adoption.** These are features that sit *above* Meshtastic and extend the protocol itself — not features that serve one product. The distinction decides membership more cleanly than the other two:
+
+- `groups` addresses a gap upstream documents in its own words. There is no per-member revocation; the channel URL *is* the key exchange; membership is whoever holds the key. If Meshtastic ever grows managed membership, this is the shape that argument takes, and it is written so it can be taken.
+- Location and ranging served a product. They needed a GNSS receiver or ranging silicon, and no amount of specification changes that.
+
+This is why the licence and the patent pledge are what they are. Apache-2.0, and an unconditional promise not to assert patents against an implementation — **including upstream's**. A set of extensions nobody may adopt is a fork with better manners; the pledge exists so these can be proposals instead.
+
+So a future bundle qualifies on three tests:
+
+1. **No hardware source.** Message formats and state, testable on any machine.
+2. **A separate crate the core does not depend on.** Taking the protocol library never means taking the extensions.
+3. **Plausibly adoptable upstream.** It extends Meshtastic. If it only makes sense for one product, it belongs with that product.
 
 This repository otherwise tracks Meshtastic. New work here should be **aligning with upstream protocol features**, not growing a parallel feature set.
 

@@ -11,7 +11,7 @@ That makes this document a gate, not a preference. It is easier to keep somethin
 
 > **If it is not part of a Meshtastic-compatible protocol implementation or its extensions, it does not belong here.**
 
-And narrower than that reads on its own: this repository **tracks Meshtastic**. Ongoing work here is aligning with upstream protocol features, not growing a parallel feature set. An extension qualifies only if it is pure protocol — message formats and state, no hardware source — which is what removing location and ranging on 2026-08-17 settled in practice.
+And narrower than that reads on its own: this repository **tracks Meshtastic**, and holds extensions that sit **above** it — protocol features that could plausibly be adopted upstream one day. Ongoing work is aligning with upstream, not growing a product's feature set under a protocol library's name. An extension qualifies only if it is pure protocol — message formats and state, no hardware source — which is what removing location and ranging on 2026-08-17 settled in practice.
 
 Everything in this repository should make sense to someone who has never heard of the products that consume it, and should be usable by them.
 
@@ -19,7 +19,7 @@ Everything in this repository should make sense to someone who has never heard o
 
 - The Meshtastic on-air protocol: frame header, channel hashing, channel and PKI cryptography, the protobuf codec.
 - Routing behaviour needed for compatibility: managed flooding, duplicate suppression, hop-limit handling, duty-cycle accounting.
-- The extension suite and its specification — the wire format, its cryptographic construction, and its rationale. **Bundles that need a hardware source do not qualify**; location and ranging were specified here and moved out on 2026-08-17 for exactly that reason. A bundle must be message formats and state, testable with no hardware — **and it must be a separate crate the core does not depend on**, so that taking the protocol library never means taking the extensions with it. `groups` satisfies both and stays.
+- The extension suite and its specification — the wire format, its cryptographic construction, and its rationale. **Bundles that need a hardware source do not qualify**; location and ranging were specified here and moved out on 2026-08-17 for exactly that reason. A bundle must be message formats and state, testable with no hardware — **it must be a separate crate the core does not depend on**, so that taking the protocol library never means taking the extensions with it; **and it must be plausibly adoptable upstream** — a feature that sits above Meshtastic and extends the protocol, rather than one serving a single product. `groups` satisfies all three and stays: upstream documents the gap it fills in its own words, and the Apache-2.0 licence and patent pledge exist so the answer can be adopted rather than merely admired.
 - `WIRE_REFERENCE.md`: on-air facts with sources, verified separated from unverified.
 - Host-side tests and on-air capture fixtures.
 - Tooling that operates on the above without hardware — for example the clean-room checker.
