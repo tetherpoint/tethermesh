@@ -88,6 +88,22 @@ MANIFEST="$OUT/MANIFEST.txt"
     echo "Each .a is the protocol library with a C API. Link it from a C build;"
     echo "no Rust toolchain is required. The header is the same for every target."
     echo
+    # DISTRIBUTION.md requires this caveat in THREE places -- the release notes,
+    # the archive, and the generated header -- and says why: "the person who
+    # hits the problem is unlikely to have read this". It was in the header and
+    # missing here until 2026-08-18, which is exactly the reader it was written
+    # for: someone holding the artifact and not the repository.
+    echo "THE PREBUILT LIBRARIES ARE A CONVENIENCE ONLY."
+    echo "IF YOU ENCOUNTER ABI BOUNDARY ISSUES, REBUILD FROM SOURCE."
+    echo
+    echo "That is not a disclaimer of quality. Float ABI variants, toolchain"
+    echo "versions, calling-convention flags and linker expectations differ"
+    echo "between build environments in ways a published artifact cannot"
+    echo "anticipate. Rebuilding resolves them definitively, and the source is"
+    echo "the commit named above -- every archive here rebuilds bit-identically"
+    echo "from it, which is what makes \"build your own and compare\" a real"
+    echo "option rather than a slogan."
+    echo
     echo "THE FILENAME CARRIES THE TARGET TRIPLE, NOT A CHIP, and that is"
     echo "deliberate: the triple is what decides whether the archive links. One"
     echo "soft-float Cortex-M33 archive serves every Cortex-M33 soft-float part,"
