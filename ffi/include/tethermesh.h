@@ -62,12 +62,12 @@ extern "C" {
 
 /* Bumped on any change to a signature, struct layout, or enum value below.
  * Compare against tm_abi_version() at startup. */
-#define TM_ABI_VERSION 3u
+#define TM_ABI_VERSION 4u
 
 uint32_t tm_abi_version(void);
 
 /* Pass this header's own sizeofs. See the note at the top of this file. */
-int32_t tm_check_layout(size_t sizeof_rx, size_t sizeof_key);
+int32_t tm_check_layout(size_t sizeof_rx, size_t sizeof_key, size_t sizeof_user);
 
 /* ── Channel keys ──────────────────────────────────────────────────────────
  *
@@ -292,6 +292,73 @@ int32_t tm_ack_encode(uint32_t from, uint32_t to, uint32_t id,
                       uint32_t request_id, uint8_t hop_limit,
                       uint8_t channel_hash, const tm_key_t *key,
                       uint8_t *out, size_t out_cap);
+
+/* ── Identity: publishing a public key ─────────────────────────────────────
+ *
+ * A node that publishes no public key CANNOT BE SENT A DIRECT MESSAGE AT ALL.
+ * The sender refuses to fall back to channel encryption for a destination whose
+ * key it does not hold, and NAKs the packet locally -- so the failure never
+ * reaches the air, and presents as a dead link rather than as a missing key. */
+
+/* Derive the X25519 public key from a 32-byte private key.
+ *
+ * private_len must be 32; any other length is an error, never a truncation.
+ * The scalar is clamped internally per RFC 7748, so you may store the raw 32
+ * bytes you drew. Clamping is idempotent; NOT clamping computes a different
+ * function rather than a weaker one.
+ *
+ * THIS DERIVES. IT DOES NOT GENERATE. Where the private key comes from and
+ * where it is kept are yours to decide: a portable no_std library has no
+ * entropy source and no storage, and a tm_keygen() quietly using a weak one
+ * would put a security-critical choice behind an interface that cannot honour
+ * it. Draw it from a hardware RNG you have checked, and persist it -- an
+ * identity that changes every boot is a new node to every peer that saw the
+ * old one. */
+int32_t tm_x25519_public(const uint8_t *private_key, size_t private_len,
+                         uint8_t *out, size_t out_cap);
+
+/* What a node publishes about itself.
+ *
+ * Pointer/length pairs because every field is variable-length on the wire; a
+ * fixed array would force this header to invent a maximum the protocol does not
+ * define. A NULL pointer or zero length OMITS the field, which is what proto3
+ * does with a default.
+ *
+ * macaddr is the trap. It has been deprecated since 2.1.x and firmware 2.7.26
+ * still puts it on the wire as six zero bytes in every User in the corpus, so a
+ * User that drops it re-encodes SHORTER than the reference produces. Pass the
+ * six zero bytes. Deprecated in the schema is not absent from the wire. */
+typedef struct {
+    const uint8_t *id;            /* conventionally '!' + node number in hex */
+    size_t         id_len;
+    const uint8_t *long_name;
+    size_t         long_name_len;
+    const uint8_t *short_name;    /* conventionally four characters */
+    size_t         short_name_len;
+    const uint8_t *public_key;    /* 32 bytes from tm_x25519_public() */
+    size_t         public_key_len;
+    const uint8_t *macaddr;       /* six bytes; read the note above */
+    size_t         macaddr_len;
+    uint32_t       hw_model;
+    uint32_t       role;
+} tm_user_t;
+
+/* Build and encrypt a NODEINFO_APP frame announcing this node. Returns length.
+ *
+ * The on-air payload for this port is a BARE User -- not a NodeInfo wrapping
+ * one -- which is what the corpus shows and what a stock node parses.
+ *
+ * Broadcast with to = 0xFFFFFFFF. When answering another node's request,
+ * address it to the asker and leave want_response clear, so two nodes cannot
+ * ask each other in a loop.
+ *
+ * relay_node is stamped with the low byte of `from`, which is what an
+ * originating node does. */
+int32_t tm_nodeinfo_encode(uint32_t from, uint32_t to, uint32_t id,
+                           uint8_t hop_limit, uint8_t channel_hash,
+                           uint8_t want_response,
+                           const tm_key_t *key, const tm_user_t *user,
+                           uint8_t *out, size_t out_cap);
 
 #ifdef __cplusplus
 }

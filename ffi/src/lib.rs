@@ -11,22 +11,25 @@
 //! one. `tools/check_artifact_link.sh` in that repository proves the shape
 //! links panic-free into a real Cortex-M33 image.
 //!
-//! # Why the logic is NOT here
+//! # Where the tests are, and a claim that was wrong
 //!
-//! The same `#[panic_handler]` that makes this crate the right place for the
-//! ABI makes it impossible to test: `cargo test` links std and brings a handler
-//! of its own, so this crate cannot host a `#[test]` at all. For a while that
-//! meant the seam between two well-covered repositories had no tests
-//! whatsoever.
+//! This section used to say the crate "cannot host a `#[test]` at all", because
+//! `cargo test` links std and brings a `#[panic_handler]` of its own — and that
+//! decisions therefore lived in a second `tmffi_core` rlib. **The premise was
+//! false.** `#![cfg_attr(not(test), no_std)]` with `#[cfg(not(test))]` on the
+//! handler lets a staticlib host its own tests directly; the split was
+//! unnecessary and was merged back on 2026-08-17. It is recorded rather than
+//! quietly overwritten because the reasoning is worth seeing wrong: the shape
+//! was asserted around instead of being tried.
 //!
-//! So decisions live in `tmffi_core`, an rlib, where they are tested: the
-//! retry-policy cap that enforces the shared-airtime rule, acknowledgement
-//! recognition, error mapping, and the status codes themselves. What stays here
-//! is what a test cannot reach — null checks, `slice::from_raw_parts`, raw
-//! writes, and the `extern "C"` surface.
+//! So the decisions are tested here, in this crate: the retry-policy cap that
+//! enforces the shared-airtime rule, acknowledgement recognition, error
+//! mapping, the status codes themselves, and the identity surface below —
+//! checked against RFC 7748's published vector rather than against ourselves.
 //!
-//! **That boundary is honest about what it buys.** The pointer handling is
-//! still untested and no arrangement of crates would change it: a null check is
+//! **What is still untested is honest about itself.** The pointer handling —
+//! null checks, `slice::from_raw_parts`, the raw writes — is untestable in
+//! isolation and no arrangement of crates would change that: a null check is
 //! only meaningful against a caller that passes null, which is a property of
 //! the C side. It remains covered by the artifact gate on the linked image.
 //!
@@ -92,12 +95,13 @@ use core::slice;
 use tethermesh::channel;
 use tethermesh::delivery::{self, Error as DeliveryError, Outbox, RetryPolicy};
 use tethermesh::frame;
-use tethermesh::message::Data;
+use tethermesh::message::{Data, PortNum, User};
 use tethermesh::header::Header;
 use tethermesh::history::PacketHistory;
 use tethermesh::airtime::DutyCycle;
 use tethermesh::history::Seen;
 use tethermesh::routing::{self, ContentionWindow, Observed, Relay, Role};
+use tethermesh::x25519;
 
 // Not under `test` OR `kani`: both link a harness that brings its own handler,
 // and only one may exist per program. `cargo kani --workspace` failed with
@@ -121,7 +125,7 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
 /// Checked at init by the C side. A stale header against a rebuilt library is
 /// otherwise silent and produces symptoms attributable to anything at all;
 /// four bytes to make it impossible is a trade worth taking every time.
-pub const TM_ABI_VERSION: u32 = 3;
+pub const TM_ABI_VERSION: u32 = 4;
 
 #[no_mangle]
 pub extern "C" fn tm_abi_version() -> u32 {
@@ -141,11 +145,18 @@ pub extern "C" fn tm_abi_version() -> u32 {
 /// and not the rare one (two fields swapped at the same width). Stated plainly
 /// so nobody reads it as more than it is.
 #[no_mangle]
-pub extern "C" fn tm_check_layout(sizeof_rx: usize, sizeof_key: usize) -> i32 {
+pub extern "C" fn tm_check_layout(
+    sizeof_rx: usize,
+    sizeof_key: usize,
+    sizeof_user: usize,
+) -> i32 {
     if sizeof_rx != core::mem::size_of::<TmRx>() {
         return TM_E_ABI;
     }
     if sizeof_key != core::mem::size_of::<TmKey>() {
+        return TM_E_ABI;
+    }
+    if sizeof_user != core::mem::size_of::<TmUser>() {
         return TM_E_ABI;
     }
     TM_OK
@@ -236,133 +247,8 @@ pub fn map_delivery_error(e: DeliveryError) -> i32 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use tethermesh::delivery::acknowledgement;
-    use tethermesh::message::PortNum;
+mod tests;
 
-    #[test]
-    fn zero_zero_takes_the_measured_ceiling() {
-        let p = resolve_retry_policy(0, 0).expect("(0,0) must resolve");
-        assert_eq!(p, RetryPolicy::MEASURED_CEILING);
-        assert_eq!(p.max_attempts, 3);
-        assert_eq!(p.interval_us, 7_000_000);
-    }
-
-    /// The refusal that enforces the shared-airtime rule.
-    #[test]
-    fn a_policy_more_aggressive_than_the_ceiling_is_refused_not_clamped() {
-        let ceiling = RetryPolicy::MEASURED_CEILING;
-
-        // More attempts than measured.
-        assert_eq!(
-            resolve_retry_policy(200, ceiling.interval_us),
-            Err(TM_E_TOO_AGGRESSIVE),
-            "200 attempts must be refused"
-        );
-        assert_eq!(
-            resolve_retry_policy(ceiling.max_attempts + 1, ceiling.interval_us),
-            Err(TM_E_TOO_AGGRESSIVE),
-            "one more than the ceiling must be refused"
-        );
-
-        // Same attempts, shorter gap -- the subtler abuse, and the one more
-        // likely to be written by someone trying to be responsive.
-        assert_eq!(
-            resolve_retry_policy(ceiling.max_attempts, ceiling.interval_us - 1),
-            Err(TM_E_TOO_AGGRESSIVE),
-            "a shorter interval is more aggressive and must be refused"
-        );
-        assert_eq!(
-            resolve_retry_policy(2, 100_000),
-            Err(TM_E_TOO_AGGRESSIVE),
-            "100 ms between retries must be refused"
-        );
-
-        // And it must REFUSE, not silently hand back the ceiling. A clamp would
-        // leave the caller believing it configured something it did not.
-        assert!(
-            resolve_retry_policy(200, 1).is_err(),
-            "clamping instead of refusing is the failure this guards"
-        );
-    }
-
-    #[test]
-    fn less_aggressive_than_the_ceiling_is_allowed() {
-        let ceiling = RetryPolicy::MEASURED_CEILING;
-        assert!(resolve_retry_policy(2, ceiling.interval_us).is_ok(), "fewer attempts");
-        assert!(resolve_retry_policy(3, 30_000_000).is_ok(), "a longer gap");
-        assert!(
-            resolve_retry_policy(1, 0).is_ok(),
-            "one attempt never retransmits, so no interval can make it aggressive"
-        );
-        assert!(resolve_retry_policy(1, 1).is_ok(), "same, with a nonsense interval");
-    }
-
-    #[test]
-    fn zero_attempts_with_an_interval_is_a_malformed_request() {
-        assert_eq!(
-            resolve_retry_policy(0, 7_000_000),
-            Err(TM_E_ARG),
-            "zero attempts is not 'take the default' unless the interval is zero too"
-        );
-    }
-
-    #[test]
-    fn an_acknowledgement_is_recognised_and_its_status_reported() {
-        let mut buf = [0u8; 64];
-        let n = acknowledgement(0x1234_5678).encode(&mut buf).unwrap();
-        let (req, status) = classify_ack(&buf[..n]).expect("must be recognised");
-        assert_eq!(req, 0x1234_5678);
-        assert_eq!(status, 0, "an acceptance");
-    }
-
-    /// A NAK is still an answer, and must be reported rather than swallowed.
-    #[test]
-    fn a_rejection_is_recognised_too() {
-        let nak = Data {
-            portnum: PortNum::ROUTING_APP.0,
-            payload: &[0x18, 0x06],
-            request_id: 0x0bad_c0de,
-            ..Data::default()
-        };
-        let mut buf = [0u8; 64];
-        let n = nak.encode(&mut buf).unwrap();
-        let (req, status) = classify_ack(&buf[..n]).expect("a NAK is still an answer");
-        assert_eq!(req, 0x0bad_c0de);
-        assert_eq!(status, 6, "the measured rejection value, reported not acted on");
-    }
-
-    #[test]
-    fn things_that_are_not_acknowledgements_are_rejected() {
-        // Wrong portnum.
-        let text = Data {
-            portnum: PortNum::TEXT_MESSAGE_APP.0,
-            request_id: 0x1234_5678,
-            ..Data::default()
-        };
-        let mut buf = [0u8; 64];
-        let n = text.encode(&mut buf).unwrap();
-        assert!(classify_ack(&buf[..n]).is_none(), "portnum must match");
-
-        // Right portnum, no request_id -- refers to nothing.
-        let bare = Data { portnum: PortNum::ROUTING_APP.0, ..Data::default() };
-        let n = bare.encode(&mut buf).unwrap();
-        assert!(classify_ack(&buf[..n]).is_none(), "request_id 0 refers to nothing");
-
-        // Not protobuf at all. Must not panic; this is attacker-reachable.
-        assert!(classify_ack(&[0xff, 0xff, 0xff, 0xff]).is_none());
-        assert!(classify_ack(&[]).is_none(), "empty is not an acknowledgement");
-    }
-
-    #[test]
-    fn a_full_outbox_and_a_bad_frame_map_to_different_codes() {
-        assert_eq!(map_delivery_error(DeliveryError::Full), TM_E_SHORT);
-        assert_eq!(map_delivery_error(DeliveryError::BadFrame), TM_E_ARG);
-        assert_ne!(map_delivery_error(DeliveryError::Full), TM_OK, "never success");
-        assert_ne!(map_delivery_error(DeliveryError::BadFrame), TM_OK);
-    }
-}
 
 
 // ── Keys ────────────────────────────────────────────────────────────────────
@@ -387,8 +273,20 @@ const DEFAULT_PSK: [u8; 16] = [
 /// last byte. `0` means no crypto and is rejected here rather than silently
 /// producing a key, because a caller asking for a key when there is none is
 /// making a mistake worth surfacing.
+/// # Safety
+///
+/// `out` must be null or a valid, aligned, writable `TmKey`.
+///
+/// **This is `unsafe` because it writes through `out`, and it was not always.**
+/// It was declared safe while dereferencing a raw pointer, which is unsound:
+/// the null check covers null and nothing covers a dangling or misaligned
+/// pointer, so a Rust caller could reach undefined behaviour with no `unsafe`
+/// at the call site. Every other pointer-taking function in this ABI was
+/// already `unsafe`; this one was the exception. **The C ABI is unchanged** —
+/// `unsafe` is a Rust-side obligation and does not affect the symbol, the
+/// calling convention or the header — so no version bump is owed for it.
 #[no_mangle]
-pub extern "C" fn tm_key_from_index(index: u8, out: *mut TmKey) -> i32 {
+pub unsafe extern "C" fn tm_key_from_index(index: u8, out: *mut TmKey) -> i32 { unsafe {
     if out.is_null() {
         return TM_E_ARG;
     }
@@ -396,15 +294,20 @@ pub extern "C" fn tm_key_from_index(index: u8, out: *mut TmKey) -> i32 {
         return TM_E_BAD_INDEX;
     }
     let mut k = DEFAULT_PSK;
-    // Wrapping, not `+`: bare arithmetic compiles to a panic path, and the crate
-    // rules forbid one reaching the image.
     // Index 15 of a [u8; 16] is a compile-time-known constant into a
     // fixed-size array: bounds are provable and no panic path is emitted.
-    // wrapping_add rather than `+` because bare arithmetic is not.
-    k[15] = k[15].wrapping_add(index - 1);
-    unsafe { (*out).bytes = k };
+    //
+    // BOTH operations are checked, not just the visible one. This line read
+    // `wrapping_add(index - 1)` with a comment explaining the `wrapping_add` --
+    // while the `index - 1` beside it was bare subtraction, which is exactly the
+    // panic path the comment claimed to have avoided. The range check above
+    // makes underflow unreachable in practice, and "unreachable in practice" is
+    // the argument this crate does not accept: the rule is that no panic path
+    // is emitted, and a proof by surrounding context is not that.
+    k[15] = k[15].wrapping_add(index.wrapping_sub(1));
+    (*out).bytes = k;
     TM_OK
-}
+}}
 
 /// Take an explicit key. 16 bytes is used as-is; 32 bytes is accepted because
 /// the protocol allows AES-256 channels, and its first 16 bytes are what this
@@ -838,8 +741,9 @@ pub unsafe extern "C" fn tm_outbox_init(
         return TM_E_ABI;
     }
 
-    // The decision lives in tmffi_core, where it is tested. This function keeps
-    // only what a test cannot reach: the null check and the raw write.
+    // The decision lives in resolve_retry_policy, where it is tested. This
+    // function keeps only what a test cannot reach: the null check and the raw
+    // write.
     let policy = match resolve_retry_policy(max_attempts, interval_us) {
         Ok(p) => p,
         Err(code) => return code,
@@ -1069,6 +973,196 @@ pub unsafe extern "C" fn tm_ack_encode(
     let Some(body) = plain.get(..plain_len) else {
         return TM_E_ARG;
     };
+    match frame::encode(&header, body, &(*key).bytes, 0, dst) {
+        Ok(n) => match i32::try_from(n) {
+            Ok(v) => v,
+            Err(_) => TM_E_SHORT,
+        },
+        Err(_) => TM_E_ARG,
+    }
+}}
+
+// ── Identity: publishing a public key ───────────────────────────────────────
+
+/// Derive the X25519 public key a peer needs in order to address this node.
+///
+/// **A node that publishes no public key cannot be sent a direct message at
+/// all.** The sender refuses to fall back to channel encryption for a
+/// destination whose key it does not hold, and NAKs the packet locally — so
+/// the failure never reaches the air and presents as a dead link rather than
+/// as a missing key. `tests/captures/pki_dm_record.json` records that
+/// behaviour observed from the far side.
+///
+/// `private_len` must be 32. The scalar is clamped internally per RFC 7748, so
+/// a caller may store the raw 32 bytes it drew: clamping is idempotent, and
+/// *not* clamping computes a different function rather than a weaker one.
+///
+/// # This derives. It does not generate.
+///
+/// Where the private key comes from, and where it is kept, is the caller's
+/// decision and deliberately outside this library. A portable `no_std` crate
+/// has no entropy source and no storage, and offering a `tm_keygen` that
+/// quietly used a weak one would put a security-critical choice behind an
+/// interface that cannot honour it. [`crate::TmUser::public_key`] is where the
+/// result belongs; `backend::SecretKey::Slot` is the seam for a private key
+/// that never becomes addressable at all.
+#[no_mangle]
+pub unsafe extern "C" fn tm_x25519_public(
+    private_key: *const u8,
+    private_len: usize,
+    out: *mut u8,
+    out_cap: usize,
+) -> i32 { unsafe {
+    if private_key.is_null() || out.is_null() {
+        return TM_E_ARG;
+    }
+    if private_len != x25519::KEY_LEN {
+        return TM_E_BAD_KEY_LEN;
+    }
+    if out_cap < x25519::KEY_LEN {
+        return TM_E_SHORT;
+    }
+    let src = slice::from_raw_parts(private_key, private_len);
+    let mut scalar = [0u8; x25519::KEY_LEN];
+    // zip, never copy_from_slice: that call compiles to a length-mismatch panic
+    // path, and check_rust_rules.sh reads the built object for exactly that
+    // symbol. It has caught one here before.
+    for (d, s) in scalar.iter_mut().zip(src.iter()) {
+        *d = *s;
+    }
+    let public = x25519::public_key(&scalar);
+    let dst = slice::from_raw_parts_mut(out, out_cap);
+    for (d, s) in dst.iter_mut().zip(public.iter()) {
+        *d = *s;
+    }
+    TM_OK
+}}
+
+/// What a node publishes about itself: the fields of a `User`.
+///
+/// Pointer/length pairs rather than fixed arrays, because every one of these is
+/// variable-length on the wire and a fixed array would force this header to
+/// invent a maximum the protocol does not define.
+///
+/// A null pointer or a zero length omits the field, which is what proto3 does
+/// with a default. **`macaddr` is the trap.** It has been deprecated since
+/// 2.1.x and firmware 2.7.26 still puts it on the wire as six zero bytes in
+/// every `User` in the corpus, so a `User` that drops it re-encodes shorter
+/// than the reference produced. Pass the six zero bytes to match what is
+/// actually emitted; deprecated in the schema is not absent from the wire.
+#[repr(C)]
+pub struct TmUser {
+    /// Conventionally `!` followed by the node number in lowercase hex.
+    pub id: *const u8,
+    pub id_len: usize,
+    pub long_name: *const u8,
+    pub long_name_len: usize,
+    /// Conventionally four characters.
+    pub short_name: *const u8,
+    pub short_name_len: usize,
+    /// 32 bytes from [`tm_x25519_public`]. Omitted when absent, and a peer that
+    /// does not receive it cannot address this node by direct message.
+    pub public_key: *const u8,
+    pub public_key_len: usize,
+    /// Six bytes. See the note above before deciding to leave it out.
+    pub macaddr: *const u8,
+    pub macaddr_len: usize,
+    pub hw_model: u32,
+    pub role: u32,
+}
+
+/// Borrow a pointer/length pair, treating null or empty as an absent field.
+///
+/// # Safety
+///
+/// `p` must be valid for `len` bytes when both are non-trivial, and outlive the
+/// returned slice. That is the FFI trust edge `DISTRIBUTION.md` names: a caller
+/// passing a bad pointer or a wrong length cannot be validated here.
+unsafe fn borrow<'a>(p: *const u8, len: usize) -> &'a [u8] {
+    if p.is_null() || len == 0 {
+        return &[];
+    }
+    unsafe { slice::from_raw_parts(p, len) }
+}
+
+/// Build and encrypt a `NODEINFO_APP` frame announcing this node.
+///
+/// Returns the frame length, or negative on error. The on-air payload for this
+/// port is a bare `User` — not a `NodeInfo` wrapping one — which is the shape
+/// the corpus shows and the shape a stock node parses.
+///
+/// Broadcast it with `to = 0xFFFFFFFF`. When answering another node's request,
+/// address it to the asker instead and leave `want_response` clear, so that two
+/// nodes cannot ask each other in a loop.
+///
+/// `relay_node` is stamped with the low byte of `from`, which is what an
+/// originating node does: `WIRE_REFERENCE.md` records the field as a one-byte
+/// truncation of the relaying node's number, corroborated on captured traffic
+/// for three separate nodes.
+#[no_mangle]
+pub unsafe extern "C" fn tm_nodeinfo_encode(
+    from: u32,
+    to: u32,
+    id: u32,
+    hop_limit: u8,
+    channel_hash: u8,
+    want_response: u8,
+    key: *const TmKey,
+    user: *const TmUser,
+    out: *mut u8,
+    out_cap: usize,
+) -> i32 { unsafe {
+    if key.is_null() || user.is_null() || out.is_null() {
+        return TM_E_ARG;
+    }
+    let u = &*user;
+    let profile = User {
+        id: borrow(u.id, u.id_len),
+        long_name: borrow(u.long_name, u.long_name_len),
+        short_name: borrow(u.short_name, u.short_name_len),
+        macaddr: borrow(u.macaddr, u.macaddr_len),
+        public_key: borrow(u.public_key, u.public_key_len),
+        hw_model: u.hw_model,
+        role: u.role,
+        ..Default::default()
+    };
+    let mut ubuf = [0u8; 160];
+    let Ok(ulen) = profile.encode(&mut ubuf) else {
+        return TM_E_SHORT;
+    };
+    let Some(ubody) = ubuf.get(..ulen) else {
+        return TM_E_SHORT;
+    };
+
+    let data = Data {
+        portnum: PortNum::NODEINFO_APP.0,
+        payload: ubody,
+        want_response: want_response != 0,
+        ..Default::default()
+    };
+    let mut plain = [0u8; 240];
+    let Ok(plain_len) = data.encode(&mut plain) else {
+        return TM_E_SHORT;
+    };
+    // get(), not plain[..plain_len]: bare slice indexing compiles to a panic
+    // path, and one reaching a linked image is a crate-rule violation.
+    let Some(body) = plain.get(..plain_len) else {
+        return TM_E_SHORT;
+    };
+
+    let header = Header {
+        to,
+        from,
+        id,
+        hop_limit,
+        want_ack: false,
+        via_mqtt: false,
+        hop_start: hop_limit,
+        channel: channel_hash,
+        next_hop: 0,
+        relay_node: (from & 0xFF) as u8,
+    };
+    let dst = slice::from_raw_parts_mut(out, out_cap);
     match frame::encode(&header, body, &(*key).bytes, 0, dst) {
         Ok(n) => match i32::try_from(n) {
             Ok(v) => v,
