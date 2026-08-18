@@ -1,0 +1,40 @@
+{
+  "record": "position_our_encoder_to_their_decoder",
+  "date": "2026-08-18",
+  "resolves": "L3's last gap was Position, blocked because no capture contained one and writing it would have meant coding against a remembered schema with nothing to check the result against. This supplies the check.",
+  "method": "A Position was encoded by us from the published schema read as specification, handed to a stock node over its serial API, transmitted by its radio, and decoded by a SECOND stock node whose log reports the values it extracted. Evidence is that node's own output — black-box observation. No reference source was read, and the schema was never vendored or run through codegen.",
+  "addressed_not_broadcast": "Sent to one of our own nodes rather than broadcast. This bench is not RF isolated and a fabricated location on a public channel would write a false position for our node into strangers' databases.",
+  "what_we_encoded": {
+    "payload_hex": "0d15cd5b07154f9721c5182a25e0cda268",
+    "payload_len": 20,
+    "latitude_i": 123456789,
+    "longitude_i": -987654321,
+    "altitude": 42,
+    "time": 1755500000,
+    "field_numbers_and_wire_types": {
+      "latitude_i": "1, sfixed32 — 32-BIT, NOT varint",
+      "longitude_i": "2, sfixed32",
+      "altitude": "3, int32 varint",
+      "time": "4, fixed32"
+    },
+    "why_the_wire_types_matter": "varint is the obvious guess for an integer field and is WRONG here, exactly as it was for MeshPacket's from/to/id. An encoder built on the guess produces bytes a stock node cannot read."
+  },
+  "what_they_reported": {
+    "log": "Received position from=0x3369e764, id=0xef893aa0, portnum=3, payloadlen=20 / updatePosition REMOTE node=0x3369e764 time=1755500000 lat=123469824 lon=-987496448",
+    "portnum": 3,
+    "payloadlen": 20,
+    "time": 1755500000,
+    "latitude_i": 123469824,
+    "longitude_i": -987496448
+  },
+  "finding_position_is_quantised_on_receipt": "SUPERSEDED AND WRONG — kept so the correction is legible. Reading only the RECEIVER's log suggested the receiver reduced the precision. Capturing the frame off the air showed the opposite: the SENDER transmits a rounded coordinate and stamps precision_bits alongside. The receiver stores what it was given. Believing the first reading for an hour is what the off-air capture corrected, and it is the same lesson as W1 in the issue tracker: a log is one party's account, and the bytes are the event.",
+  "what_this_establishes": "Our Position ENCODER is correct: field numbers, the fixed-width lat/lon, and the varint altitude all parse in their decoder, which reports the payload length we produced and the exact time we sent.",
+  "what_this_does_NOT_establish": "Nothing further -- the decoder direction is now covered too. The full frame is in on_air_frames.json as the seventh entry, and tests/host_unit's the_reference_position_decodes_and_rebuilds_byte_for_byte decodes THEIR bytes and re-encodes them byte-for-byte. What remains unobserved is a Position from a node with a real GPS fix, which would carry the fields this one leaves absent.",
+  "provenance": {
+    "transmitter": "Heltec V3, stock Meshtastic 2.7.26.54e0d8d, driven over its serial API",
+    "receiver": "Heltec V3, stock, same build, unmodified",
+    "note": "Our own nodes, our own channel, synthetic coordinates. Publishable under TESTING.md."
+  },
+  "finding_the_sender_quantises_and_declares_it": "A stock node does NOT transmit the coordinate it was handed. Given latitude_i 123456789 = 0x075BCD15 it put 123469824 = 0x075C0000 on the air -- ROUNDED, not truncated, to eighteen trailing zero bits -- and added Position field 23, precision_bits = 13, which we never supplied. altitude and time went out exactly as given. So a Position on the air carries the sender's declared precision, and an encoder that omits precision_bits produces something shorter than the reference does.",
+  "their_encoding_hex": "0d00005c0715000024c5182a25e0cda268b8010d"
+}

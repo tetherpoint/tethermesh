@@ -122,6 +122,14 @@ A side effect worth recording: the oracle **loaded a `ChannelFile` we hand-encod
 
 **The default primary channel's stored PSK is the single byte `0x01`** — a short index, not a key, expanded at use (`Expand short PSK #1`) into a 128-bit key (`Use AES128 key!`). A 16-byte PSK supplied directly also selects AES128. This corroborates the asserted default-PSK value without independently proving it: given the now-verified hash function, the observed `0x08` requires `xor_fold(default_psk) == 0x02`, which the asserted value satisfies — necessary, not sufficient.
 
+**A `Position` sender quantises its own coordinates and declares by how much — MEASURED 2026-08-18.** Handed `latitude_i = 123456789` (`0x075BCD15`) over its serial API, a stock node put `123469824` (`0x075C0000`) on the air — **rounded, not truncated**, to eighteen trailing zero bits — and added `Position` field 23, `precision_bits = 13`, which was never supplied to it. `altitude` and `time` went out exactly as given.
+
+**It happens on TRANSMIT, and the receiver's log says otherwise.** Reading only the receiving node's `updatePosition` line suggests the receiver reduced the precision; capturing the frame off the air shows the sender did. The first reading was believed for an hour. A log is one party's account of an event; the bytes are the event.
+
+Consequences for an implementation: `latitude_i` and `longitude_i` are **`sfixed32`** and `time` is `fixed32` — 32-bit, not varint, the same trap as `MeshPacket`'s `from`/`to`/`id` — and an encoder that omits `precision_bits` produces a shorter payload than the reference does. Frame and both directions in `tests/captures/position_record.json` and `on_air_frames.json`.
+
+**`next_hop` is optional on an addressed frame.** A Routing reply carried the destination's low byte; a node-to-node `Position` carried zero while addressed. So the field is set when the sender has a next hop to name and zero when it does not — "addressed implies `next_hop`" was a property of one sample.
+
 **The hop fields' bit positions are pinned by a RELAYED frame, and nothing else could pin them.** `flags` bit 0-2 is `hop_limit` and bits 5-7 are `hop_start` — but every originated frame has the two EQUAL, so an all-originated corpus cannot tell them apart. Measured 2026-08-18: transposing the two fields in both the decoder and the encoder passed all 102 host tests, all 24 ABI tests and every Kani harness, because each gate was self-consistent and the sample could not distinguish them. A frame would have gone on the air with the fields swapped and nothing would have objected.
 
 `on_air_frames.json` now carries a relayed frame — `flags = 0x62`, `0b0110_0010`, `hop_limit = 2` of `hop_start = 3` — and the receiving stock node independently logged `HopLim=2 hopStart=3` for that packet id, so the assignment comes from their decoder rather than ours. The transposition now fails in both crates.

@@ -31,7 +31,7 @@ use tethermesh::crypto::{
 use tethermesh::frame;
 use tethermesh::header::{Header, HEADER_LEN};
 use tethermesh::history::{PacketHistory, Seen};
-use tethermesh::message::{ChannelSettings, Data, MeshPacket, NodeInfo, PortNum, User};
+use tethermesh::message::{ChannelSettings, Data, MeshPacket, NodeInfo, PortNum, Position, User};
 use tethermesh::packet_id::{NextId, PacketIdSource};
 use tethermesh::protobuf::{Error as ProtoError, Reader, Value, Writer};
 use tethermesh::routing::{
@@ -969,10 +969,14 @@ fn header_decodes_and_re_encodes_real_captured_frames() {
         // every entry — a property of that sample, not of frames. It broke the
         // moment a Routing reply addressed to us was added, which is the
         // corpus doing its job.
+        // Broadcast, or addressed to SOME node. Naming the destination was a
+        // property of the sample: it read `h.to == 0x7e57_0001` while every
+        // addressed frame here happened to be aimed at one synthetic node, and
+        // broke when a node-to-node Position was captured. Zero is the thing
+        // that is actually wrong -- it addresses nobody.
         assert!(
-            h.is_broadcast() || h.to == 0x7e57_0001,
-            "frame {i}: addressed to 0x{:08x}, which is neither broadcast nor us",
-            h.to
+            h.is_broadcast() || h.to != 0,
+            "frame {i}: addressed to 0x00000000, which reaches no node"
         );
         assert_eq!(h.from, 0x3369_e764, "frame {i}: sender does not match the transmitting board");
         assert_eq!(h.channel, 0x08, "frame {i}: channel hash should be LongFast's verified 0x08");
@@ -1020,10 +1024,17 @@ fn header_decodes_and_re_encodes_real_captured_frames() {
         if h.is_broadcast() {
             assert_eq!(h.next_hop, 0, "frame {i}: a broadcast has no next hop");
         } else {
-            assert_eq!(
-                h.next_hop,
-                (h.to & 0xFF) as u8,
-                "frame {i}: an addressed frame carries the destination's last byte as next_hop"
+            // ...and it is a rule with a HOLE, found the same way the rule was.
+            // This asserted the destination's low byte for every addressed
+            // frame, which the Routing reply satisfied and a node-to-node
+            // Position did not: that one carries next_hop = 0 while addressed.
+            // So the field is OPTIONAL -- set when the sender has a next hop to
+            // name, zero when it does not -- and "addressed implies next_hop"
+            // was the sample again.
+            assert!(
+                h.next_hop == 0 || h.next_hop == (h.to & 0xFF) as u8,
+                "frame {i}: next_hop is either unset or the destination's low byte, got 0x{:02x} for to=0x{:08x}",
+                h.next_hop, h.to
             );
         }
 
@@ -3552,4 +3563,50 @@ fn the_routing_wrapper_reproduces_the_measured_ack_bytes() {
 
     // An empty payload decodes as accepted — proto3's own default.
     assert!(Routing::decode(&[]).expect("empty").status.is_accepted());
+}
+
+/// Our `Position` reads the reference's own bytes, and rebuilds them exactly.
+///
+/// This is the half that was blocked. L3 left `Position` unwritten because no
+/// capture contained one, and coding against a remembered schema with nothing
+/// to check the result against is what this project refuses. The corpus now
+/// carries a Position a stock node's transmitter produced, so the check exists.
+///
+/// **The frame is the reference's own encoding, not a copy of ours.** It was
+/// obtained by handing a stock node a Position over its serial API and
+/// capturing what its radio actually sent — and it sent something different:
+/// the coordinates rounded, and a `precision_bits` field we never supplied.
+/// Re-encoding must reproduce that, including the field we did not invent.
+#[test]
+fn the_reference_position_decodes_and_rebuilds_byte_for_byte() {
+    let doc = fs::read_to_string(captures_dir().join("on_air_frames.json")).unwrap();
+    let raw = on_air_frames_with_plaintext()
+        .into_iter()
+        .find(|(pn, _, _)| *pn == 3)
+        .expect("the corpus carries a POSITION_APP frame");
+    let _ = &doc;
+
+    let plain = hex_to_bytes(&raw.2);
+    let data = Data::decode(&plain).expect("Data");
+    assert_eq!(data.portnum, 3, "POSITION_APP");
+
+    let p = Position::decode(data.payload).expect("Position");
+    assert_eq!(p.latitude_i, 123_469_824, "the coordinate as SENT, already rounded");
+    assert_eq!(p.longitude_i, -987_496_448);
+    assert_eq!(p.altitude, 42, "altitude passed through unchanged");
+    assert_eq!(p.time, 1_755_500_000, "time passed through exactly");
+    assert_eq!(p.precision_bits, 13, "the sender declares how much it kept");
+
+    // The coordinate the node was GIVEN was 123456789; what it transmitted has
+    // eighteen trailing zero bits. Asserting that here keeps the finding
+    // attached to the bytes rather than only to prose.
+    assert_ne!(p.latitude_i, 123_456_789, "the sender does not transmit what it was given");
+    assert_eq!(p.latitude_i.trailing_zeros(), 18);
+
+    let mut buf = [0u8; 64];
+    let n = p.encode(&mut buf).expect("encode");
+    assert_eq!(
+        &buf[..n], data.payload,
+        "re-encoding must reproduce the reference's bytes, precision_bits included"
+    );
 }

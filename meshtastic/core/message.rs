@@ -254,6 +254,116 @@ impl<'a> User<'a> {
     }
 }
 
+/// A node's location, `POSITION_APP`.
+///
+/// # The wire types are the whole difficulty
+///
+/// `latitude_i` and `longitude_i` are **`sfixed32`** and `time` is `fixed32` —
+/// **32-bit fields, not varints.** Varint is the obvious guess for an integer
+/// and it is wrong here, exactly as it was for [`MeshPacket`]'s `from`, `to`
+/// and `id`. An encoder built on the guess produces bytes a stock node cannot
+/// read, and nothing about the mistake announces itself.
+///
+/// Coordinates are degrees scaled by 1e7, carried as raw little-endian
+/// two's-complement in those four bytes.
+///
+/// # What is verified, and what is not
+///
+/// **Our encoder is checked against their decoder.** A `Position` built here
+/// was carried by a stock node's radio and read by a second stock node, which
+/// reported the payload length we produced and the exact `time` we sent —
+/// `tests/captures/position_record.json`.
+///
+/// **Our decoder is NOT checked against their bytes**, because no node on the
+/// bench emits a `Position`: none has GPS, and setting a fixed position needs
+/// admin messages whose schema is not available locally. The round-trip test
+/// below is self-consistency, and is labelled as such rather than counted as
+/// interoperability.
+///
+/// # The SENDER quantises the coordinates, and says by how much
+///
+/// A stock node does not transmit the coordinate it was given. Handed
+/// `latitude_i = 123456789` (`0x075BCD15`) it put `123469824` (`0x075C0000`) on
+/// the air — **rounded**, not truncated, to eighteen trailing zero bits — and
+/// stamped `precision_bits = 13` alongside. `time` and `altitude` went out
+/// exactly as supplied.
+///
+/// **This happens on TRANSMIT, not on receipt**, which is only visible by
+/// capturing the frame off the air; reading the receiver's log alone suggests
+/// the opposite and that reading was wrong for an hour. Anyone comparing a
+/// coordinate they supplied against one that arrives must expect the loss, and
+/// `precision_bits` is how the sender declares it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Position {
+    /// Degrees times 1e7. `sfixed32` on the wire.
+    pub latitude_i: i32,
+    /// Degrees times 1e7. `sfixed32` on the wire.
+    pub longitude_i: i32,
+    /// Metres. A varint, unlike the coordinates.
+    pub altitude: i32,
+    /// Seconds since the epoch. `fixed32` on the wire.
+    pub time: u32,
+    /// How many bits of coordinate precision the SENDER kept, field 23.
+    ///
+    /// Carried because a stock node puts it on the wire in every `Position` it
+    /// sends, and a wrapper that dropped it would re-encode shorter than the
+    /// reference produced — the same rule that keeps `User::macaddr`.
+    pub precision_bits: u32,
+}
+
+impl Position {
+    /// Decode from protobuf bytes.
+    ///
+    /// # Errors
+    ///
+    /// [`Error`] if the input is not well-formed protobuf.
+    pub fn decode(bytes: &[u8]) -> Result<Self, Error> {
+        let mut out = Self::default();
+        let mut reader = Reader::new(bytes);
+        while let Some(field) = reader.next_field()? {
+            match (field.number, field.value) {
+                (1, Value::Fixed32(b)) => out.latitude_i = i32::from_le_bytes(b),
+                (2, Value::Fixed32(b)) => out.longitude_i = i32::from_le_bytes(b),
+                (3, Value::Varint(v)) => out.altitude = truncate_u32(v) as i32,
+                (4, Value::Fixed32(b)) => out.time = u32::from_le_bytes(b),
+                (23, Value::Varint(v)) => out.precision_bits = truncate_u32(v),
+                _ => {}
+            }
+        }
+        Ok(out)
+    }
+
+    /// Encode into `buf`, returning the number of bytes written.
+    ///
+    /// Zero-valued fields are omitted, which is what proto3 does with a
+    /// default — and note that a latitude of exactly zero is therefore absent
+    /// rather than present-and-zero. That is the reference's own behaviour for
+    /// scalar fields and is not a choice made here.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::BufferTooSmall`] if `buf` cannot hold the result.
+    pub fn encode(&self, buf: &mut [u8]) -> Result<usize, Error> {
+        let mut w = Writer::new(buf);
+        if self.latitude_i != 0 {
+            w.field(1, &Value::Fixed32(self.latitude_i.to_le_bytes()))?;
+        }
+        if self.longitude_i != 0 {
+            w.field(2, &Value::Fixed32(self.longitude_i.to_le_bytes()))?;
+        }
+        if self.altitude != 0 {
+            w.field(3, &Value::Varint(self.altitude as u32 as u64))?;
+        }
+        if self.time != 0 {
+            w.field(4, &Value::Fixed32(self.time.to_le_bytes()))?;
+        }
+        if self.precision_bits != 0 {
+            w.field(23, &Value::Varint(u64::from(self.precision_bits)))?;
+        }
+        Ok(w.len())
+    }
+}
+
 /// One channel's settings.
 ///
 /// Carries the two inputs [`crate::channel::channel_hash`] needs, which is
