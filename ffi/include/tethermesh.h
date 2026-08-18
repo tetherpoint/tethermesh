@@ -74,13 +74,13 @@ extern "C" {
 
 /* Bumped on any change to a signature, struct layout, or enum value below.
  * Compare against tm_abi_version() at startup. */
-#define TM_ABI_VERSION 5u
+#define TM_ABI_VERSION 6u
 
 uint32_t tm_abi_version(void);
 
 /* Pass this header's own sizeofs. See the note at the top of this file. */
 int32_t tm_check_layout(size_t sizeof_rx, size_t sizeof_key, size_t sizeof_user,
-                        size_t sizeof_pki_key);
+                        size_t sizeof_pki_key, size_t sizeof_data);
 
 /* ── Channel keys ──────────────────────────────────────────────────────────
  *
@@ -434,6 +434,41 @@ int32_t tm_pki_encode(uint32_t from, uint32_t to, uint32_t id,
                       uint32_t portnum,
                       const uint8_t *payload, size_t payload_len,
                       uint8_t *out, size_t out_cap);
+
+/* ── Reading what arrived ──────────────────────────────────────────────────*/
+
+/* A decoded Data wrapper. Pointers borrow from the buffer passed to
+ * tm_data_decode() and are valid only while it is.
+ *
+ * Carries the fields a consumer acts on, not the whole schema -- adding one is
+ * an ABI change and should be. */
+typedef struct {
+    uint32_t       portnum;
+    const uint8_t *payload;
+    size_t         payload_len;
+    /* The sender wants a reply. Answer it ADDRESSED TO THE SENDER and do not
+     * set this on the answer: two nodes each asking the other is a loop that
+     * spends shared airtime and resolves nothing. */
+    uint8_t        want_response;
+    /* Identifier of the request this answers; 0 when it answers nothing. */
+    uint32_t       request_id;
+} tm_data_t;
+
+/* Read a decrypted payload as a Data.
+ *
+ * A successful return is NOT an authenticity claim on a channel-encrypted
+ * frame: CTR decrypts any bytes into some other bytes, so a wrong key can still
+ * yield something that parses. Only a PKI frame's tag settles that. */
+int32_t tm_data_decode(const uint8_t *payload, size_t payload_len, tm_data_t *out);
+
+/* Read a NODEINFO_APP payload as a User. Same tm_user_t the encoder takes,
+ * filled in the other direction, so a consumer keeps ONE description of a peer
+ * rather than two that can disagree. Every pointer borrows from payload.
+ *
+ * THIS IS HOW A NODE LEARNS THE KEY IT NEEDS TO ADDRESS A PEER. A User may
+ * legitimately carry no key, in which case public_key_len is 0 and that peer
+ * cannot be sent a direct message. That is a real state, not a failure. */
+int32_t tm_user_decode(const uint8_t *payload, size_t payload_len, tm_user_t *out);
 
 #ifdef __cplusplus
 }

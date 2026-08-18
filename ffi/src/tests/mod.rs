@@ -539,3 +539,113 @@ fn tm_is_pki_and_tm_pki_decrypt_refuse_what_is_not_one() {
         );
     }
 }
+
+// ── Reading what arrived ────────────────────────────────────────────────────
+
+/// A published NodeInfo must be readable back as a peer would read it.
+///
+/// This is the loop that makes a node addressable: we encode a `User` carrying
+/// our key, a peer decodes it and keeps the key, and only then can it originate
+/// a direct message to us. Testing the encoder alone leaves the half that
+/// actually matters unchecked.
+#[test]
+fn a_published_nodeinfo_decodes_back_to_the_same_user() {
+    let mut key = TmKey { bytes: [0u8; 16] };
+    assert_eq!(unsafe { tm_key_from_index(1, &mut key) }, TM_OK);
+
+    let pubkey = [0x5Au8; 32];
+    let id = b"!328070b9";
+    let long = b"tethermesh";
+    let short = b"tm01";
+    let mac = [0u8; 6];
+    let user = TmUser {
+        id: id.as_ptr(), id_len: id.len(),
+        long_name: long.as_ptr(), long_name_len: long.len(),
+        short_name: short.as_ptr(), short_name_len: short.len(),
+        public_key: pubkey.as_ptr(), public_key_len: pubkey.len(),
+        macaddr: mac.as_ptr(), macaddr_len: mac.len(),
+        hw_model: 0, role: 0,
+    };
+    let mut out = [0u8; 256];
+    let n = unsafe {
+        tm_nodeinfo_encode(0x3280_70b9, 0xFFFF_FFFF, 7, 3, 0x08, 1, &key, &user,
+                           out.as_mut_ptr(), out.len())
+    };
+    assert!(n > 0);
+    let n = usize::try_from(n).unwrap();
+
+    let (_, plain) = frame::decode_in_place(&mut out[..n], &key.bytes, 0).expect("decode");
+
+    let mut data = TmData {
+        portnum: 0, payload: core::ptr::null(), payload_len: 0,
+        want_response: 0, request_id: 0,
+    };
+    assert_eq!(unsafe { tm_data_decode(plain.as_ptr(), plain.len(), &mut data) }, TM_OK);
+    assert_eq!(data.portnum, 4, "NODEINFO_APP");
+    assert_eq!(data.want_response, 1, "we asked, so a peer must see that we asked");
+
+    let mut back = TmUser {
+        id: core::ptr::null(), id_len: 0,
+        long_name: core::ptr::null(), long_name_len: 0,
+        short_name: core::ptr::null(), short_name_len: 0,
+        public_key: core::ptr::null(), public_key_len: 0,
+        macaddr: core::ptr::null(), macaddr_len: 0,
+        hw_model: 0, role: 0,
+    };
+    assert_eq!(
+        unsafe { tm_user_decode(data.payload, data.payload_len, &mut back) }, TM_OK);
+    assert_eq!(back.public_key_len, 32, "the key is what makes us addressable");
+    assert_eq!(unsafe { slice::from_raw_parts(back.public_key, 32) }, &pubkey);
+    assert_eq!(unsafe { slice::from_raw_parts(back.id, back.id_len) }, id);
+    assert_eq!(unsafe { slice::from_raw_parts(back.short_name, back.short_name_len) }, short);
+}
+
+/// A peer that published no key is a real state, not a decode failure.
+#[test]
+fn a_user_without_a_key_decodes_with_a_zero_length_key() {
+    let id = b"!deadbeef";
+    let mut ubuf = [0u8; 128];
+    let ulen = User { id, ..Default::default() }.encode(&mut ubuf).unwrap();
+
+    let mut back = TmUser {
+        id: core::ptr::null(), id_len: 0,
+        long_name: core::ptr::null(), long_name_len: 0,
+        short_name: core::ptr::null(), short_name_len: 0,
+        public_key: core::ptr::null(), public_key_len: 0,
+        macaddr: core::ptr::null(), macaddr_len: 0,
+        hw_model: 0, role: 0,
+    };
+    assert_eq!(unsafe { tm_user_decode(ubuf.as_ptr(), ulen, &mut back) }, TM_OK);
+    assert_eq!(back.public_key_len, 0, "absent, and that is not an error");
+    assert_eq!(back.id_len, 9);
+}
+
+/// Hostile input must be refused, never parsed into something plausible.
+#[test]
+fn the_decoders_refuse_rubbish_rather_than_inventing_a_peer() {
+    let mut data = TmData {
+        portnum: 0, payload: core::ptr::null(), payload_len: 0,
+        want_response: 0, request_id: 0,
+    };
+    // Truncated length-delimited field: claims 0x7f bytes and supplies none.
+    let truncated = [0x0au8, 0x7f];
+    assert_eq!(
+        unsafe { tm_data_decode(truncated.as_ptr(), truncated.len(), &mut data) },
+        TM_E_ARG,
+    );
+    // A null payload is an argument error, not a crash.
+    assert_eq!(unsafe { tm_data_decode(core::ptr::null(), 0, &mut data) }, TM_E_ARG);
+
+    let mut back = TmUser {
+        id: core::ptr::null(), id_len: 0,
+        long_name: core::ptr::null(), long_name_len: 0,
+        short_name: core::ptr::null(), short_name_len: 0,
+        public_key: core::ptr::null(), public_key_len: 0,
+        macaddr: core::ptr::null(), macaddr_len: 0,
+        hw_model: 0, role: 0,
+    };
+    assert_eq!(
+        unsafe { tm_user_decode(truncated.as_ptr(), truncated.len(), &mut back) },
+        TM_E_ARG,
+    );
+}

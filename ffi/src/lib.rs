@@ -128,7 +128,7 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
 /// Checked at init by the C side. A stale header against a rebuilt library is
 /// otherwise silent and produces symptoms attributable to anything at all;
 /// four bytes to make it impossible is a trade worth taking every time.
-pub const TM_ABI_VERSION: u32 = 5;
+pub const TM_ABI_VERSION: u32 = 6;
 
 #[no_mangle]
 pub extern "C" fn tm_abi_version() -> u32 {
@@ -153,6 +153,7 @@ pub extern "C" fn tm_check_layout(
     sizeof_key: usize,
     sizeof_user: usize,
     sizeof_pki_key: usize,
+    sizeof_data: usize,
 ) -> i32 {
     if sizeof_rx != core::mem::size_of::<TmRx>() {
         return TM_E_ABI;
@@ -164,6 +165,9 @@ pub extern "C" fn tm_check_layout(
         return TM_E_ABI;
     }
     if sizeof_pki_key != core::mem::size_of::<TmPkiKey>() {
+        return TM_E_ABI;
+    }
+    if sizeof_data != core::mem::size_of::<TmData>() {
         return TM_E_ABI;
     }
     TM_OK
@@ -1439,4 +1443,90 @@ pub unsafe extern "C" fn tm_pki_encode(
         Ok(v) => v,
         Err(_) => TM_E_SHORT,
     }
+}}
+
+// ── Reading what arrived ────────────────────────────────────────────────────
+
+/// A decoded `Data` wrapper. Slices borrow from the buffer passed to
+/// [`tm_data_decode`] and are valid only while it is.
+///
+/// Carries the fields a consumer acts on, not the whole schema. Adding one is
+/// an ABI change and should be, so the set here is deliberately the measured
+/// subset rather than everything the wire can hold.
+#[repr(C)]
+pub struct TmData {
+    pub portnum: u32,
+    pub payload: *const u8,
+    pub payload_len: usize,
+    /// The sender wants a reply. Answer it addressed to the sender, and do not
+    /// set this on the answer -- two nodes each asking the other is a loop that
+    /// costs shared airtime and resolves nothing.
+    pub want_response: u8,
+    /// Identifier of the request this answers, 0 when it answers nothing.
+    pub request_id: u32,
+}
+
+/// Read a decrypted payload as a `Data`.
+///
+/// **A successful return is not an authenticity claim** on a channel-encrypted
+/// frame. CTR decrypts any bytes into some other bytes, so a wrong key yields
+/// plaintext that may still parse. Only a PKI frame's tag settles that; see
+/// [`tm_pki_decrypt`].
+#[no_mangle]
+pub unsafe extern "C" fn tm_data_decode(
+    payload: *const u8,
+    payload_len: usize,
+    out: *mut TmData,
+) -> i32 { unsafe {
+    if payload.is_null() || out.is_null() {
+        return TM_E_ARG;
+    }
+    let bytes = slice::from_raw_parts(payload, payload_len);
+    let Ok(d) = Data::decode(bytes) else {
+        return TM_E_ARG;
+    };
+    (*out).portnum = d.portnum;
+    (*out).payload = d.payload.as_ptr();
+    (*out).payload_len = d.payload.len();
+    (*out).want_response = u8::from(d.want_response);
+    (*out).request_id = d.request_id;
+    TM_OK
+}}
+
+/// Read a `NODEINFO_APP` payload as a `User`.
+///
+/// The same [`TmUser`] the encoder takes, filled in the other direction, so a
+/// consumer has one description of a peer rather than two that can disagree.
+/// Every pointer borrows from `payload`.
+///
+/// **This is how a node learns the public key it needs to address a peer.**
+/// Note what the wire permits: a `User` may legitimately carry no key at all,
+/// in which case `public_key_len` is 0 and that peer cannot be sent a direct
+/// message. That is a real state, not a decode failure.
+#[no_mangle]
+pub unsafe extern "C" fn tm_user_decode(
+    payload: *const u8,
+    payload_len: usize,
+    out: *mut TmUser,
+) -> i32 { unsafe {
+    if payload.is_null() || out.is_null() {
+        return TM_E_ARG;
+    }
+    let bytes = slice::from_raw_parts(payload, payload_len);
+    let Ok(u) = User::decode(bytes) else {
+        return TM_E_ARG;
+    };
+    (*out).id = u.id.as_ptr();
+    (*out).id_len = u.id.len();
+    (*out).long_name = u.long_name.as_ptr();
+    (*out).long_name_len = u.long_name.len();
+    (*out).short_name = u.short_name.as_ptr();
+    (*out).short_name_len = u.short_name.len();
+    (*out).public_key = u.public_key.as_ptr();
+    (*out).public_key_len = u.public_key.len();
+    (*out).macaddr = u.macaddr.as_ptr();
+    (*out).macaddr_len = u.macaddr.len();
+    (*out).hw_model = u.hw_model;
+    (*out).role = u.role;
+    TM_OK
 }}
