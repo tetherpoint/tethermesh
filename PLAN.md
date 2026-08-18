@@ -354,6 +354,16 @@ That is the argument for spec-first in one instance: the error was in prose that
 
 **Gate:** two instances exchange authenticated extension traffic that an unmodified reference node relays without reading; a forged sender fails the tag; a node without the extension falls back and still communicates.
 
+**2026-08-18 — two of the three clauses are met; the third is blocked on hardware, not on work.**
+
+*A forged sender fails the tag* is settled in software and always could be — it is a property of the construction, not of anyone's firmware. `a_forged_sender_fails_the_tag` rewrites `from` in the AAD and the open must fail; `a_relayed_frame_still_verifies` decrements the hop limit and stamps a relay byte and the open must succeed. That pair is the whole reason the AAD is the invariant subset.
+
+*An unmodified reference node relays it without reading, and still communicates* is **met on hardware**, recorded in `tests/captures/suite_relay_record.json`. A sealed envelope was carried as an ordinary `Data` on portnum 256 and put on the air; a stock node logged `Portnum=256`, a portnum it has no handler for, then **relayed it** — `enqueue for send … HopLim=1`, `Started Tx … relay=0x20` — and carried on serving other traffic. The channel key was the **published default**, so every node on that channel could decrypt the frame and none could read the message. That is the design demonstrated rather than argued.
+
+*Two instances exchange* is **not met, and is blocked on a second node running this stack.** This bench has one. It cannot be faked by looping a node back to itself, which would prove only that our encoder agrees with our decoder — the thing host tests already establish and the thing an on-air gate exists to go beyond. `suite/groups/tests/bench_emit.rs` is the emitter a second node would be pointed at.
+
+**The bundle itself is implemented, not merely specified** — seal, parse, open, epoch keys, and a roster with an owner, add/remove and epoch bumps, with nine tests and no stubs.
+
 ## L8 — release engineering
 
 The C ABI surface, `cbindgen` header, and the artifact discipline `DISTRIBUTION.md` commits to: a declared target set, reproducible builds, `tm_abi_version()`, a CI size budget, and a minimal C consumer built against each released archive.

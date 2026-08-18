@@ -20,3 +20,13 @@ crate-type = ["rlib"]
 
 [dependencies]
 tethermesh = { path = "../.." }
+
+[dev-dependencies]
+# The bench emitter in tests/ builds a whole frame -- header, channel crypto and
+# the Data wrapper -- around a sealed envelope, so it needs the protocol crate
+# directly. A normal dependency is not visible to an integration test crate.
+#
+# NOT a cycle: tethermesh does not depend on this bundle and must not. SCOPE.md
+# requires a bundle to be "a separate crate the core does not depend on", so
+# that taking the protocol library never means taking the extensions with it.
+tethermesh = { path = "../.." }

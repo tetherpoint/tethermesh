@@ -220,3 +220,4 @@ fn the_epoch_refuses_to_wrap() {
         "wrapping to 0 would reproduce epoch 0's key and reuse every nonce under it"
     );
 }
+
