@@ -1,0 +1,39 @@
+{
+  "record": "routing_validated_against_the_reference_across_a_topology_matrix",
+  "date": "2026-08-18",
+  "resolves": "PLAN.md L5's restated gate — 'validation against the reference across a topology matrix, not implementation'.",
+  "method": "Topology is imposed IN SOFTWARE by the consuming node's filter, which drops a named node's DIRECT frames while still accepting relayed copies of them. Directness is read from the header: a frame carries its originator's low byte in relay_node, so a copy carrying anyone else's byte came via a relay. Physical placement gives one topology, imprecisely, and not the same one tomorrow; a filter gives a matrix, reproducibly. Sound for protocol questions and UNSOUND for RF ones — the protocol cannot distinguish 'filtered' from 'out of range', which is exactly why contention, capture and duty-cycle results are NOT taken from this apparatus.",
+  "topologies": [
+    {
+      "name": "A — one hop, no filter",
+      "arrived": "hop_limit 3 of hop_start 3, direct from the originator",
+      "decision": "relay=1, relay_hop=2, window=143 slots, draw=120 -> 3360 ms",
+      "then": "the same (from,id) arrived again at hop_limit 2, a peer's rebroadcast -> duplicate=1, relay=0, suppressed=DUPLICATE",
+      "outcome": "a peer (low byte 0x28) rebroadcast it before our backoff expired, so the queued relay was CANCELLED and we transmitted nothing. Confirmed from the far side: no frame carrying our relay byte for that id was observed at any stock node."
+    },
+    {
+      "name": "B — two hops, originator filtered",
+      "arrived": "the originator's DIRECT frame was dropped (relay_node = its own low byte); the copy taken carried hop_limit 2 of hop_start 3",
+      "decision": "relay=1, relay_hop=1, window=135 slots, draw=32 -> 896 ms",
+      "outcome": "relayed onward at hop_limit 1 and ACCEPTED by an unmodified stock node, which logged it with our relay byte."
+    }
+  ],
+  "validated": [
+    "Hop-limit decrement at two depths: 3->2 and 2->1, each accepted by a stock decoder.",
+    "Duplicate suppression against genuine duplicate traffic, not a constructed pair.",
+    "Relay cancellation when another node transmits first, INCLUDING the negative: nothing went out afterwards.",
+    "Contention-window draws fall inside the computed window at both depths.",
+    "relay_node carries our own low byte on our rebroadcast, matching what the corpus shows a stock node doing."
+  ],
+  "not_validated": [
+    "Hop-limit EXHAUSTION (suppressed=HOP_LIMIT). A hop_limit=0 frame never appeared: stock nodes stop relaying before emitting one, so producing it needs a longer chain than three nodes give.",
+    "DUTY_BUDGET refusal — needs sustained traffic well beyond this run.",
+    "Everything RF: contention bounds, capture, and duty cycle are NOT measurable on a filtered topology, by construction."
+  ],
+  "observability_fix": "The relay log lines carried no packet id, so 'queued', 'cancelled' and 'sent' could not be attributed to a packet. A cancel followed by an unrelated send therefore read as a defect — the cancel path looked broken when it was two different frames, this bench also relaying foreign traffic. Ids were added before any conclusion was drawn.",
+  "provenance": {
+    "subject": "our node, 0x328070b9, at its -9 dBm floor",
+    "reference": "three Heltec V3, stock Meshtastic 2.7.26.54e0d8d, unmodified, region US, LongFast, tx_power=1",
+    "note": "Our own nodes, our own channel, our own payloads. Publishable under TESTING.md."
+  }
+}
