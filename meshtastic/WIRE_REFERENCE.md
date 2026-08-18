@@ -490,6 +490,54 @@ So the position is unchanged in substance and better understood: settling this n
 
 ---
 
+## PUBLIC KEYS ARE PINNED ON FIRST USE — MEASURED 2026-08-18, ON HARDWARE
+
+**A node does not replace a public key it has already learned for a peer.** The
+later `NodeInfo` is received, parsed and applied to the node database, and the
+key in it is silently discarded.
+
+**How it was measured.** Our node published a `NodeInfo` carrying key A, which
+three stock nodes learned. Its key was then changed twice, to B and finally to
+C, and further `NodeInfo` frames were broadcast. All three stock nodes continued
+to report key A.
+
+The obvious confound — that they simply never received the later frames — was
+excluded from both ends:
+
+- The nearest stock node's own log shows the frame arriving and being applied:
+  `Received nodeinfo from=0x…, portnum=4, payloadlen=78`, then
+  `Update DB node 0x…`. It even rebroadcast the frame.
+- Our transmitted frame was decrypted independently and confirmed to carry key
+  **C**, not key A — so the stale key is on the receiving side, not ours. The
+  decrypted `User` was `id`, `long_name`, `short_name`, `macaddr` (six zeros)
+  and a 32-byte `public_key`, totalling the 78 bytes their log reported.
+
+**Nothing is logged about the key at all.** No warning, no rejection, no mention
+of a change. Searching the receiving node's output for any key-related line
+returns nothing, so from the outside a pinned stale key and a correctly updated
+one are indistinguishable until a direct message fails to decrypt.
+
+**This is trust-on-first-use, observed.** It is the behaviour `KEY_VERIFICATION_APP
+= 12` exists to strengthen, and it is the correct security choice: a node that
+accepted any new key for a known number would let an attacker take over an
+identity by broadcasting one. Recorded here because the *consequence* is severe
+and undocumented in what we can read.
+
+**The consequence, stated plainly: a node's key pair is drawn once and then
+never rotated.** Rotating it makes the node unaddressable by every peer that
+already knew it — their cached key no longer matches, direct messages are
+encrypted to a key it does not hold, and nothing on either side reports why.
+Recovery needs each peer to forget the node, not another broadcast.
+
+**What still works when the key is stale, and why.** Acknowledgement is decided
+from the 16-byte header alone, so a node whose key is stale still acknowledges a
+direct message it cannot decrypt — confirmed on the same run: the stock node
+logged `Received a ACK for 0x…, stopping retransmissions` for a message whose
+body the receiver never read. That separation is deliberate; see the
+acknowledgement section above.
+
+---
+
 ## Corrections this phase forces
 
 **To the commonly-repeated description of the protocol:** the preset table (7 vs 17, two deprecated), `DATA_PAYLOAD_LEN` (233 not 237), the absence of `next_hop` routing, and the absence of XEdDSA and KEY_VERIFICATION.
