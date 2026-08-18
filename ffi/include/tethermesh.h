@@ -86,7 +86,7 @@ typedef struct tm_outbox_t tm_outbox_t;
  otherwise silent and produces symptoms attributable to anything at all;
  four bytes to make it impossible is a trade worth taking every time.
  */
-#define TM_ABI_VERSION 6
+#define TM_ABI_VERSION 7
 
 /*
  Status codes, defined once so the ABI and its tests cannot disagree.
@@ -282,6 +282,47 @@ typedef struct tm_data_t {
   uint32_t request_id;
 } tm_data_t;
 
+/*
+ The 16-byte cleartext header, decoded.
+
+ Every field is on the wire in the clear, so this needs no key and makes no
+ routing decision — it is a parse, not an observation. [`tm_rx_observe`] is
+ the one that decides, and it mutates history in doing so.
+
+ **This exists because a consumer needed these three fields before it could
+ call anything else** — who sent a frame, which packet it is, and who
+ relayed it — and with no way to ask, it read bytes 4..8, 8..12 and 15 out of
+ the frame itself. That put this crate's wire layout in someone else's source
+ with nothing keeping the two in step. The offsets belong here.
+
+ **It travels in the clear and nothing authenticates it.** Any relay can alter
+ it and any listener can forge one; `hop_limit`, `channel` and `relay_node`
+ are routing hints, never evidence. See `header.rs`.
+ */
+typedef struct tm_header_t {
+  uint32_t to;
+  uint32_t from;
+  uint32_t id;
+  uint8_t hop_limit;
+  /*
+   Equal to `hop_limit` on a frame nobody has forwarded. **That comparison
+   is how directness is decided** — a relayed copy has been decremented.
+   */
+  uint8_t hop_start;
+  uint8_t channel_hash;
+  /*
+   Low byte of the next hop's node number, 0 when unset.
+   */
+  uint8_t next_hop;
+  /*
+   Low byte of the node that transmitted this copy — the originator on a
+   frame nobody has forwarded, the relay otherwise.
+   */
+  uint8_t relay_node;
+  uint8_t want_ack;
+  uint8_t via_mqtt;
+} tm_header_t;
+
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
@@ -312,7 +353,8 @@ int32_t tm_check_layout(size_t sizeof_rx,
                         size_t sizeof_key,
                         size_t sizeof_user,
                         size_t sizeof_pki_key,
-                        size_t sizeof_data);
+                        size_t sizeof_data,
+                        size_t sizeof_header);
 
 /*
  Expand the 1-byte shorthand: `1` is the default key, `2..=10` add 1..9 to its
@@ -748,6 +790,15 @@ int32_t tm_data_decode(const uint8_t *payload, size_t payload_len, struct tm_dat
  message. That is a real state, not a decode failure.
  */
 int32_t tm_user_decode(const uint8_t *payload, size_t payload_len, struct tm_user_t *out);
+
+/*
+ Decode the header of a received frame. No key, no state, no decision.
+
+ Returns [`TM_E_SHORT`] for anything too short to hold a header, which is the
+ only way this can fail: every 16-byte prefix is a well-formed header, because
+ the layout has no reserved values to reject.
+ */
+int32_t tm_header_peek(const uint8_t *frame, size_t frame_len, struct tm_header_t *out);
 
 #ifdef __cplusplus
 }  // extern "C"

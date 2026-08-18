@@ -716,3 +716,103 @@ fn every_originating_encoder_stamps_relay_node_with_the_low_byte_of_from() {
     let h = frame::peek_header(&out[..usize::try_from(n).unwrap()]).expect("header");
     assert_eq!(h.relay_node, LOW, "tm_pki_encode");
 }
+
+/// The header decode is pinned to real captured frames, field by field.
+///
+/// Not a round-trip against our own encoder — that would agree with itself. Each
+/// frame in the on-air corpus carries the header values as the capture recorded
+/// them, and this asserts the ABI reproduces every one.
+///
+/// **This test is the thing that keeps the wire layout in one place.** A
+/// consumer that needed `from`, `id` and `relay_node` before it could call
+/// anything else had been reading bytes 4..8, 8..12 and 15 out of the frame
+/// itself, because the ABI offered no way to ask. That put these offsets in two
+/// repositories with nothing comparing them.
+#[test]
+fn tm_header_peek_reproduces_every_captured_header() {
+    let doc = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"), "/../tests/captures/on_air_frames.json"
+    )).expect("on_air_frames.json");
+
+    let num = |seg: &str, key: &str| -> u64 {
+        let at = seg.find(&format!("\"{key}\"")).expect("key");
+        let rest = &seg[at..];
+        let colon = rest.find(':').expect("colon");
+        rest[colon + 1..].trim_start()
+            .split(|c: char| !c.is_ascii_digit()).next().expect("digits")
+            .parse().expect("number")
+    };
+
+    // Only some frames carry a recorded header block, so each one is paired
+    // with the nearest PRECEDING raw_hex rather than assuming one per frame.
+    let mut checked = 0;
+    for (hdr_at, _) in doc.match_indices("\"header\"") {
+        let before = &doc[..hdr_at];
+        let raw_at = before.rfind("\"raw_hex\"").expect("a frame precedes its header");
+        let r = &doc[raw_at..];
+        let colon = r.find(':').expect("colon");
+        let q1 = r[colon..].find('"').expect("open") + colon + 1;
+        let q2 = r[q1..].find('"').expect("close") + q1;
+        let raw = &r[q1..q2];
+        let bytes: Vec<u8> = (0..raw.len() / 2)
+            .map(|i| u8::from_str_radix(&raw[i * 2..i * 2 + 2], 16).expect("hex"))
+            .collect();
+        let seg = &doc[hdr_at..];
+
+        let mut h = TmHeader {
+            to: 0, from: 0, id: 0, hop_limit: 0, hop_start: 0,
+            channel_hash: 0, next_hop: 0, relay_node: 0, want_ack: 0, via_mqtt: 0,
+        };
+        assert_eq!(
+            unsafe { tm_header_peek(bytes.as_ptr(), bytes.len(), &mut h) }, TM_OK);
+
+        assert_eq!(u64::from(h.to), num(seg, "to"), "to");
+        assert_eq!(u64::from(h.from), num(seg, "from"), "from");
+        assert_eq!(u64::from(h.id), num(seg, "id"), "id");
+        assert_eq!(u64::from(h.hop_limit), num(seg, "hop_limit"), "hop_limit");
+        assert_eq!(u64::from(h.hop_start), num(seg, "hop_start"), "hop_start");
+        assert_eq!(u64::from(h.channel_hash), num(seg, "channel"), "channel");
+        assert_eq!(u64::from(h.next_hop), num(seg, "next_hop"), "next_hop");
+        assert_eq!(u64::from(h.relay_node), num(seg, "relay_node"), "relay_node");
+        checked += 1;
+    }
+    assert!(checked >= 3, "the corpus records at least three headers, saw {checked}");
+
+    // THE CORPUS CANNOT PIN hop_start, and saying so is the point. Every
+    // captured frame is originated, so hop_start == hop_limit in all of them
+    // and reading one where the other belongs is invisible here -- found by
+    // mutating this test and watching it stay green. A relayed frame would
+    // separate them; the corpus contains none, so one is constructed.
+    let relayed = Header {
+        to: 0xFFFF_FFFF, from: 0x3369_e764, id: 0x0bad_c0de,
+        hop_limit: 1, hop_start: 3, channel: 0x08, relay_node: 0x28,
+        ..Header::default()
+    }.encode();
+    let mut h = TmHeader {
+        to: 0, from: 0, id: 0, hop_limit: 0, hop_start: 0,
+        channel_hash: 0, next_hop: 0, relay_node: 0, want_ack: 0, via_mqtt: 0,
+    };
+    assert_eq!(unsafe { tm_header_peek(relayed.as_ptr(), relayed.len(), &mut h) }, TM_OK);
+    assert_eq!(h.hop_limit, 1, "hop_limit");
+    assert_eq!(h.hop_start, 3, "hop_start must not read hop_limit");
+    assert_ne!(h.hop_limit, h.hop_start, "a relayed frame is what separates them");
+    assert_eq!(h.relay_node, 0x28, "stamped by the relay, not the originator");
+}
+
+/// A frame too short to hold a header is refused, not parsed.
+#[test]
+fn tm_header_peek_refuses_a_runt_rather_than_reading_past_it() {
+    let mut h = TmHeader {
+        to: 0, from: 0, id: 0, hop_limit: 0, hop_start: 0,
+        channel_hash: 0, next_hop: 0, relay_node: 0, want_ack: 0, via_mqtt: 0,
+    };
+    let buf = [0xAAu8; 16];
+    for len in 0..16usize {
+        assert_eq!(
+            unsafe { tm_header_peek(buf.as_ptr(), len, &mut h) }, TM_E_SHORT,
+            "a {len}-byte frame has no header to read");
+    }
+    assert_eq!(unsafe { tm_header_peek(buf.as_ptr(), 16, &mut h) }, TM_OK,
+               "exactly 16 bytes is a header");
+    assert_eq!(unsafe { tm_header_peek(core::ptr::null(), 16, &mut h) }, TM_E_ARG);
+}

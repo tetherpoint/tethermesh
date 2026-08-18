@@ -120,3 +120,4 @@ exclude = ["TmCtx", "TmOutbox"]
 "TmUser"   = "tm_user_t"
 "TmPkiKey" = "tm_pki_key_t"
 "TmData"   = "tm_data_t"
+"TmHeader" = "tm_header_t"

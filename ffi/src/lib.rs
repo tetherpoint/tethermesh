@@ -155,7 +155,7 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
 /// Checked at init by the C side. A stale header against a rebuilt library is
 /// otherwise silent and produces symptoms attributable to anything at all;
 /// four bytes to make it impossible is a trade worth taking every time.
-pub const TM_ABI_VERSION: u32 = 6;
+pub const TM_ABI_VERSION: u32 = 7;
 
 #[no_mangle]
 pub extern "C" fn tm_abi_version() -> u32 {
@@ -187,6 +187,7 @@ pub extern "C" fn tm_check_layout(
     sizeof_user: usize,
     sizeof_pki_key: usize,
     sizeof_data: usize,
+    sizeof_header: usize,
 ) -> i32 {
     if sizeof_rx != core::mem::size_of::<TmRx>() {
         return TM_E_ABI;
@@ -201,6 +202,9 @@ pub extern "C" fn tm_check_layout(
         return TM_E_ABI;
     }
     if sizeof_data != core::mem::size_of::<TmData>() {
+        return TM_E_ABI;
+    }
+    if sizeof_header != core::mem::size_of::<TmHeader>() {
         return TM_E_ABI;
     }
     TM_OK
@@ -1577,5 +1581,76 @@ pub unsafe extern "C" fn tm_user_decode(
     unsafe { (*out).macaddr_len = u.macaddr.len() };
     unsafe { (*out).hw_model = u.hw_model };
     unsafe { (*out).role = u.role };
+    TM_OK
+}
+
+// ── Reading the header, without deciding anything ───────────────────────────
+
+/// The 16-byte cleartext header, decoded.
+///
+/// Every field is on the wire in the clear, so this needs no key and makes no
+/// routing decision — it is a parse, not an observation. [`tm_rx_observe`] is
+/// the one that decides, and it mutates history in doing so.
+///
+/// **This exists because a consumer needed these three fields before it could
+/// call anything else** — who sent a frame, which packet it is, and who
+/// relayed it — and with no way to ask, it read bytes 4..8, 8..12 and 15 out of
+/// the frame itself. That put this crate's wire layout in someone else's source
+/// with nothing keeping the two in step. The offsets belong here.
+///
+/// **It travels in the clear and nothing authenticates it.** Any relay can alter
+/// it and any listener can forge one; `hop_limit`, `channel` and `relay_node`
+/// are routing hints, never evidence. See `header.rs`.
+#[repr(C)]
+pub struct TmHeader {
+    pub to: u32,
+    pub from: u32,
+    pub id: u32,
+    pub hop_limit: u8,
+    /// Equal to `hop_limit` on a frame nobody has forwarded. **That comparison
+    /// is how directness is decided** — a relayed copy has been decremented.
+    pub hop_start: u8,
+    pub channel_hash: u8,
+    /// Low byte of the next hop's node number, 0 when unset.
+    pub next_hop: u8,
+    /// Low byte of the node that transmitted this copy — the originator on a
+    /// frame nobody has forwarded, the relay otherwise.
+    pub relay_node: u8,
+    pub want_ack: u8,
+    pub via_mqtt: u8,
+}
+
+/// Decode the header of a received frame. No key, no state, no decision.
+///
+/// Returns [`TM_E_SHORT`] for anything too short to hold a header, which is the
+/// only way this can fail: every 16-byte prefix is a well-formed header, because
+/// the layout has no reserved values to reject.
+#[no_mangle]
+pub unsafe extern "C" fn tm_header_peek(
+    frame: *const u8,
+    frame_len: usize,
+    out: *mut TmHeader,
+) -> i32 {
+    if frame.is_null() || out.is_null() {
+        return TM_E_ARG;
+    }
+    // SAFETY: the caller's pointer and length; the FFI trust edge.
+    let f = unsafe { slice::from_raw_parts(frame, frame_len) };
+    let Ok(h) = frame::peek_header(f) else {
+        return TM_E_SHORT;
+    };
+    // SAFETY: `out` was null-checked; the caller owns valid storage for it.
+    unsafe {
+        (*out).to = h.to;
+        (*out).from = h.from;
+        (*out).id = h.id;
+        (*out).hop_limit = h.hop_limit;
+        (*out).hop_start = h.hop_start;
+        (*out).channel_hash = h.channel;
+        (*out).next_hop = h.next_hop;
+        (*out).relay_node = h.relay_node;
+        (*out).want_ack = u8::from(h.want_ack);
+        (*out).via_mqtt = u8::from(h.via_mqtt);
+    }
     TM_OK
 }

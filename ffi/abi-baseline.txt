@@ -6,10 +6,10 @@
 # Refreshed DELIBERATELY, never to make a build pass. If this file
 # changed without TM_ABI_VERSION moving, that is the defect the
 # check exists to catch, and the fix is the version bump.
-# TM_ABI_VERSION: 6
+# TM_ABI_VERSION: 7
 typedef struct tm_ctx_t tm_ctx_t;
 typedef struct tm_outbox_t tm_outbox_t;
-#define TM_ABI_VERSION 6
+#define TM_ABI_VERSION 7
 #define TM_OK 0
 #define TM_E_ARG -1
 #define TM_E_ABI -2
@@ -64,12 +64,25 @@ size_t payload_len;
 uint8_t want_response;
 uint32_t request_id;
 } tm_data_t;
+typedef struct tm_header_t {
+uint32_t to;
+uint32_t from;
+uint32_t id;
+uint8_t hop_limit;
+uint8_t hop_start;
+uint8_t channel_hash;
+uint8_t next_hop;
+uint8_t relay_node;
+uint8_t want_ack;
+uint8_t via_mqtt;
+} tm_header_t;
 uint32_t tm_abi_version(void);
 int32_t tm_check_layout(size_t sizeof_rx,
 size_t sizeof_key,
 size_t sizeof_user,
 size_t sizeof_pki_key,
-size_t sizeof_data);
+size_t sizeof_data,
+size_t sizeof_header);
 int32_t tm_key_from_index(uint8_t index, struct tm_key_t *out);
 int32_t tm_key_from_bytes(const uint8_t *psk, size_t len, struct tm_key_t *out);
 uint8_t tm_channel_hash(const uint8_t *name, size_t name_len, const struct tm_key_t *key);
@@ -175,3 +188,4 @@ uint8_t *out,
 size_t out_cap);
 int32_t tm_data_decode(const uint8_t *payload, size_t payload_len, struct tm_data_t *out);
 int32_t tm_user_decode(const uint8_t *payload, size_t payload_len, struct tm_user_t *out);
+int32_t tm_header_peek(const uint8_t *frame, size_t frame_len, struct tm_header_t *out);
