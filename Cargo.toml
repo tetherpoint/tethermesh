@@ -13,6 +13,25 @@
 # downstream consumers. Each crate declares its own keys.
 [workspace]
 members = ["ffi", "suite/groups"]
+resolver = "2"
+# third_party/ is a path DEPENDENCY, never a member.
+#
+# A path dependency living inside the workspace directory becomes an implicit
+# member unless it is excluded, and a member is resolved with its OWN default
+# features -- which silently overrode the `default-features = false` on the
+# fiat-crypto dependency below. Under any `--workspace` command, fiat-crypto
+# resolved as `[default, std]` instead of `[]`, pulling `std` into the graph of
+# a no_std staticlib that carries its own `#[panic_handler]`, and the collision
+# surfaced as `E0152: found duplicate lang item panic_impl` -- an error naming
+# neither features nor the workspace.
+#
+# The shipped artifact was never affected: `check_all.sh` cross-compiles per
+# crate, not with `--workspace`, so it always got the no_std build. The bug was
+# that no `--workspace` command agreed with it.
+#
+# This also matches what SCOPE.md already says about this directory -- it "is
+# not ours to hold to them" -- which was true of our gates and not of cargo.
+exclude = ["third_party/fiat-crypto/fiat-rust"]
 
 [package]
 name = "tethermesh"
@@ -160,6 +179,19 @@ crate-type = ["rlib"]
 [[test]]
 name = "host_unit"
 path = "tests/host_unit/main.rs"
+
+# The dev profile aborts too, and that is a correctness requirement rather than
+# a preference. This workspace ships a `no_std` staticlib that carries its own
+# `#[panic_handler]`, and a no_std crate has no unwinding runtime -- so building
+# it under the default `panic = "unwind"` fails outright with "unwinding panics
+# are not supported without std". Matching the release setting makes the dev
+# build model what actually ships instead of a configuration that cannot exist.
+#
+# Cargo ignores this for the test and bench profiles, which therefore keep
+# unwinding and can still report a failed assertion. That is why the setting is
+# safe to make unconditional here.
+[profile.dev]
+panic = "abort"
 
 [profile.release]
 # An aborting panic is what turns a would-be memory error into a halt rather
