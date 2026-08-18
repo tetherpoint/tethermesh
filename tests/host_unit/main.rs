@@ -47,6 +47,34 @@ use tethermesh::x25519::{public_key, x25519};
 /// so a caller must say which it wants. Three tests previously scraped every
 /// `raw_hex` and assumed all of them were text; that held only while the corpus
 /// was one message type, and broke the moment it stopped being one.
+/// Frames with the plaintext the capture recorded for each.
+///
+/// The two tests below used to expect `sniff-probe-{i}` by POSITION, which is a
+/// property of the original sample rather than of the corpus -- it broke the
+/// moment a frame that was not a numbered probe was added. Checking the
+/// recorded plaintext instead is both robust and a stronger claim: decrypting
+/// the captured ciphertext must reproduce the decryption the capture recorded.
+fn on_air_frames_with_plaintext() -> Vec<(u32, String, String)> {
+    let doc = fs::read_to_string(captures_dir().join("on_air_frames.json")).unwrap();
+    let mut out = Vec::new();
+    let mut from = 0usize;
+    while let Some(hit) = doc[from..].find("\"raw_hex\"") {
+        let abs = from + hit;
+        let tail = &doc[abs..];
+        let hex = json_str(tail, "raw_hex").map(str::to_string);
+        let pt = json_str(tail, "plaintext_hex").map(str::to_string);
+        let pn = tail.find("\"portnum\"").and_then(|i| {
+            tail[i + 9..].trim_start_matches([':', ' ']).split(|c: char| !c.is_ascii_digit())
+                .next().and_then(|t| t.parse::<u32>().ok())
+        });
+        if let (Some(h), Some(p), Some(t)) = (hex, pn, pt) {
+            out.push((p, h, t));
+        }
+        from = abs + 9;
+    }
+    out
+}
+
 fn on_air_frames() -> Vec<(u32, String)> {
     let doc = fs::read_to_string(captures_dir().join("on_air_frames.json")).unwrap();
     let mut out = Vec::new();
@@ -948,11 +976,26 @@ fn header_decodes_and_re_encodes_real_captured_frames() {
         );
         assert_eq!(h.from, 0x3369_e764, "frame {i}: sender does not match the transmitting board");
         assert_eq!(h.channel, 0x08, "frame {i}: channel hash should be LongFast's verified 0x08");
-        assert_eq!(
-            h.relay_node,
-            (h.from & 0xFF) as u8,
-            "frame {i}: relay_node must be the low byte of the sender"
-        );
+        // relay_node is the low byte of whoever TRANSMITTED THIS COPY -- the
+        // originator on a frame nobody has forwarded, the relaying node
+        // otherwise. Asserting it against `from` unconditionally was true of an
+        // all-originated sample and false of the protocol, and it broke the
+        // moment the first relayed frame was captured. Same shape as the
+        // is_broadcast and hop_limit assumptions above; three of these have now
+        // been found by extending the corpus rather than by review.
+        if h.hop_limit == h.hop_start {
+            assert_eq!(
+                h.relay_node,
+                (h.from & 0xFF) as u8,
+                "frame {i}: an ORIGINATED frame carries its sender's low byte"
+            );
+        } else {
+            assert_ne!(
+                h.relay_node,
+                (h.from & 0xFF) as u8,
+                "frame {i}: a RELAYED frame carries the relayer's low byte, not the sender's"
+            );
+        }
         // INVARIANTS, not sample values. This block asserted hop_limit == 3,
         // hop_start == 3 and !want_ack — all true of the original three
         // broadcasts and none of them true of a Routing reply, which travels
@@ -1070,10 +1113,10 @@ fn captured_frames_decrypt_to_the_text_that_was_transmitted() {
     let doc = fs::read_to_string(captures_dir().join("on_air_frames.json")).unwrap();
 
     let _ = &doc;
-    let raws: Vec<String> = on_air_frames()
+    let raws: Vec<(String, String)> = on_air_frames_with_plaintext()
         .into_iter()
-        .filter(|(pn, _)| *pn == PortNum::TEXT_MESSAGE_APP.0)
-        .map(|(_, h)| h)
+        .filter(|(pn, _, _)| *pn == PortNum::TEXT_MESSAGE_APP.0)
+        .map(|(_, h, t)| (h, t))
         .collect();
     assert!(raws.len() >= 3, "expected the text frames; got {}", raws.len());
 
@@ -1081,25 +1124,24 @@ fn captured_frames_decrypt_to_the_text_that_was_transmitted() {
         panic!("the default channel key is AES-128")
     };
 
-    for (i, hex) in raws.iter().enumerate() {
+    for (i, (hex, recorded)) in raws.iter().enumerate() {
         let frame = hex_to_bytes(hex);
         let h = Header::decode(&frame).unwrap();
         let mut body = frame[HEADER_LEN..].to_vec();
 
         ctr_apply(&key, &nonce(h.id, h.from, 0), &mut body);
 
-        let text = format!("sniff-probe-{i}");
-        let found = String::from_utf8_lossy(&body).contains(&text);
+        let want = hex_to_bytes(recorded);
         assert!(
-            found,
-            "frame {i} did not decrypt to {text:?}; got {}",
+            body == want,
+            "frame {i} did not decrypt to the plaintext the capture recorded; got {}",
             body.iter().map(|b| format!("{b:02x}")).collect::<String>()
         );
 
-        // And it must be a well-formed Data message, not merely contain the text.
+        // And it must be a well-formed Data message, not merely the right bytes.
         let d = Data::decode(&body).expect("plaintext should parse as Data");
         assert_eq!(d.portnum, PortNum::TEXT_MESSAGE_APP.0);
-        assert_eq!(d.payload, text.as_bytes());
+        assert!(!d.payload.is_empty(), "frame {i}: a text frame carries text");
     }
 }
 
@@ -1159,6 +1201,11 @@ fn a_captured_frame_survives_decode_then_encode_byte_for_byte() {
         .filter(|(pn, _)| *pn == PortNum::TEXT_MESSAGE_APP.0)
         .map(|(_, h)| h)
         .collect();
+    let plaintexts: Vec<String> = on_air_frames_with_plaintext()
+        .into_iter()
+        .filter(|(pn, _, _)| *pn == PortNum::TEXT_MESSAGE_APP.0)
+        .map(|(_, _, t)| t)
+        .collect();
     assert!(raws.len() >= 3, "expected the text frames; got {}", raws.len());
 
     let Psk::Aes128(key) = expand_psk(&[0x01]).unwrap() else { panic!() };
@@ -1170,10 +1217,9 @@ fn a_captured_frame_survives_decode_then_encode_byte_for_byte() {
         let (hdr, plain) = frame::decode_in_place(&mut work, &key, 0).expect("decode failed");
         let plain = plain.to_vec();
 
-        assert_eq!(
-            Data::decode(&plain).unwrap().payload,
-            format!("sniff-probe-{i}").as_bytes()
-        );
+        // The payload the capture recorded, not a name derived from position.
+        let recorded = hex_to_bytes(&plaintexts[i]);
+        assert_eq!(plain, recorded, "frame {i}: plaintext differs from the capture");
 
         let mut rebuilt = vec![0u8; frame::MAX_FRAME];
         let n = frame::encode(&hdr, &plain, &key, 0, &mut rebuilt).expect("encode failed");

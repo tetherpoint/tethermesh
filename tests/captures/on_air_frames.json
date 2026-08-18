@@ -4,7 +4,7 @@
   "provenance": {
     "captured": "2026-08-16",
     "transmitter": "Heltec V3, stock Meshtastic 2.7.26.54e0d8d, US/LongFast, tx_power 10 dBm",
-    "receiver": "Heltec V3 running bench/firmware/heltec_v3_sniffer \u2014 an independently written SX1262 driver, from the SX126x datasheet's documented command set",
+    "receiver": "Heltec V3 running bench/firmware/heltec_v3_sniffer — an independently written SX1262 driver, from the SX126x datasheet's documented command set",
     "radio": "906.875 MHz, SF11, BW 250 kHz, preamble 16, sync word registers 0x24 0xB4. CODING RATE IS THE RECEIVER'S SETTING, NOT A MEASUREMENT -- see coding_rate_caveat.",
     "note": "Our nodes, our channel, our own text. Publishable under TESTING.md. No third-party traffic.",
     "clean_room_note": "The receiver's driver is our own work. No GPL radio library is linked or consulted; see README.md for the boundary and tools/check_cleanroom.sh for the gate that enforces it."
@@ -143,10 +143,32 @@
       "plaintext_note": "Data{portnum=5 ROUTING_APP, request_id=0x0c300350, payload=Routing{field 3 = 6}}. A rejection, echoing the request_id of a channel-encrypted want_ack direct message sent to a node that holds our public key. See routing_ack.json.",
       "elicited_by": "a want_ack probe transmitted over the air.",
       "portnum": 5
+    },
+    {
+      "raw_hex": "ffffffff64e76933542e74fd620800204cb0e4b5a3b3bd3e3206e4e7646cc728b322ff47",
+      "len": 36,
+      "header": {
+        "to": 4294967295,
+        "from": 862578532,
+        "id": 4252249684,
+        "flags": 98,
+        "hop_limit": 2,
+        "want_ack": false,
+        "via_mqtt": false,
+        "hop_start": 3,
+        "channel": 8,
+        "next_hop": 0,
+        "relay_node": 32
+      },
+      "ciphertext_hex": "4cb0e4b5a3b3bd3e3206e4e7646cc728b322ff47",
+      "plaintext_hex": "0801120e686f706669656c642d70726f62654800",
+      "plaintext_note": "Data{portnum=1 TEXT_MESSAGE_APP, payload='hopfield-probe', bitfield=0}. THE FIRST RELAYED FRAME IN THIS CORPUS. Originated by 0x3369e764 at hop_limit 3 and rebroadcast by 0x09d4b420, which stamped its own low byte 0x20 into relay_node and decremented the hop limit.",
+      "portnum": 1,
+      "why_this_frame_is_here": "IT IS THE ONLY FRAME WHERE hop_limit != hop_start, AND THAT IS THE POINT. Every other frame here is originated, so the two fields are equal and NOTHING pinned their bit positions: transposing hop_limit and hop_start in BOTH decode and encode passed all 102 host tests, all 24 ABI tests and every Kani harness, because each gate was self-consistent and the corpus could not tell them apart. flags=0x62 is 0b0110_0010 -- bits 0-2 are 2 and bits 5-7 are 3 -- and the receiving stock node independently logged HopLim=2 hopStart=3 for this packet id, so the assignment comes from their decoder rather than ours."
     }
   ],
   "coding_rate_caveat": "This file previously recorded 'CR 4/5' among the radio parameters, which read as a measured property of the transmission. It is not. It is what our receiver was configured to, and in LoRa explicit-header mode that setting is ignored: the header carries the payload's coding rate, is itself sent at a fixed 4/8, and the receiver reconfigures from it. Demonstrated 2026-08-16 -- a receiver deliberately set to 4/8 and to 4/6 decoded the same frames with crc=ok at matched SF and BW. So successful reception says nothing about the transmitter's coding rate, and LongFast's CR has never been measured by this project.",
-  "corpus_breadth_note": "Extended 2026-08-16 from three frames of one length and one portnum. Now spans 29 to 102 bytes across portnums 1 (text), 4 (NodeInfo) and 5 (Routing). PLAN.md had flagged the original as 'a sample rather than a survey'.",
+  "corpus_breadth_note": "Extended 2026-08-16 from three frames of one length and one portnum. Now spans 29 to 102 bytes across portnums 1 (text), 4 (NodeInfo) and 5 (Routing). PLAN.md had flagged the original as 'a sample rather than a survey'. EXTENDED 2026-08-18 along a new axis: relay depth. The sixth frame is the first that has been RELAYED, carrying hop_limit 2 of hop_start 3 and the relayer's low byte in relay_node. Until it was added, no frame here distinguished hop_limit from hop_start, and no test or proof could have caught the two being transposed.",
   "retransmission_note": "REFINES A CLAIM MADE IN retry_behaviour.json. That record says the payload changes on every retransmission -- re-encrypted rather than resent verbatim. That was observed on PKI direct messages only, where a fresh extra_nonce is drawn per attempt. The two 29-byte Routing retransmissions captured here are CHANNEL-encrypted and BYTE-IDENTICAL, because the channel nonce derives from (id, from) and is therefore deterministic. So the original claim was true of what it observed and over-general as written; the behaviour depends on the encryption mode.",
   "schema_note": "Every frame carries an explicit `portnum`. Added 2026-08-16 when the corpus grew past text messages and three tests failed -- they had scraped every raw_hex and assumed all of them decrypt to 'sniff-probe-N'. That assumption was invisible while the corpus was homogeneous. Tests now filter on portnum rather than assuming."
 }
