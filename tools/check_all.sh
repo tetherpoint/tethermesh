@@ -93,6 +93,16 @@ head "documentation matches the code"
     [ "$s" = 3 ] || rc=1
 }
 
+head "generated C header matches the crate"
+# T8. The header was hand-written until 2026-08-18 and drifted silently by
+# construction. Generating it is only half the fix: without this check the
+# generator exists and the committed file still rots the first time someone
+# edits the Rust and forgets to run it.
+"$ROOT/tools/check_header.sh" || {
+    s=$?
+    [ "$s" = 3 ] || rc=1
+}
+
 head "crate rules (panic-free, no alloc, no global state)"
 "$ROOT/tools/check_rust_rules.sh" || {
     s=$?

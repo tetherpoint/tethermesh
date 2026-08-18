@@ -358,6 +358,14 @@ That is the argument for spec-first in one instance: the error was in prose that
 
 The C ABI surface, `cbindgen` header, and the artifact discipline `DISTRIBUTION.md` commits to: a declared target set, reproducible builds, `tm_abi_version()`, a CI size budget, and a minimal C consumer built against each released archive.
 
+**2026-08-18 — the header is generated.** `tools/generate_header.sh` produces `ffi/include/tethermesh.h` with cbindgen, and `tools/check_header.sh` fails the build if the committed file is not what the crate generates — because generating it is only half the fix, and without the check the file rots the first time someone edits the Rust and forgets to run the generator. Red-tested both ways: a hand edit to the header and an ABI change without regeneration are each caught.
+
+Two things about that generation are load-bearing and are recorded in `ffi/cbindgen.toml` rather than left to be rediscovered. The C type names are pinned by `[export.rename]` — cbindgen would otherwise emit `TmKey` rather than `tm_key_t`, breaking every consumer and every line of documentation at once, because the C spelling is the contract and the Rust spelling is an implementation detail. And `TmCtx`/`TmOutbox` are **excluded and forward-declared**: the in-source `cbindgen:opaque` annotation was tried first and cbindgen 0.29.4 did not honour it for those `#[repr(C)]` structs, emitting their fields including `PacketHistory<HISTORY>`, which is not valid C. The generator refuses its own output if any of that leaks back in.
+
+`usize_is_size_t` keeps `size_t` in the signatures; cbindgen otherwise emits `uintptr_t`, the same width on every declared target and a different type in a published contract.
+
+Verified by rebuilding the existing C consumer against the generated header unchanged — same 28 `tm_*` symbols linked, so the contract did not move.
+
 **2026-08-16 — the blocker that deferred this phase turned out not to exist.**
 
 L8 has been parked behind the `staticlib` / `#[panic_handler]` tension: that a linkable `no_std` artifact needs a panic handler, and defining one emits the `rust_begin_unwind` symbol the artifact gate reads as evidence a path can panic. Tested rather than reasoned about, and it is a **measurement artifact**.

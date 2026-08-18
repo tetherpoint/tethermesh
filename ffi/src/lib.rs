@@ -137,16 +137,22 @@ pub extern "C" fn tm_abi_version() -> u32 {
 
 /// Verify the C header's view of struct layout matches this crate's.
 ///
-/// cbindgen is not available in this environment, so `tethermesh.h` is written
-/// by hand -- and a hand-written header against a changing Rust crate drifts
-/// silently, producing field reads at the wrong offsets that look like protocol
-/// bugs. The C side passes its own `sizeof`s and a mismatch fails loudly at
-/// init instead.
+/// **The header is generated now** (`tools/generate_header.sh`, gated by
+/// `tools/check_header.sh`), so the drift this was built to mitigate is largely
+/// gone. It was hand-written until 2026-08-18 because cbindgen was not
+/// installed, and a hand-written header against a changing crate drifts
+/// silently -- a field added on the Rust side shifts every offset after it, and
+/// C then reads garbage that looks like a protocol bug.
 ///
-/// This is weaker than generating the header: equal sizes do not prove equal
-/// field order. It catches the common case (a field added, removed, or resized)
-/// and not the rare one (two fields swapped at the same width). Stated plainly
-/// so nobody reads it as more than it is.
+/// Keep calling it anyway. Generation and this check answer **different
+/// questions**: generation guarantees the committed header matches the crate at
+/// build time, while this catches a *stale header linked against a rebuilt
+/// library* -- a shipped binary and a header from a different version, which no
+/// amount of generation can see.
+///
+/// It compares sizes, so it catches a field added, removed or resized and does
+/// **not** catch two same-width fields swapped. Stated plainly so nobody reads
+/// it as more than it is.
 #[no_mangle]
 pub extern "C" fn tm_check_layout(
     sizeof_rx: usize,
@@ -298,7 +304,7 @@ const DEFAULT_PSK: [u8; 16] = [
 /// making a mistake worth surfacing.
 /// # Safety
 ///
-/// `out` must be null or a valid, aligned, writable `TmKey`.
+/// `out` must be null or a valid, aligned, writable `tm_key_t`.
 ///
 /// **This is `unsafe` because it writes through `out`, and it was not always.**
 /// It was declared safe while dereferencing a raw pointer, which is unsound:
@@ -1027,7 +1033,8 @@ pub unsafe extern "C" fn tm_ack_encode(
 /// has no entropy source and no storage, and offering a `tm_keygen` that
 /// quietly used a weak one would put a security-critical choice behind an
 /// interface that cannot honour it. [`crate::TmUser::public_key`] is where the
-/// result belongs; `backend::SecretKey::Slot` is the seam for a private key
+/// result belongs in a `tm_user_t`'s `public_key`; `backend::SecretKey::Slot`
+/// is the seam for a private key
 /// that never becomes addressable at all.
 #[no_mangle]
 pub unsafe extern "C" fn tm_x25519_public(
@@ -1199,7 +1206,7 @@ pub unsafe extern "C" fn tm_nodeinfo_encode(
 
 /// A message key agreed with one peer: SHA-256 over the raw X25519 secret.
 ///
-/// A distinct type for the same reason [`TmKey`] is one — it is not
+/// A distinct type for the same reason `tm_key_t` is one — it is not
 /// interchangeable with a channel key, and the two are the same shape in C. A
 /// channel key is 16 bytes of AES-128 shared by everyone on the channel; this
 /// is 32 bytes of AES-256 shared with exactly one peer, and passing one where
@@ -1495,7 +1502,7 @@ pub unsafe extern "C" fn tm_data_decode(
 
 /// Read a `NODEINFO_APP` payload as a `User`.
 ///
-/// The same [`TmUser`] the encoder takes, filled in the other direction, so a
+/// The same `tm_user_t` the encoder takes, filled in the other direction, so a
 /// consumer has one description of a peer rather than two that can disagree.
 /// Every pointer borrows from `payload`.
 ///
