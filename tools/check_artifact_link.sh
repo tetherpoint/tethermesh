@@ -68,7 +68,15 @@ done
 # triple: a wrong float ABI links but produces an image that faults at runtime.
 case "$TARGET" in
     thumbv8m.main-none-eabihf) MFLAGS="-mcpu=cortex-m33 -mthumb -mfloat-abi=hard -mfpu=fpv5-sp-d16" ;;
+    thumbv8m.main-none-eabi)   MFLAGS="-mcpu=cortex-m33 -mthumb -mfloat-abi=soft" ;;
     thumbv7em-none-eabihf)     MFLAGS="-mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16" ;;
+    # ESP32-C3/C6, the parts targets.conf names for this row. `zicsr_zifencei`
+    # is spelled out because GCC 12 and later split those out of the base `i`
+    # extension: a bare `-march=rv32imc` fails to assemble against a Rust
+    # rlib built for riscv32imc. ilp32 is soft float, which is what the Rust
+    # target is -- and a float-ABI mismatch here LINKS and then faults at
+    # runtime, which is the reason this table is explicit rather than derived.
+    riscv32imc-unknown-none-elf) MFLAGS="-march=rv32imc_zicsr_zifencei -mabi=ilp32" ;;
     *) printf '\033[31m[artifact] no machine flags recorded for %s\033[0m\n' "$TARGET" >&2; exit 1 ;;
 esac
 
@@ -164,7 +172,16 @@ else
 fi
 
 # ── 2. the calls must survive as real branches ─────────────────────────────
-calls=$("$OBJDUMP" -d "$WORK/linked.elf" 2>/dev/null | grep -c 'bl.*tm_channel_hash' || true)
+# The call instruction is spelled differently per architecture and the pattern
+# must not be: ARM emits `bl <sym>`, RISC-V emits `jal <sym>` (or `call`). This
+# read `bl.*tm_channel_hash` and so REFUSED every RISC-V image while reporting
+# it as "the call was optimised away" -- the same ARM-centrism targets.conf
+# records finding in the panic gate's allowlist.
+#
+# Anchored on `<sym>` at end of line so it matches the CALL and not the
+# function's own label, nor an internal branch to `<sym+0x1a>`.
+calls=$("$OBJDUMP" -d "$WORK/linked.elf" 2>/dev/null \
+        | grep -cE '(bl|jal|call)[[:space:]].*<tm_channel_hash>$' || true)
 if [ "$calls" -lt 1 ]; then
     fail "the consumer's call to tm_channel_hash is not a branch in the
               disassembly -- it was optimised away, so nothing was exercised."

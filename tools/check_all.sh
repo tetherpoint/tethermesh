@@ -29,12 +29,30 @@ if [ "${1:-}" = "--pending" ]; then
 Checks that exist as requirements but cannot run until there is something to
 check. Each is listed here so the gap is visible rather than forgotten.
 
-  artifact test         PARTIAL. tools/check_artifact_link.sh links a real C
-                        consumer and inspects the linked image, and passes on
-                        Cortex-M33 and Cortex-M4. It is not yet driven across
-                        the whole declared target set: RISC-V has no cross-gcc
-                        installed here, so that row cannot be linked at all.
-                        Reported rather than skipped quietly.
+  artifact test         tools/check_artifact_link.sh links a real C consumer
+                        and inspects the linked image. ALL FOUR declared
+                        targets now pass, RISC-V included -- it was reported as
+                        PARTIAL until 2026-08-18 on the belief that no RISC-V
+                        cross-gcc existed here. One did: ESP-IDF's
+                        riscv32-esp-elf, which this bench compiles ESP32-C6
+                        with daily. The search had looked for
+                        riscv32-unknown-elf and clang and concluded absence.
+
+                        Two things had to be fixed once it ran, and both are the
+                        same failure mode this file keeps recording. The machine
+                        flags table had no RISC-V row, and the "did the call
+                        survive" grep matched ARM's `bl` only -- so a perfectly
+                        good RISC-V image was REFUSED, and refused with the
+                        message "the call was optimised away", which is a
+                        different and more alarming claim than the truth. It is
+                        `jal` on RISC-V; the pattern now takes bl/jal/call and
+                        is anchored so it cannot match a label or an internal
+                        branch.
+
+                        Still not automated in this script, because the
+                        toolchain paths are arguments rather than guesses -- a
+                        cross compiler found by guessing is one nobody can
+                        reproduce. Run it per target with the prefix.
 
 Implemented since this list was written, and no longer pending:
 
