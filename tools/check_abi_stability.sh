@@ -54,6 +54,9 @@ base_ver=${base_ver:-0}
 
 if [ "${1:-}" = "--accept" ]; then
     {
+        echo "# SPDX-FileCopyrightText: 2026 The tetherpoint Authors"
+        echo "# SPDX-License-Identifier: Apache-2.0"
+        echo "#"
         echo "# tethermesh C ABI baseline -- the surface a consumer links against."
         echo "#"
         echo "# Refreshed DELIBERATELY, never to make a build pass. If this file"

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 The tetherpoint Authors
+# SPDX-License-Identifier: Apache-2.0
+#
 # tethermesh C ABI baseline -- the surface a consumer links against.
 #
 # Refreshed DELIBERATELY, never to make a build pass. If this file
