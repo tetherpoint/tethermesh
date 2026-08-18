@@ -26,6 +26,34 @@ dependency at all:
 | hacl-rs curve files, isolated | no | **+3** |
 | `libcrux-curve25519` (whole crate) | **required** | +37 |
 
+**VERIFIED 2026-08-18, BY BUILDING IT BOTH WAYS — and the distinction is sharper
+than "the curve path never uses it" suggests.**
+
+| built as | allocator | panic symbols |
+|---|---|---|
+| the curve path's own modules — `fstar`, `lowstar`, `bignum25519_51`, `curve25519_51` | **no** | **+3** |
+| the whole `libcrux-hacl-rs` crate, *calling only that same curve path* | **REQUIRED — build fails** | n/a |
+| `libcrux-curve25519` from crates.io (what `measure_panic_symbols.sh` builds) | **REQUIRED — build fails** | n/a |
+
+**THE ALLOCATOR REQUIREMENT IS A CRATE-LEVEL PROPERTY, NOT A CALL-GRAPH ONE.**
+`lib.rs` declares `pub mod prelude { extern crate alloc; }`, and compiling the
+crate compiles that module — so a consumer that touches only the allocation-free
+curve path still fails with `no global memory allocator found but one is
+required`. Reasoning about which functions you call will not save you, and this
+is exactly the reasoning that produced a wrong summary on 2026-08-18: *"libcrux
+requires an allocator"*, unqualified, read as a claim about the curve code, which
+is false about it.
+
+The precise statement, and the only one to repeat: **the curve code is
+disqualified by the PANIC rule (+3 paths); the crate around it is additionally
+disqualified by the ALLOCATION rule.** Taking only the modules that avoid the
+allocator means forking generated files, which the analysis below explains voids
+the verification it exists to provide.
+
+The three panic symbols were confirmed by the same build:
+`core::panicking::panic_bounds_check`, `core::panicking::panic_fmt`,
+`core::slice::index::slice_index_fail`.
+
 The good news is how narrow it is. `curve25519_51.rs` (342 lines) and
 `bignum25519_51.rs` (726) contain **no `panic!`, no `unwrap`, no `assert`,
 and no allocation**. Compiled with about 180 lines of `fstar`/`lowstar`

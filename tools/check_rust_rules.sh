@@ -332,6 +332,38 @@ for p in m.get("packages", []):
     else
         say "binary carries no panic machinery ($total symbols inspected, no outside references)"
     fi
+
+    # ── NO ALLOCATION, checked on the object rather than asserted ──────────
+    #
+    # Rule 2 was stated in this file's header and enforced NOWHERE in this
+    # repository. The consuming firmware checked it; the library that makes the
+    # promise did not, so an allocator could be introduced here and only be
+    # caught one repository away -- if at all.
+    #
+    # THE FAILURE THIS EXISTS FOR IS SPECIFIC AND HAS ALREADY HAPPENED ONCE, in
+    # analysis rather than in code. libcrux's curve path is genuinely
+    # allocation-free -- verified 2026-08-18, it builds no_std with no allocator
+    # and carries zero allocator symbols. But the CRATE around it declares
+    # `pub mod prelude { extern crate alloc; }`, and that forces an allocator on
+    # any consumer even when the curve path never touches it. THE ALLOCATOR
+    # REQUIREMENT IS A CRATE-LEVEL PROPERTY, NOT A CALL-GRAPH ONE. A dependency
+    # can therefore be allocation-free in the part you use and still break this
+    # rule, and reasoning about which functions you call will not tell you.
+    #
+    # So it is measured, on the built object, where the answer is not a matter
+    # of opinion.
+    alloc_syms=$("$NM" "$LIBA" 2>/dev/null \
+        | grep -oE '__rust_alloc[a-z_]*|__rg_alloc[a-z_]*|__rdl_alloc[a-z_]*|__rust_realloc|__rust_dealloc|__rust_alloc_error_handler' \
+        | sort -u || true)
+    if [ -n "$alloc_syms" ]; then
+        fail "$LIBA LINKS A RUST ALLOCATOR. DISTRIBUTION.md forbids one outright:
+              buffers are caller-provided with explicit lengths, and an allocator
+              on an embedded target introduces a failure mode with no correct
+              handling. This is rule 2 and it is not negotiable:"
+        printf '%s\n' "$alloc_syms" | sed 's/^/                /' >&2
+    else
+        say "no allocator linked (rule 2, checked on the object)"
+    fi
 fi
 
 if [ "$violations" -gt 0 ]; then

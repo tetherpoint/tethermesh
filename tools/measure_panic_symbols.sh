@@ -134,11 +134,31 @@ printf '%-26s %8s %10s %8s %8s\n' "--------------------------" "--------" "-----
 
 for c in baseline dalek libcrux; do
     if ! (cd "$WORK/$c" && cargo build --release --offline >"$WORK/$c.log" 2>&1); then
-        # A build failure is a RESULT here, not an error. libcrux requiring a
-        # global allocator is precisely why it is not linked, and DISTRIBUTION.md
-        # forbids one outright — so record it rather than aborting the run.
+        # A build failure is a RESULT here, not an error. Record it rather than
+        # aborting the run.
+        #
+        # READ THE LABEL CAREFULLY -- IT COST A MISDIAGNOSIS ON 2026-08-18.
+        # This row builds the WHOLE `libcrux-curve25519` crate. The allocator it
+        # requires comes from the crate around the curve code, NOT from the curve
+        # code. Verified by building it both ways:
+        #
+        #   curve path only (fstar + lowstar + bignum25519_51 + curve25519_51)
+        #       builds no_std for thumbv8m with NO allocator, zero allocator
+        #       symbols, and +3 panic symbols (panic_bounds_check, panic_fmt,
+        #       slice_index_fail).
+        #   the libcrux-hacl-rs CRATE, calling only that same curve path
+        #       FAILS with "no global memory allocator", because lib.rs declares
+        #       `pub mod prelude { extern crate alloc; }`.
+        #
+        # So THE ALLOCATOR REQUIREMENT IS A CRATE-LEVEL PROPERTY, NOT A
+        # CALL-GRAPH ONE, and "we only call the allocation-free part" does not
+        # help. Saying "libcrux requires an allocator" unqualified reads as a
+        # statement about the curve code and is wrong about it; the honest
+        # summary is that the curve code is disqualified by the PANIC rule and
+        # the crate additionally by the allocation rule.
+        # docs/UPSTREAM-HACL-PANIC-FREEDOM.md carries the full analysis.
         if grep -q 'no global memory allocator' "$WORK/$c.log"; then
-            printf '%-26s %8s %10s %8s %8s   <- REQUIRES AN ALLOCATOR\n' "$c" "n/a" "n/a" "n/a" "n/a"
+            printf '%-26s %8s %10s %8s %8s   <- WHOLE CRATE NEEDS AN ALLOCATOR (its prelude, not its curve code)\n' "$c" "n/a" "n/a" "n/a" "n/a"
             continue
         fi
         warn "$c failed to build for a reason other than the allocator:"
