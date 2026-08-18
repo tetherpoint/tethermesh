@@ -122,6 +122,10 @@ A side effect worth recording: the oracle **loaded a `ChannelFile` we hand-encod
 
 **The default primary channel's stored PSK is the single byte `0x01`** — a short index, not a key, expanded at use (`Expand short PSK #1`) into a 128-bit key (`Use AES128 key!`). A 16-byte PSK supplied directly also selects AES128. This corroborates the asserted default-PSK value without independently proving it: given the now-verified hash function, the observed `0x08` requires `xor_fold(default_psk) == 0x02`, which the asserted value satisfies — necessary, not sufficient.
 
+**An ORIGINATING node stamps `relay_node` with its own low byte — it is not left zero.** Measured 2026-08-18 by decoding the corpus rather than by reading prose: all five frames in `on_air_frames.json` are originated (`hop_limit == hop_start`) and every one carries `relay_node = 0x64` for node `0x3369e764`. A stock node originating a direct message logs the same, `relay=0x64` on its own `enqueue for send`.
+
+That matters because zero is the tempting default and it is *tolerated*: frames we sent with `relay_node = 0` were rendered normally by stock nodes, so nothing on the air reports the deviation. Two encoders in our own C ABI wrote 0 and two wrote the low byte, and the disagreement survived until somebody decoded the corpus.
+
 **`relay_node` is a one-byte truncation of the sender's node number.** Node `0x7739e49b` transmitted `relay=0x9b`. Confirmed twice more, and independently of the log channel, on captured UDP traffic: `0x266cbc2b → 0x2b` and `0x2f7f90dc → 0xdc` (`tests/captures/udp_mesh_capture.json`).
 
 **The `channel` field carries the one-byte channel hash.** Captured packets on the default channel show `channel = 8`, matching `xor_fold("LongFast") ^ xor_fold(default_psk)` — the hash function verified above, now corroborated at a second boundary.

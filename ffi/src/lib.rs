@@ -629,7 +629,14 @@ pub unsafe extern "C" fn tm_text_encode(
         hop_start: hop_limit,
         channel: channel_hash,
         next_hop: 0,
-        relay_node: 0,
+        // The low byte of `from`, because that is what an originating node
+        // actually puts on the wire. All five frames in the on-air corpus are
+        // originated (hop_limit == hop_start) and every one carries
+        // relay_node = 0x64 for node 0x3369e764. This encoded 0 until
+        // 2026-08-18, which stock nodes tolerate -- our text was rendered --
+        // but it is a deviation from measured behaviour, and it disagreed with
+        // tm_nodeinfo_encode and tm_relay_prepare in this same ABI.
+        relay_node: (from & 0xFF) as u8,
     };
 
     let dst = slice::from_raw_parts_mut(out, out_cap);
@@ -994,7 +1001,14 @@ pub unsafe extern "C" fn tm_ack_encode(
         hop_start: hop_limit,
         channel: channel_hash,
         next_hop: 0,
-        relay_node: 0,
+        // The low byte of `from`, because that is what an originating node
+        // actually puts on the wire. All five frames in the on-air corpus are
+        // originated (hop_limit == hop_start) and every one carries
+        // relay_node = 0x64 for node 0x3369e764. This encoded 0 until
+        // 2026-08-18, which stock nodes tolerate -- our text was rendered --
+        // but it is a deviation from measured behaviour, and it disagreed with
+        // tm_nodeinfo_encode and tm_relay_prepare in this same ABI.
+        relay_node: (from & 0xFF) as u8,
     };
     let dst = slice::from_raw_parts_mut(out, out_cap);
     // get(), not plain[..plain_len]: bare slice indexing compiles to a panic

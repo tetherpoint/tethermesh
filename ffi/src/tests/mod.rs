@@ -649,3 +649,70 @@ fn the_decoders_refuse_rubbish_rather_than_inventing_a_peer() {
         TM_E_ARG,
     );
 }
+
+/// Every originating encoder stamps `relay_node`, and they all agree.
+///
+/// The rule is measured, not inferred: all five frames in `on_air_frames.json`
+/// are originated — `hop_limit == hop_start` — and every one carries
+/// `relay_node = 0x64` for node `0x3369e764`. `WIRE_REFERENCE.md` corroborates
+/// the truncation on two further nodes from captured traffic.
+///
+/// This exists because two encoders in this ABI disagreed with the other two
+/// until 2026-08-18: `tm_text_encode` and `tm_ack_encode` wrote 0 while
+/// `tm_nodeinfo_encode` and `tm_pki_encode` wrote the low byte. Stock nodes
+/// tolerate the zero — our text was rendered — so nothing on the bench would
+/// ever have reported it. A disagreement inside one ABI about what goes on the
+/// wire is the kind of thing that is only ever found by looking.
+#[test]
+fn every_originating_encoder_stamps_relay_node_with_the_low_byte_of_from() {
+    const FROM: u32 = 0x3280_70b9;
+    const LOW: u8 = 0xb9;
+
+    let mut key = TmKey { bytes: [0u8; 16] };
+    assert_eq!(unsafe { tm_key_from_index(1, &mut key) }, TM_OK);
+    let mut out = [0u8; 256];
+
+    let n = unsafe {
+        tm_text_encode(FROM, 0xFFFF_FFFF, 1, 3, 0x08, 0, &key, b"hi".as_ptr(), 2,
+                       out.as_mut_ptr(), out.len())
+    };
+    assert!(n > 0);
+    let h = frame::peek_header(&out[..usize::try_from(n).unwrap()]).expect("header");
+    assert_eq!(h.relay_node, LOW, "tm_text_encode");
+    assert_eq!(h.hop_limit, h.hop_start, "an originated frame");
+
+    let n = unsafe {
+        tm_ack_encode(FROM, 0x3369_e764, 2, 0xdead, 3, 0x08, &key,
+                      out.as_mut_ptr(), out.len())
+    };
+    assert!(n > 0);
+    let h = frame::peek_header(&out[..usize::try_from(n).unwrap()]).expect("header");
+    assert_eq!(h.relay_node, LOW, "tm_ack_encode");
+
+    let id = b"!328070b9";
+    let mac = [0u8; 6];
+    let user = TmUser {
+        id: id.as_ptr(), id_len: id.len(),
+        long_name: core::ptr::null(), long_name_len: 0,
+        short_name: core::ptr::null(), short_name_len: 0,
+        public_key: core::ptr::null(), public_key_len: 0,
+        macaddr: mac.as_ptr(), macaddr_len: mac.len(),
+        hw_model: 0, role: 0,
+    };
+    let n = unsafe {
+        tm_nodeinfo_encode(FROM, 0xFFFF_FFFF, 3, 3, 0x08, 0, &key, &user,
+                           out.as_mut_ptr(), out.len())
+    };
+    assert!(n > 0);
+    let h = frame::peek_header(&out[..usize::try_from(n).unwrap()]).expect("header");
+    assert_eq!(h.relay_node, LOW, "tm_nodeinfo_encode");
+
+    let pki = bench_key();
+    let n = unsafe {
+        tm_pki_encode(FROM, 0x3369_e764, 4, 3, 0, &pki, 0x1234, 1,
+                      b"x".as_ptr(), 1, out.as_mut_ptr(), out.len())
+    };
+    assert!(n > 0);
+    let h = frame::peek_header(&out[..usize::try_from(n).unwrap()]).expect("header");
+    assert_eq!(h.relay_node, LOW, "tm_pki_encode");
+}
