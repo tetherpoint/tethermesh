@@ -19,7 +19,7 @@ Everything in this repository should make sense to someone who has never heard o
 
 - The Meshtastic on-air protocol: frame header, channel hashing, channel and PKI cryptography, the protobuf codec.
 - Routing behaviour needed for compatibility: managed flooding, duplicate suppression, hop-limit handling, duty-cycle accounting.
-- The extension suite and its specification — the wire format, its cryptographic construction, and its rationale. **Bundles that need a hardware source do not qualify**; location and ranging were specified here and moved out on 2026-08-17 for exactly that reason. A bundle must be message formats and state, testable with no hardware.
+- The extension suite and its specification — the wire format, its cryptographic construction, and its rationale. **Bundles that need a hardware source do not qualify**; location and ranging were specified here and moved out on 2026-08-17 for exactly that reason. A bundle must be message formats and state, testable with no hardware — **and it must be a separate crate the core does not depend on**, so that taking the protocol library never means taking the extensions with it. `groups` satisfies both and stays.
 - `WIRE_REFERENCE.md`: on-air facts with sources, verified separated from unverified.
 - Host-side tests and on-air capture fixtures.
 - Tooling that operates on the above without hardware — for example the clean-room checker.

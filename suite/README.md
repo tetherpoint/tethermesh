@@ -11,7 +11,11 @@ The boundary is fixed and non-negotiable: **extensions live in the payload and t
 
 **Anything needing a hardware source belongs to a consuming product, not here.** Location and ranging were both specified in this file and are both gone as of 2026-08-17: one needed a GNSS receiver, the other ranging silicon, and neither is something a portable protocol library can carry. `SCOPE.md` said as much all along — *"source implementations that require particular hardware — a GNSS driver, a ranging driver — are out of scope here"* — and the specifications drifted across that line before the implementations could.
 
-What is left is what this repository can hold honestly: extensions that are **message formats and state**, testable on any machine, with no hardware precondition. `groups` is one. A future bundle qualifies on the same test.
+What is left is what this repository can hold honestly: extensions that are **message formats and state**, testable on any machine, with no hardware precondition. `groups` is one, and stays — **as a separate crate**, which is the property that makes keeping it safe rather than a matter of taste.
+
+The dependency runs one way: `tethermesh_groups` depends on the core, and the core depends on nothing here. So a consumer taking the protocol library gets exactly that, and pays for groups only by asking for it — `cargo build -p tethermesh` does not compile a line of it. An extension that the core depended on would be a parallel feature set wearing a crate boundary; this is the opposite arrangement.
+
+A future bundle qualifies on the same two tests: **no hardware source, and the core must not depend on it.**
 
 This repository otherwise tracks Meshtastic. New work here should be **aligning with upstream protocol features**, not growing a parallel feature set.
 
