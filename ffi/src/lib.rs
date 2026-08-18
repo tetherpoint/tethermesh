@@ -309,6 +309,9 @@ pub fn map_delivery_error(e: DeliveryError) -> i32 {
 #[cfg(test)]
 mod tests;
 
+#[cfg(kani)]
+mod proofs;
+
 
 
 // ── Keys ────────────────────────────────────────────────────────────────────

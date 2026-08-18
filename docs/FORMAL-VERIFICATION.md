@@ -75,6 +75,52 @@ table is part of it. Run with `cargo kani --workspace`, which covers both crates
 | `the_epoch_never_wraps_from_any_starting_value` | from any epoch, a bump either advances by exactly one or refuses at 255. A wrap would reproduce epoch 0's key and reuse every nonce under it |
 | `nonce_construction_is_total_and_carries_the_epoch` | total, 13 bytes, and the epoch reaches the nonce |
 
+## The C ABI — `ffi/src/proofs.rs`
+
+**This crate had no proofs until 2026-08-18, which was the wrong way round.** It
+is the surface a C consumer actually reaches, it grew from ABI v3 to v7 in a
+single day, and it was the least proven code here while the protocol crate had
+thirteen harnesses and the extension bundle six.
+
+Every property below was already covered by *examples*, and examples are chosen
+by whoever writes them. That is the difference these rows buy.
+
+| harness | property |
+|---|---|
+| `no_request_can_beat_the_retry_ceiling` | over every `(max_attempts, interval_us)`, no accepted policy exceeds the measured ceiling. This is the mechanism enforcing `PLAN.md`'s shared-airtime rule, and it had four example tests; a single attempt is exempt because it never retransmits |
+| `classify_ack_is_total_on_arbitrary_bytes` | no payload panics it — attacker-reachable, because channel decryption authenticates nothing and turns any bytes into some other bytes |
+| `tm_header_peek_refuses_every_short_frame_and_reads_every_full_one` | every length below a header is refused and every full one decodes, proven across the boundary rather than at the two points a test would pick |
+| `tm_pki_decrypt_refuses_every_frame_too_short_to_hold_one` | every frame below `header(16) + tag(8) + extra_nonce(4)` is refused, never read past |
+| `tm_key_from_index_accepts_exactly_the_defined_range` | exactly `1..=10`, and `0` — which means "no crypto" on the wire — never silently yields a key |
+| `tm_data_decode_is_total_on_arbitrary_bytes` | no payload panics the decoder a consumer calls on anything that decrypted |
+
+**Three of these need an explicit `#[kani::unwind]`, and that is worth
+understanding before trusting them.** `Data::decode` walks protobuf fields in a
+loop Kani cannot bound by itself, and `tm_pki_decrypt`'s harness iterates every
+length below the minimum frame. Without a bound the checker searches instead of
+proving: the first attempt at these ran **past ten minutes without reporting a
+single harness**.
+
+**A bound that is too small would silently prove less**, which is why the
+unwinding assertions matter more than the bound: they are themselves checks, and
+they report `SUCCESS` here — meaning the loops are fully covered within the
+bound rather than cut off inside it. A truncated proof and a complete one look
+identical in the summary line, and only that check separates them.
+
+The same lesson applies to symbolic lengths. A `usize` drawn by `kani::any()`
+and passed to `slice::from_raw_parts` makes the checker model a slice of unknown
+extent and is what made the first attempt intractable. These harnesses iterate
+**concrete** lengths with symbolic **contents**, because the question — does
+each length refuse or decode — is finite and is better asked that way.
+
+**What these do not cover, and it is the larger half.** Nothing here says
+anything about **pointer validity**. The FFI boundary is the trust edge
+`DISTRIBUTION.md` names — a caller passing a bad pointer or a wrong length
+cannot be validated — so these harnesses supply real buffers and prove what
+happens for arbitrary contents and lengths *within* them. That is the half that
+is ours to guarantee. Null is checked at run time everywhere, because null is
+the one bad pointer that can be recognised.
+
 **What these do not cover, stated because the gap is easy to misread.** Nothing
 here proves the AEAD is sound — that is AES-CCM's property, checked instead
 against an independent implementation's answers in
