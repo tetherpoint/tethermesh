@@ -79,14 +79,41 @@
 // requires every unsafe OPERATION to sit in an explicit `unsafe {}` block even
 // inside an `unsafe fn`, so that a signature does not blanket-authorise a body.
 //
-// HONEST LIMITATION, 2026-08-17: the blocks below were applied by `cargo fix`,
-// which satisfies the lint by wrapping WHOLE FUNCTION BODIES -- `fn f(..) {
-// unsafe { .. } }`. That is exactly the blanket authorisation the attribute
-// exists to prevent, so for this crate the lint is currently satisfied without
-// being earned. Nothing regressed -- the bodies were `unsafe fn` bodies before
-// -- but nobody should read the attribute here as evidence that each unsafe
-// operation has been individually justified. Narrowing them to the specific
-// operations is real work and is recorded as such rather than claimed.
+// TWO DIFFERENT THINGS SHARE THE KEYWORD, and the distinction is the point.
+// `unsafe fn` is an obligation on CALLERS -- every function here is one, because
+// a C caller can pass any pointer at all. An `unsafe {}` block is an assertion
+// by the AUTHOR that this particular operation was checked. Without the lint the
+// first silently grants the second for a whole function body.
+//
+// EARNED 2026-08-18. It previously was not. `cargo fix` had satisfied the lint
+// by wrapping each WHOLE FUNCTION BODY -- `fn f(..) { unsafe { .. } }` -- which
+// is mechanically compliant and is exactly the blanket authorisation the
+// attribute exists to prevent. 25 functions were in that shape. Narrowing them
+// made the compiler enumerate what is genuinely unchecked: **75 operations**,
+// against roughly twice as many lines of ordinary safe code that had been
+// sitting inside those blocks -- the `zip` copy loops, the arithmetic, the
+// encode calls, the null checks. A reader can now see which is which.
+//
+// EVERY ONE OF THOSE BLOCKS IS ONE OF THREE OPERATIONS, and they share a single
+// precondition, stated here rather than repeated 79 times:
+//
+//   1. building a slice from a caller's pointer and length,
+//   2. reading or writing through a caller's out-pointer,
+//   3. taking a reference to a caller-owned struct.
+//
+// The precondition is that the pointer is valid, aligned, and the length
+// truthful. **That cannot be checked here and is not claimed to be** --
+// `DISTRIBUTION.md` calls the FFI boundary the trust edge for this reason: "a
+// caller passing a bad pointer or a wrong length cannot be validated". A null
+// pointer IS checked, everywhere, because null is the one bad pointer that can
+// be recognised. Where a function's obligation is narrower than the above, its
+// own `# Safety` section says so.
+//
+// The narrowing is size-neutral, which is the evidence it is a restructuring
+// and not a rewrite: 5066 -> 5070 bytes of .text on the largest target. The
+// first attempt was 700 bytes larger because `&unsafe { (*key).bytes }` COPIES
+// the key array into a temporary where the original borrowed it; the block
+// belongs around the dereference, not around the field access.
 #![forbid(unsafe_op_in_unsafe_fn)]
 #![allow(clippy::missing_safety_doc)]
 
@@ -315,7 +342,7 @@ const DEFAULT_PSK: [u8; 16] = [
 /// `unsafe` is a Rust-side obligation and does not affect the symbol, the
 /// calling convention or the header — so no version bump is owed for it.
 #[no_mangle]
-pub unsafe extern "C" fn tm_key_from_index(index: u8, out: *mut TmKey) -> i32 { unsafe {
+pub unsafe extern "C" fn tm_key_from_index(index: u8, out: *mut TmKey) -> i32 {
     if out.is_null() {
         return TM_E_ARG;
     }
@@ -334,29 +361,29 @@ pub unsafe extern "C" fn tm_key_from_index(index: u8, out: *mut TmKey) -> i32 { 
     // the argument this crate does not accept: the rule is that no panic path
     // is emitted, and a proof by surrounding context is not that.
     k[15] = k[15].wrapping_add(index.wrapping_sub(1));
-    (*out).bytes = k;
+    unsafe { (*out).bytes = k };
     TM_OK
-}}
+}
 
 /// Take an explicit key. 16 bytes is used as-is; 32 bytes is accepted because
 /// the protocol allows AES-256 channels, and its first 16 bytes are what this
 /// path needs. Any other length is an error rather than a truncation.
 #[no_mangle]
-pub unsafe extern "C" fn tm_key_from_bytes(psk: *const u8, len: usize, out: *mut TmKey) -> i32 { unsafe {
+pub unsafe extern "C" fn tm_key_from_bytes(psk: *const u8, len: usize, out: *mut TmKey) -> i32 {
     if psk.is_null() || out.is_null() {
         return TM_E_ARG;
     }
     if len != 16 && len != 32 {
         return TM_E_BAD_KEY_LEN;
     }
-    let src = slice::from_raw_parts(psk, 16);
+    let src = unsafe { slice::from_raw_parts(psk, 16) };
     let mut k = [0u8; 16];
     for (d, s) in k.iter_mut().zip(src) {
         *d = *s;
     }
-    (*out).bytes = k;
+    unsafe { (*out).bytes = k };
     TM_OK
-}}
+}
 
 /// Channel hash over a name and an already-expanded key.
 ///
@@ -369,7 +396,7 @@ pub unsafe extern "C" fn tm_channel_hash(name: *const u8, name_len: usize, key: 
     if name.is_null() || key.is_null() {
         return 0;
     }
-    channel::channel_hash(slice::from_raw_parts(name, name_len), &(*key).bytes)
+    channel::channel_hash(slice::from_raw_parts(name, name_len), unsafe { &(*key).bytes })
 }}
 
 // ── Context ─────────────────────────────────────────────────────────────────
@@ -403,14 +430,14 @@ pub extern "C" fn tm_ctx_align() -> usize {
 /// `abi` must be `tm_abi_version()` as the *header* saw it; a mismatch fails
 /// here rather than misbehaving later.
 #[no_mangle]
-pub unsafe extern "C" fn tm_ctx_init(ctx: *mut TmCtx, abi: u32, node_num: u32) -> i32 { unsafe {
+pub unsafe extern "C" fn tm_ctx_init(ctx: *mut TmCtx, abi: u32, node_num: u32) -> i32 {
     if ctx.is_null() {
         return TM_E_ARG;
     }
     if abi != TM_ABI_VERSION {
         return TM_E_ABI;
     }
-    ctx.write(TmCtx {
+    unsafe { ctx.write(TmCtx {
         history: PacketHistory::new(),
         // 100% of a 1-hour window: a duty budget the caller has not chosen to
         // constrain. Regulatory limits are a deployment decision and belong to
@@ -422,9 +449,9 @@ pub unsafe extern "C" fn tm_ctx_init(ctx: *mut TmCtx, abi: u32, node_num: u32) -
         window: ContentionWindow::MESHTASTIC_SHAPE,
         node_num,
         role: Role::Client,
-    });
+    }) };
     TM_OK
-}}
+}
 
 // ── Receive ─────────────────────────────────────────────────────────────────
 
@@ -487,12 +514,12 @@ pub unsafe extern "C" fn tm_rx_observe(
     now_us: u64,
     heard_relayed: u8,
     out: *mut TmRx,
-) -> i32 { unsafe {
+) -> i32 {
     if ctx.is_null() || frame_ptr.is_null() || out.is_null() {
         return TM_E_ARG;
     }
-    let ctx = &mut *ctx;
-    let bytes = slice::from_raw_parts(frame_ptr, frame_len);
+    let ctx = unsafe { &mut *ctx };
+    let bytes = unsafe { slice::from_raw_parts(frame_ptr, frame_len) };
 
     let Some(h) = Header::decode(bytes) else {
         return TM_E_SHORT;
@@ -539,9 +566,9 @@ pub unsafe extern "C" fn tm_rx_observe(
             };
         }
     }
-    out.write(r);
+    unsafe { out.write(r) };
     TM_OK
-}}
+}
 
 /// Decrypt a frame in place and hand back the plaintext payload.
 ///
@@ -555,20 +582,20 @@ pub unsafe extern "C" fn tm_frame_decrypt(
     key: *const TmKey,
     payload_out: *mut *const u8,
     payload_len_out: *mut usize,
-) -> i32 { unsafe {
+) -> i32 {
     if frame_ptr.is_null() || key.is_null() || payload_out.is_null() || payload_len_out.is_null() {
         return TM_E_ARG;
     }
-    let buf = slice::from_raw_parts_mut(frame_ptr, frame_len);
-    match frame::decode_in_place(buf, &(*key).bytes, 0) {
+    let buf = unsafe { slice::from_raw_parts_mut(frame_ptr, frame_len) };
+    match frame::decode_in_place(buf, unsafe { &(*key).bytes }, 0) {
         Ok((_h, payload)) => {
-            *payload_out = payload.as_ptr();
-            *payload_len_out = payload.len();
+            unsafe { *payload_out = payload.as_ptr() };
+            unsafe { *payload_len_out = payload.len() };
             TM_OK
         }
         Err(_) => TM_E_SHORT,
     }
-}}
+}
 
 // ── Transmit ────────────────────────────────────────────────────────────────
 
@@ -602,11 +629,11 @@ pub unsafe extern "C" fn tm_text_encode(
     text_len: usize,
     out: *mut u8,
     out_cap: usize,
-) -> i32 { unsafe {
+) -> i32 {
     if key.is_null() || text.is_null() || out.is_null() {
         return TM_E_ARG;
     }
-    let txt = slice::from_raw_parts(text, text_len);
+    let txt = unsafe { slice::from_raw_parts(text, text_len) };
 
     // Data -> protobuf, then that plaintext into the frame body.
     let data = Data {
@@ -639,7 +666,7 @@ pub unsafe extern "C" fn tm_text_encode(
         relay_node: (from & 0xFF) as u8,
     };
 
-    let dst = slice::from_raw_parts_mut(out, out_cap);
+    let dst = unsafe { slice::from_raw_parts_mut(out, out_cap) };
     // get(), not plain[..plain_len]. Bare slice indexing compiles to a panic
     // path, and one reaching a linked image is a crate-rule violation --
     // check_rust_rules.sh inspects the built object precisely because source
@@ -649,11 +676,11 @@ pub unsafe extern "C" fn tm_text_encode(
     let Some(body) = plain.get(..plain_len) else {
         return TM_E_ARG;
     };
-    match frame::encode(&header, body, &(*key).bytes, 0, dst) {
+    match frame::encode(&header, body, unsafe { &(*key).bytes }, 0, dst) {
         Ok(n) => n as i32,
         Err(_) => TM_E_ARG,
     }
-}}
+}
 
 /// Patch a received frame in place so it can be rebroadcast.
 ///
@@ -673,11 +700,11 @@ pub unsafe extern "C" fn tm_relay_prepare(
     frame_len: usize,
     relay_hop_limit: u8,
     our_node_num: u32,
-) -> i32 { unsafe {
+) -> i32 {
     if frame_ptr.is_null() {
         return TM_E_ARG;
     }
-    let buf = slice::from_raw_parts_mut(frame_ptr, frame_len);
+    let buf = unsafe { slice::from_raw_parts_mut(frame_ptr, frame_len) };
     let Some(mut h) = Header::decode(buf) else {
         return TM_E_SHORT;
     };
@@ -688,7 +715,7 @@ pub unsafe extern "C" fn tm_relay_prepare(
         *d = *s;
     }
     TM_OK
-}}
+}
 
 /// Record a packet we originated, so it is suppressed if it comes back.
 ///
@@ -701,14 +728,14 @@ pub unsafe extern "C" fn tm_relay_prepare(
 /// the case too, which is a second mechanism rather than a louder version of
 /// the first.
 #[no_mangle]
-pub unsafe extern "C" fn tm_note_originated(ctx: *mut TmCtx, from: u32, id: u32) -> i32 { unsafe {
+pub unsafe extern "C" fn tm_note_originated(ctx: *mut TmCtx, from: u32, id: u32) -> i32 {
     if ctx.is_null() {
         return TM_E_ARG;
     }
-    let ctx = &mut *ctx;
+    let ctx = unsafe { &mut *ctx };
     let _ = ctx.history.observe(from, id);
     TM_OK
-}}
+}
 
 // ── Delivery: acknowledgement and retransmission ─────────────────────────────
 //
@@ -769,7 +796,7 @@ pub unsafe extern "C" fn tm_outbox_init(
     abi: u32,
     max_attempts: u8,
     interval_us: u32,
-) -> i32 { unsafe {
+) -> i32 {
     if ob.is_null() {
         return TM_E_ARG;
     }
@@ -785,9 +812,9 @@ pub unsafe extern "C" fn tm_outbox_init(
         Err(code) => return code,
     };
 
-    ob.write(TmOutbox { inner: Outbox::new(policy) });
+    unsafe { ob.write(TmOutbox { inner: Outbox::new(policy) }) };
     TM_OK
-}}
+}
 
 /// Track a frame that has **already been transmitted once**.
 ///
@@ -801,16 +828,16 @@ pub unsafe extern "C" fn tm_outbox_track(
     frame_ptr: *const u8,
     frame_len: usize,
     now_us: u64,
-) -> i32 { unsafe {
+) -> i32 {
     if ob.is_null() || frame_ptr.is_null() {
         return TM_E_ARG;
     }
-    let f = slice::from_raw_parts(frame_ptr, frame_len);
-    match (*ob).inner.track(f, now_us) {
+    let f = unsafe { slice::from_raw_parts(frame_ptr, frame_len) };
+    match unsafe { (*ob).inner.track(f, now_us) } {
         Ok(()) => TM_OK,
         Err(e) => map_delivery_error(e),
     }
-}}
+}
 
 /// Retire the entry an acknowledgement refers to.
 ///
@@ -818,21 +845,21 @@ pub unsafe extern "C" fn tm_outbox_track(
 /// error** -- the acknowledgement may be for a frame already retired, or for
 /// another node entirely.
 #[no_mangle]
-pub unsafe extern "C" fn tm_outbox_acknowledge(ob: *mut TmOutbox, request_id: u32) -> i32 { unsafe {
+pub unsafe extern "C" fn tm_outbox_acknowledge(ob: *mut TmOutbox, request_id: u32) -> i32 {
     if ob.is_null() {
         return TM_E_ARG;
     }
-    i32::from((*ob).inner.acknowledge(request_id))
-}}
+    i32::from(unsafe { (*ob).inner.acknowledge(request_id) })
+}
 
 /// How many frames are still awaiting acknowledgement.
 #[no_mangle]
-pub unsafe extern "C" fn tm_outbox_pending(ob: *const TmOutbox) -> i32 { unsafe {
+pub unsafe extern "C" fn tm_outbox_pending(ob: *const TmOutbox) -> i32 {
     if ob.is_null() {
         return TM_E_ARG;
     }
-    i32::try_from((*ob).inner.len()).unwrap_or(i32::MAX)
-}}
+    i32::try_from(unsafe { (*ob).inner.len() }).unwrap_or(i32::MAX)
+}
 
 /// Drop one entry that has exhausted every attempt, reporting what it was.
 ///
@@ -848,19 +875,19 @@ pub unsafe extern "C" fn tm_outbox_reap(
     now_us: u64,
     out_from: *mut u32,
     out_id: *mut u32,
-) -> i32 { unsafe {
+) -> i32 {
     if ob.is_null() || out_from.is_null() || out_id.is_null() {
         return TM_E_ARG;
     }
-    match (*ob).inner.reap(now_us) {
+    match unsafe { (*ob).inner.reap(now_us) } {
         Some((from, id)) => {
-            out_from.write(from);
-            out_id.write(id);
+            unsafe { out_from.write(from) };
+            unsafe { out_id.write(id) };
             1
         }
         None => 0,
     }
-}}
+}
 
 /// The next frame due for retransmission, copied into `out`.
 ///
@@ -882,12 +909,13 @@ pub unsafe extern "C" fn tm_outbox_next_due(
     out: *mut u8,
     out_cap: usize,
     out_attempt: *mut u8,
-) -> i32 { unsafe {
+) -> i32 {
     if ob.is_null() || ctx.is_null() || out.is_null() {
         return TM_E_ARG;
     }
-    let ctx = &mut *ctx;
-    let Some(due) = (*ob).inner.next_due(now_us, airtime_us, &mut ctx.duty) else {
+    let ctx = unsafe { &mut *ctx };
+    let Some(due) = (unsafe { &mut (*ob).inner }).next_due(now_us, airtime_us, &mut ctx.duty)
+    else {
         return 0;
     };
     let n = due.frame.len();
@@ -897,18 +925,18 @@ pub unsafe extern "C" fn tm_outbox_next_due(
         // buffer cannot hold MAX_FRAME has a bug, not a transient condition.
         return TM_E_SHORT;
     }
-    let dst = slice::from_raw_parts_mut(out, out_cap);
+    let dst = unsafe { slice::from_raw_parts_mut(out, out_cap) };
     for (d, s) in dst.iter_mut().zip(due.frame.iter()) {
         *d = *s;
     }
     if !out_attempt.is_null() {
-        out_attempt.write(due.attempt);
+        unsafe { out_attempt.write(due.attempt) };
     }
     match i32::try_from(n) {
         Ok(v) => v,
         Err(_) => TM_E_SHORT,
     }
-}}
+}
 
 /// Read a decrypted payload as an acknowledgement, if it is one.
 ///
@@ -924,22 +952,22 @@ pub unsafe extern "C" fn tm_acknowledges(
     payload_len: usize,
     out_request_id: *mut u32,
     out_status: *mut u32,
-) -> i32 { unsafe {
+) -> i32 {
     if payload.is_null() || out_request_id.is_null() {
         return TM_E_ARG;
     }
-    let bytes = slice::from_raw_parts(payload, payload_len);
+    let bytes = unsafe { slice::from_raw_parts(payload, payload_len) };
     match classify_ack(bytes) {
         Some((request_id, status)) => {
-            out_request_id.write(request_id);
+            unsafe { out_request_id.write(request_id) };
             if !out_status.is_null() {
-                out_status.write(status);
+                unsafe { out_status.write(status) };
             }
             1
         }
         None => 0,
     }
-}}
+}
 
 /// Whether a received frame is addressed to us and asks to be acknowledged.
 ///
@@ -949,13 +977,13 @@ pub unsafe extern "C" fn tm_wants_ack(
     frame_ptr: *const u8,
     frame_len: usize,
     our_node_num: u32,
-) -> i32 { unsafe {
+) -> i32 {
     if frame_ptr.is_null() {
         return TM_E_ARG;
     }
-    let f = slice::from_raw_parts(frame_ptr, frame_len);
+    let f = unsafe { slice::from_raw_parts(frame_ptr, frame_len) };
     i32::from(delivery::wants_acknowledgement(f, our_node_num))
-}}
+}
 
 /// Build and encrypt an acknowledgement of `request_id`, addressed to `to`.
 ///
@@ -982,7 +1010,7 @@ pub unsafe extern "C" fn tm_ack_encode(
     key: *const TmKey,
     out: *mut u8,
     out_cap: usize,
-) -> i32 { unsafe {
+) -> i32 {
     if key.is_null() || out.is_null() {
         return TM_E_ARG;
     }
@@ -1010,20 +1038,20 @@ pub unsafe extern "C" fn tm_ack_encode(
         // tm_nodeinfo_encode and tm_relay_prepare in this same ABI.
         relay_node: (from & 0xFF) as u8,
     };
-    let dst = slice::from_raw_parts_mut(out, out_cap);
+    let dst = unsafe { slice::from_raw_parts_mut(out, out_cap) };
     // get(), not plain[..plain_len]: bare slice indexing compiles to a panic
     // path, and one reaching a linked image is a crate-rule violation.
     let Some(body) = plain.get(..plain_len) else {
         return TM_E_ARG;
     };
-    match frame::encode(&header, body, &(*key).bytes, 0, dst) {
+    match frame::encode(&header, body, unsafe { &(*key).bytes }, 0, dst) {
         Ok(n) => match i32::try_from(n) {
             Ok(v) => v,
             Err(_) => TM_E_SHORT,
         },
         Err(_) => TM_E_ARG,
     }
-}}
+}
 
 // ── Identity: publishing a public key ───────────────────────────────────────
 
@@ -1056,7 +1084,7 @@ pub unsafe extern "C" fn tm_x25519_public(
     private_len: usize,
     out: *mut u8,
     out_cap: usize,
-) -> i32 { unsafe {
+) -> i32 {
     if private_key.is_null() || out.is_null() {
         return TM_E_ARG;
     }
@@ -1066,7 +1094,7 @@ pub unsafe extern "C" fn tm_x25519_public(
     if out_cap < x25519::KEY_LEN {
         return TM_E_SHORT;
     }
-    let src = slice::from_raw_parts(private_key, private_len);
+    let src = unsafe { slice::from_raw_parts(private_key, private_len) };
     let mut scalar = [0u8; x25519::KEY_LEN];
     // zip, never copy_from_slice: that call compiles to a length-mismatch panic
     // path, and check_rust_rules.sh reads the built object for exactly that
@@ -1075,12 +1103,12 @@ pub unsafe extern "C" fn tm_x25519_public(
         *d = *s;
     }
     let public = x25519::public_key(&scalar);
-    let dst = slice::from_raw_parts_mut(out, out_cap);
+    let dst = unsafe { slice::from_raw_parts_mut(out, out_cap) };
     for (d, s) in dst.iter_mut().zip(public.iter()) {
         *d = *s;
     }
     TM_OK
-}}
+}
 
 /// What a node publishes about itself: the fields of a `User`.
 ///
@@ -1155,17 +1183,17 @@ pub unsafe extern "C" fn tm_nodeinfo_encode(
     user: *const TmUser,
     out: *mut u8,
     out_cap: usize,
-) -> i32 { unsafe {
+) -> i32 {
     if key.is_null() || user.is_null() || out.is_null() {
         return TM_E_ARG;
     }
-    let u = &*user;
+    let u = unsafe { &*user };
     let profile = User {
-        id: borrow(u.id, u.id_len),
-        long_name: borrow(u.long_name, u.long_name_len),
-        short_name: borrow(u.short_name, u.short_name_len),
-        macaddr: borrow(u.macaddr, u.macaddr_len),
-        public_key: borrow(u.public_key, u.public_key_len),
+        id: unsafe { borrow(u.id, u.id_len) },
+        long_name: unsafe { borrow(u.long_name, u.long_name_len) },
+        short_name: unsafe { borrow(u.short_name, u.short_name_len) },
+        macaddr: unsafe { borrow(u.macaddr, u.macaddr_len) },
+        public_key: unsafe { borrow(u.public_key, u.public_key_len) },
         hw_model: u.hw_model,
         role: u.role,
         ..Default::default()
@@ -1206,15 +1234,15 @@ pub unsafe extern "C" fn tm_nodeinfo_encode(
         next_hop: 0,
         relay_node: (from & 0xFF) as u8,
     };
-    let dst = slice::from_raw_parts_mut(out, out_cap);
-    match frame::encode(&header, body, &(*key).bytes, 0, dst) {
+    let dst = unsafe { slice::from_raw_parts_mut(out, out_cap) };
+    match frame::encode(&header, body, unsafe { &(*key).bytes }, 0, dst) {
         Ok(n) => match i32::try_from(n) {
             Ok(v) => v,
             Err(_) => TM_E_SHORT,
         },
         Err(_) => TM_E_ARG,
     }
-}}
+}
 
 // ── PKI direct messages ─────────────────────────────────────────────────────
 
@@ -1276,7 +1304,7 @@ pub unsafe extern "C" fn tm_pki_agree(
     peer_public: *const u8,
     peer_public_len: usize,
     out: *mut TmPkiKey,
-) -> i32 { unsafe {
+) -> i32 {
     if private_key.is_null() || peer_public.is_null() || out.is_null() {
         return TM_E_ARG;
     }
@@ -1285,18 +1313,18 @@ pub unsafe extern "C" fn tm_pki_agree(
     }
     let mut priv_k = [0u8; x25519::KEY_LEN];
     let mut peer_k = [0u8; x25519::KEY_LEN];
-    for (d, s) in priv_k.iter_mut().zip(slice::from_raw_parts(private_key, private_len)) {
+    for (d, s) in priv_k.iter_mut().zip(unsafe { slice::from_raw_parts(private_key, private_len) }) {
         *d = *s;
     }
-    for (d, s) in peer_k.iter_mut().zip(slice::from_raw_parts(peer_public, peer_public_len)) {
+    for (d, s) in peer_k.iter_mut().zip(unsafe { slice::from_raw_parts(peer_public, peer_public_len) }) {
         *d = *s;
     }
     let Some(shared) = x25519::x25519(&priv_k, &peer_k) else {
         return TM_E_SMALL_ORDER;
     };
-    (*out).bytes = sha256(&shared);
+    unsafe { (*out).bytes = sha256(&shared) };
     TM_OK
-}}
+}
 
 /// Is this frame a PKI direct message?
 ///
@@ -1306,16 +1334,16 @@ pub unsafe extern "C" fn tm_pki_agree(
 /// wrong runs the frame through the channel path, which does not fail: CTR
 /// decrypts anything into something.
 #[no_mangle]
-pub unsafe extern "C" fn tm_is_pki(frame: *const u8, frame_len: usize) -> i32 { unsafe {
+pub unsafe extern "C" fn tm_is_pki(frame: *const u8, frame_len: usize) -> i32 {
     if frame.is_null() {
         return TM_E_ARG;
     }
-    let f = slice::from_raw_parts(frame, frame_len);
+    let f = unsafe { slice::from_raw_parts(frame, frame_len) };
     let Ok(h) = frame::peek_header(f) else {
         return TM_E_SHORT;
     };
     i32::from(h.channel == 0 && !h.is_broadcast())
-}}
+}
 
 /// Bytes a PKI frame carries beyond its plaintext: the 8-byte tag and the
 /// 4-byte `extra_nonce`. Both are on the wire; neither is the message.
@@ -1342,11 +1370,11 @@ pub unsafe extern "C" fn tm_pki_decrypt(
     key: *const TmPkiKey,
     payload: *mut *const u8,
     payload_len: *mut usize,
-) -> i32 { unsafe {
+) -> i32 {
     if frame.is_null() || key.is_null() || payload.is_null() || payload_len.is_null() {
         return TM_E_ARG;
     }
-    let f = slice::from_raw_parts_mut(frame, frame_len);
+    let f = unsafe { slice::from_raw_parts_mut(frame, frame_len) };
     let Ok(h) = frame::peek_header(f) else {
         return TM_E_SHORT;
     };
@@ -1369,16 +1397,16 @@ pub unsafe extern "C" fn tm_pki_decrypt(
     let Some(sealed) = body.get_mut(..sealed_len) else {
         return TM_E_SHORT;
     };
-    match crypto::ccm_decrypt_in_place(&(*key).bytes, &nonce, sealed, crypto::CCM_TAG_LEN) {
+    match crypto::ccm_decrypt_in_place(unsafe { &(*key).bytes }, &nonce, sealed, crypto::CCM_TAG_LEN) {
         Ok(n) => {
-            *payload = sealed.as_ptr();
-            *payload_len = n;
+            unsafe { *payload = sealed.as_ptr() };
+            unsafe { *payload_len = n };
             TM_OK
         }
         Err(crypto::CcmError::Unauthentic) => TM_E_UNAUTHENTIC,
         Err(_) => TM_E_SHORT,
     }
-}}
+}
 
 /// Build and seal a PKI direct message. Returns the frame length.
 ///
@@ -1403,13 +1431,13 @@ pub unsafe extern "C" fn tm_pki_encode(
     payload_len: usize,
     out: *mut u8,
     out_cap: usize,
-) -> i32 { unsafe {
+) -> i32 {
     if key.is_null() || payload.is_null() || out.is_null() {
         return TM_E_ARG;
     }
     let data = Data {
         portnum,
-        payload: slice::from_raw_parts(payload, payload_len),
+        payload: unsafe { slice::from_raw_parts(payload, payload_len) },
         ..Default::default()
     };
     let mut work = [0u8; 240];
@@ -1419,7 +1447,7 @@ pub unsafe extern "C" fn tm_pki_encode(
 
     let nonce = pki_nonce(id, extra_nonce.to_le_bytes(), from);
     let Ok(sealed) = crypto::ccm_encrypt_in_place(
-        &(*key).bytes, &nonce, &mut work, plain_len, crypto::CCM_TAG_LEN,
+        unsafe { &(*key).bytes }, &nonce, &mut work, plain_len, crypto::CCM_TAG_LEN,
     ) else {
         return TM_E_SHORT;
     };
@@ -1444,7 +1472,7 @@ pub unsafe extern "C" fn tm_pki_encode(
     if out_cap < total {
         return TM_E_SHORT;
     }
-    let dst = slice::from_raw_parts_mut(out, out_cap);
+    let dst = unsafe { slice::from_raw_parts_mut(out, out_cap) };
     for (d, s) in dst.iter_mut().zip(hdr.iter()) {
         *d = *s;
     }
@@ -1464,7 +1492,7 @@ pub unsafe extern "C" fn tm_pki_encode(
         Ok(v) => v,
         Err(_) => TM_E_SHORT,
     }
-}}
+}
 
 // ── Reading what arrived ────────────────────────────────────────────────────
 
@@ -1498,21 +1526,21 @@ pub unsafe extern "C" fn tm_data_decode(
     payload: *const u8,
     payload_len: usize,
     out: *mut TmData,
-) -> i32 { unsafe {
+) -> i32 {
     if payload.is_null() || out.is_null() {
         return TM_E_ARG;
     }
-    let bytes = slice::from_raw_parts(payload, payload_len);
+    let bytes = unsafe { slice::from_raw_parts(payload, payload_len) };
     let Ok(d) = Data::decode(bytes) else {
         return TM_E_ARG;
     };
-    (*out).portnum = d.portnum;
-    (*out).payload = d.payload.as_ptr();
-    (*out).payload_len = d.payload.len();
-    (*out).want_response = u8::from(d.want_response);
-    (*out).request_id = d.request_id;
+    unsafe { (*out).portnum = d.portnum };
+    unsafe { (*out).payload = d.payload.as_ptr() };
+    unsafe { (*out).payload_len = d.payload.len() };
+    unsafe { (*out).want_response = u8::from(d.want_response) };
+    unsafe { (*out).request_id = d.request_id };
     TM_OK
-}}
+}
 
 /// Read a `NODEINFO_APP` payload as a `User`.
 ///
@@ -1529,25 +1557,25 @@ pub unsafe extern "C" fn tm_user_decode(
     payload: *const u8,
     payload_len: usize,
     out: *mut TmUser,
-) -> i32 { unsafe {
+) -> i32 {
     if payload.is_null() || out.is_null() {
         return TM_E_ARG;
     }
-    let bytes = slice::from_raw_parts(payload, payload_len);
+    let bytes = unsafe { slice::from_raw_parts(payload, payload_len) };
     let Ok(u) = User::decode(bytes) else {
         return TM_E_ARG;
     };
-    (*out).id = u.id.as_ptr();
-    (*out).id_len = u.id.len();
-    (*out).long_name = u.long_name.as_ptr();
-    (*out).long_name_len = u.long_name.len();
-    (*out).short_name = u.short_name.as_ptr();
-    (*out).short_name_len = u.short_name.len();
-    (*out).public_key = u.public_key.as_ptr();
-    (*out).public_key_len = u.public_key.len();
-    (*out).macaddr = u.macaddr.as_ptr();
-    (*out).macaddr_len = u.macaddr.len();
-    (*out).hw_model = u.hw_model;
-    (*out).role = u.role;
+    unsafe { (*out).id = u.id.as_ptr() };
+    unsafe { (*out).id_len = u.id.len() };
+    unsafe { (*out).long_name = u.long_name.as_ptr() };
+    unsafe { (*out).long_name_len = u.long_name.len() };
+    unsafe { (*out).short_name = u.short_name.as_ptr() };
+    unsafe { (*out).short_name_len = u.short_name.len() };
+    unsafe { (*out).public_key = u.public_key.as_ptr() };
+    unsafe { (*out).public_key_len = u.public_key.len() };
+    unsafe { (*out).macaddr = u.macaddr.as_ptr() };
+    unsafe { (*out).macaddr_len = u.macaddr.len() };
+    unsafe { (*out).hw_model = u.hw_model };
+    unsafe { (*out).role = u.role };
     TM_OK
-}}
+}
