@@ -1,0 +1,31 @@
+{
+  "record": "our_encoder_to_their_decoder__length_sweep",
+  "date": "2026-08-18",
+  "resolves": "L4's remaining gap — 'our encoder -> their decoder' was demonstrated on a few constructed frames, not swept across the length range.",
+  "method": "Frames originated by our node at five lengths spanning and exceeding the on-air corpus, transmitted on air, and confirmed decoded by unmodified stock nodes. Evidence is the receiving nodes' own logs — black-box observation. No reference source was read.",
+  "results": [
+    { "text_bytes": 9,   "frame_bytes": 29,  "decoded": true, "note": "corpus minimum" },
+    { "text_bytes": 40,  "frame_bytes": 60,  "decoded": true },
+    { "text_bytes": 82,  "frame_bytes": 102, "decoded": true, "note": "corpus maximum" },
+    { "text_bytes": 160, "frame_bytes": 181, "decoded": true, "note": "beyond the corpus; the Data payload-length varint takes a second byte above 127, so frame = text + 21 rather than text + 20" },
+    { "text_bytes": 228, "frame_bytes": 249, "decoded": true, "note": "MAX_FRAME — the largest frame the protocol permits" }
+  ],
+  "refusal_boundary": {
+    "text_bytes": 229,
+    "result": "TM_E_ARG, refused rather than truncated",
+    "why": "its Data wrapper encodes to 234 bytes, one over MAX_PAYLOAD 233, so frame::encode refuses. A silent truncation here would put a malformed frame on the air with nothing reporting it."
+  },
+  "portnums_separately_confirmed": {
+    "1": "TEXT_MESSAGE_APP — this sweep",
+    "4": "NODEINFO_APP — a stock node parsed it and updated its node database",
+    "5": "ROUTING_APP — our acknowledgement, which a stock node accepted and stopped retransmitting on",
+    "70": "TRACEROUTE_APP — answered by a stock node",
+    "256": "the extension suite — relayed by a stock node without being read"
+  },
+  "instrument_note": "MEASURED ON ALL THREE STOCK NODES AT ONCE, taking the union. A single node is not a valid instrument for 'did this reach the air': it rebroadcasts what it hears and a half-duplex radio is deaf while transmitting, so it misses much of a burst. Measuring with one receiver produced a convincing and entirely false 'the transmitter stops after two frames' on 2026-08-18, which cost a session before the union measurement retired it.",
+  "provenance": {
+    "transmitter": "our own node, 0x328070b9, at its -9 dBm floor",
+    "receivers": "three Heltec V3, stock Meshtastic 2.7.26.54e0d8d, unmodified, region US, LongFast, tx_power=1",
+    "note": "Our own nodes, our own channel, our own payloads. No third-party traffic. Publishable under TESTING.md."
+  }
+}
