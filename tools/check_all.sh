@@ -29,14 +29,6 @@ if [ "${1:-}" = "--pending" ]; then
 Checks that exist as requirements but cannot run until there is something to
 check. Each is listed here so the gap is visible rather than forgotten.
 
-  ABI stability         needs a RELEASED header to compare against. The pieces
-                        exist now that the ABI crate is in this repository --
-                        tm_abi_version() is callable and tm_check_layout()
-                        compares the C side's sizeof against the Rust one --
-                        but "unchanged within a major version" needs a previous
-                        version on record, and there has been no release. The
-                        first release is what makes this checkable, not more code.
-
   artifact test         PARTIAL. tools/check_artifact_link.sh links a real C
                         consumer and inspects the linked image, and passes on
                         Cortex-M33 and Cortex-M4. It is not yet driven across
@@ -45,6 +37,19 @@ check. Each is listed here so the gap is visible rather than forgotten.
                         Reported rather than skipped quietly.
 
 Implemented since this list was written, and no longer pending:
+
+  ABI stability         tools/check_abi_stability.sh, wired into this script.
+                        It needed a previous version on record and there had
+                        been no release; v0.1.0 is that record. The baseline is
+                        the ABI SURFACE of the released header -- declarations,
+                        layouts and constants -- because comments change
+                        constantly and mean nothing to a linker. A surface
+                        change with TM_ABI_VERSION standing still FAILS; a
+                        change with a bump is a declared break and passes. Both
+                        red-tested. It cannot tell an intended break from an
+                        accident, which is why refreshing the baseline is a
+                        deliberate --accept rather than automatic.
+
 
   reproducible build    tools/check_reproducible.sh builds twice -- the second
                         time from a COPY AT A DIFFERENT PATH, which is what a
@@ -99,6 +104,17 @@ head "generated C header matches the crate"
 # generator exists and the committed file still rots the first time someone
 # edits the Rust and forgets to run it.
 "$ROOT/tools/check_header.sh" || {
+    s=$?
+    [ "$s" = 3 ] || rc=1
+}
+
+head "ABI stability within a major version"
+# DISTRIBUTION.md promises "header struct layouts are frozen within a major
+# version, and any break takes a major bump". An ABI break fails at RUNTIME, in
+# the field, confusingly -- so it gets a check rather than a convention. Listed
+# as pending until 2026-08-18 for a real reason: it needs a previous version on
+# record, and there had been no release.
+"$ROOT/tools/check_abi_stability.sh" || {
     s=$?
     [ "$s" = 3 ] || rc=1
 }
