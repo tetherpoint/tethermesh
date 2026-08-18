@@ -312,3 +312,230 @@ fn a_nodeinfo_without_a_public_key_omits_the_field_rather_than_faking_one() {
     let profile = User::decode(data.payload).expect("User");
     assert!(profile.public_key.is_empty(), "no key must mean no field");
 }
+
+// ── PKI direct messages ─────────────────────────────────────────────────────
+
+/// The committed capture, read through the same fixture the protocol crate
+/// uses. Deliberately not a copy: a second copy of a vector drifts from the
+/// first, and then two tests disagree about what the reference actually did.
+fn pki_record() -> String {
+    std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../tests/captures/pki_dm_record.json"
+    ))
+    .expect("pki_dm_record.json")
+}
+
+fn field_hex(doc: &str, name: &str) -> Vec<u8> {
+    let at = doc.find(&format!("\"{name}\"")).expect("field present");
+    let rest = &doc[at..];
+    let open = rest.find(':').expect("colon");
+    let q1 = rest[open..].find('"').expect("open quote") + open + 1;
+    let q2 = rest[q1..].find('"').expect("close quote") + q1;
+    let hex = &rest[q1..q2];
+    (0..hex.len() / 2)
+        .map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).expect("hex"))
+        .collect()
+}
+
+/// The shared secret from the bench exchange whose both halves we held.
+/// Recorded in `pki_dm_record.json`'s prose; the derived key it produces was
+/// independently reported by the reference node's own log as `d8 85 d2 24 …`.
+const BENCH_SHARED: &str = "b82315ffc2c374aba1ee1b290a7d4823a1837049920f9821b34a4dfd0a8f3d60";
+
+fn bench_key() -> TmPkiKey {
+    let shared: Vec<u8> = (0..BENCH_SHARED.len() / 2)
+        .map(|i| u8::from_str_radix(&BENCH_SHARED[i * 2..i * 2 + 2], 16).unwrap())
+        .collect();
+    TmPkiKey { bytes: sha256(&shared) }
+}
+
+/// The ABI opens a direct message a real node actually sent.
+///
+/// This is the whole scheme at once: if it decrypts, the KDF, the key size, the
+/// nonce layout, the tag length and the payload framing are simultaneously
+/// right. Checked against their bytes, not against our encoder.
+#[test]
+fn tm_pki_decrypt_opens_a_real_captured_direct_message() {
+    let doc = pki_record();
+    let mut frame = field_hex(&doc, "frame_hex");
+    let key = bench_key();
+    // The reference node logged the first eight bytes of the key it derived.
+    assert_eq!(
+        &key.bytes[..8],
+        &[0xd8, 0x85, 0xd2, 0x24, 0xe6, 0xcc, 0x3d, 0xe0],
+        "our KDF must reproduce the key their firmware reported"
+    );
+
+    assert_eq!(unsafe { tm_is_pki(frame.as_ptr(), frame.len()) }, 1);
+
+    let mut payload: *const u8 = core::ptr::null();
+    let mut payload_len: usize = 0;
+    let rc = unsafe {
+        tm_pki_decrypt(frame.as_mut_ptr(), frame.len(), &key, &mut payload, &mut payload_len)
+    };
+    assert_eq!(rc, TM_OK, "a genuine message must open");
+
+    let plain = unsafe { slice::from_raw_parts(payload, payload_len) };
+    let data = Data::decode(plain).expect("plaintext parses as Data");
+    assert_eq!(data.portnum, 1, "TEXT_MESSAGE_APP");
+    assert_eq!(data.payload, b"pki-probe-B");
+}
+
+/// A forged message is refused, and refused with its own code.
+///
+/// The property channel encryption does not have. Every flipped byte must fail
+/// the tag rather than yield plausible bytes — and it must not be reported as a
+/// short buffer or a bad argument, because a caller distinguishing "someone is
+/// lying to me" from "I passed the wrong length" is the entire point.
+#[test]
+fn tm_pki_decrypt_refuses_a_tampered_message() {
+    let doc = pki_record();
+    let key = bench_key();
+    for flip in [0usize, 5, 16, 20] {
+        let mut frame = field_hex(&doc, "frame_hex");
+        frame[16 + flip] ^= 0x01;
+        let mut payload: *const u8 = core::ptr::null();
+        let mut payload_len: usize = 0;
+        assert_eq!(
+            unsafe {
+                tm_pki_decrypt(frame.as_mut_ptr(), frame.len(), &key, &mut payload, &mut payload_len)
+            },
+            TM_E_UNAUTHENTIC,
+            "flipping payload byte {flip} must fail the tag"
+        );
+    }
+    // A wrong key must also fail the tag, not merely produce garbage.
+    let mut frame = field_hex(&doc, "frame_hex");
+    let wrong = TmPkiKey { bytes: [0u8; 32] };
+    let mut payload: *const u8 = core::ptr::null();
+    let mut payload_len: usize = 0;
+    assert_eq!(
+        unsafe {
+            tm_pki_decrypt(frame.as_mut_ptr(), frame.len(), &wrong, &mut payload, &mut payload_len)
+        },
+        TM_E_UNAUTHENTIC,
+    );
+}
+
+/// Agreement is symmetric, and it is the RFC's key pair on both sides.
+#[test]
+fn tm_pki_agree_is_symmetric_over_the_rfc_7748_pair() {
+    // RFC 7748 section 6.1.
+    let a_priv = [
+        0x77, 0x07, 0x6d, 0x0a, 0x73, 0x18, 0xa5, 0x7d, 0x3c, 0x16, 0xc1, 0x72, 0x51, 0xb2, 0x66,
+        0x45, 0xdf, 0x4c, 0x2f, 0x87, 0xeb, 0xc0, 0x99, 0x2a, 0xb1, 0x77, 0xfb, 0xa5, 0x1d, 0xb9,
+        0x2c, 0x2a,
+    ];
+    let b_priv = [
+        0x5d, 0xab, 0x08, 0x7e, 0x62, 0x4a, 0x8a, 0x4b, 0x79, 0xe1, 0x7f, 0x8b, 0x83, 0x80, 0x0e,
+        0xe6, 0x6f, 0x3b, 0xb1, 0x29, 0x26, 0x18, 0xb6, 0xfd, 0x1c, 0x2f, 0x8b, 0x27, 0xff, 0x88,
+        0xe0, 0xeb,
+    ];
+    let mut a_pub = [0u8; 32];
+    let mut b_pub = [0u8; 32];
+    assert_eq!(
+        unsafe { tm_x25519_public(a_priv.as_ptr(), 32, a_pub.as_mut_ptr(), 32) }, TM_OK);
+    assert_eq!(
+        unsafe { tm_x25519_public(b_priv.as_ptr(), 32, b_pub.as_mut_ptr(), 32) }, TM_OK);
+
+    let mut ka = TmPkiKey { bytes: [0u8; 32] };
+    let mut kb = TmPkiKey { bytes: [0u8; 32] };
+    assert_eq!(unsafe { tm_pki_agree(a_priv.as_ptr(), 32, b_pub.as_ptr(), 32, &mut ka) }, TM_OK);
+    assert_eq!(unsafe { tm_pki_agree(b_priv.as_ptr(), 32, a_pub.as_ptr(), 32, &mut kb) }, TM_OK);
+    assert_eq!(ka.bytes, kb.bytes, "both sides must agree the same key");
+
+    // And it is SHA-256 of RFC 7748's published shared secret K, not of
+    // something we invented -- so the KDF is pinned to an external answer.
+    let k = [
+        0x4a, 0x5d, 0x9d, 0x5b, 0xa4, 0xce, 0x2d, 0xe1, 0x72, 0x8e, 0x3b, 0xf4, 0x80, 0x35, 0x0f,
+        0x25, 0xe0, 0x7e, 0x21, 0xc9, 0x47, 0xd1, 0x9e, 0x33, 0x76, 0xf0, 0x9b, 0x3c, 0x1e, 0x16,
+        0x17, 0x42,
+    ];
+    assert_eq!(ka.bytes, sha256(&k));
+}
+
+/// A small-order peer key is refused with its own code, never agreed.
+#[test]
+fn tm_pki_agree_refuses_a_small_order_peer_key() {
+    let priv_k = [0x11u8; 32];
+    let mut out = TmPkiKey { bytes: [0xAAu8; 32] };
+    // u = 0 drives the shared secret to zero regardless of the private key.
+    let zero = [0u8; 32];
+    assert_eq!(
+        unsafe { tm_pki_agree(priv_k.as_ptr(), 32, zero.as_ptr(), 32, &mut out) },
+        TM_E_SMALL_ORDER,
+    );
+    assert_eq!(out.bytes, [0xAAu8; 32], "must not have written a key");
+
+    // A wrong length is a different failure and must not be conflated.
+    assert_eq!(
+        unsafe { tm_pki_agree(priv_k.as_ptr(), 16, zero.as_ptr(), 32, &mut out) },
+        TM_E_BAD_KEY_LEN,
+    );
+}
+
+/// Our encoder and our reader agree, and the frame looks like a PKI frame.
+#[test]
+fn tm_pki_encode_round_trips_through_tm_pki_decrypt() {
+    let key = bench_key();
+    let text = b"abi-round-trip";
+    let mut out = [0u8; 256];
+    let n = unsafe {
+        tm_pki_encode(
+            0x3280_70b9, 0x3369_e764, 0x0bad_1234, 3, 1, &key, 0x5200_0d21, 1,
+            text.as_ptr(), text.len(), out.as_mut_ptr(), out.len(),
+        )
+    };
+    assert!(n > 0, "encode failed: {n}");
+    let n = usize::try_from(n).unwrap();
+
+    // Channel byte 0x00 is what marks it, and it must be addressed.
+    assert_eq!(unsafe { tm_is_pki(out.as_ptr(), n) }, 1);
+    let h = frame::peek_header(&out[..n]).expect("header");
+    assert_eq!(h.channel, 0x00);
+    assert_eq!(h.relay_node, 0xb9, "low byte of `from`");
+    assert!(h.want_ack);
+
+    let mut payload: *const u8 = core::ptr::null();
+    let mut payload_len: usize = 0;
+    assert_eq!(
+        unsafe {
+            tm_pki_decrypt(out.as_mut_ptr(), n, &key, &mut payload, &mut payload_len)
+        },
+        TM_OK,
+    );
+    let plain = unsafe { slice::from_raw_parts(payload, payload_len) };
+    let data = Data::decode(plain).expect("Data");
+    assert_eq!(data.payload, text);
+}
+
+/// A broadcast on a real channel is not a PKI frame, and a runt is neither.
+#[test]
+fn tm_is_pki_and_tm_pki_decrypt_refuse_what_is_not_one() {
+    let mut key = TmKey { bytes: [0u8; 16] };
+    assert_eq!(unsafe { tm_key_from_index(1, &mut key) }, TM_OK);
+    let mut out = [0u8; 128];
+    let n = unsafe {
+        tm_text_encode(1, 0xFFFF_FFFF, 2, 3, 0x08, 0, &key, b"hi".as_ptr(), 2,
+                       out.as_mut_ptr(), out.len())
+    };
+    assert!(n > 0);
+    assert_eq!(unsafe { tm_is_pki(out.as_ptr(), usize::try_from(n).unwrap()) }, 0,
+               "a channel broadcast is not a direct message");
+
+    // Hostile input: shorter than a header, and shorter than the overhead.
+    let pki = bench_key();
+    let mut payload: *const u8 = core::ptr::null();
+    let mut payload_len: usize = 0;
+    for len in [0usize, 1, 15, 16, 20, 27] {
+        let mut runt = [0u8; 32];
+        assert_eq!(
+            unsafe {
+                tm_pki_decrypt(runt.as_mut_ptr(), len, &pki, &mut payload, &mut payload_len)
+            },
+            TM_E_SHORT,
+            "a {len}-byte frame must be refused, not parsed"
+        );
+    }
+}

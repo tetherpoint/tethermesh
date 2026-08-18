@@ -93,6 +93,9 @@
 use core::slice;
 
 use tethermesh::channel;
+use tethermesh::crypto;
+use tethermesh::header;
+use tethermesh::sha256::sha256;
 use tethermesh::delivery::{self, Error as DeliveryError, Outbox, RetryPolicy};
 use tethermesh::frame;
 use tethermesh::message::{Data, PortNum, User};
@@ -125,7 +128,7 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
 /// Checked at init by the C side. A stale header against a rebuilt library is
 /// otherwise silent and produces symptoms attributable to anything at all;
 /// four bytes to make it impossible is a trade worth taking every time.
-pub const TM_ABI_VERSION: u32 = 4;
+pub const TM_ABI_VERSION: u32 = 5;
 
 #[no_mangle]
 pub extern "C" fn tm_abi_version() -> u32 {
@@ -149,6 +152,7 @@ pub extern "C" fn tm_check_layout(
     sizeof_rx: usize,
     sizeof_key: usize,
     sizeof_user: usize,
+    sizeof_pki_key: usize,
 ) -> i32 {
     if sizeof_rx != core::mem::size_of::<TmRx>() {
         return TM_E_ABI;
@@ -157,6 +161,9 @@ pub extern "C" fn tm_check_layout(
         return TM_E_ABI;
     }
     if sizeof_user != core::mem::size_of::<TmUser>() {
+        return TM_E_ABI;
+    }
+    if sizeof_pki_key != core::mem::size_of::<TmPkiKey>() {
         return TM_E_ABI;
     }
     TM_OK
@@ -181,6 +188,18 @@ pub const TM_E_BAD_KEY_LEN: i32 = -4;
 pub const TM_E_BAD_INDEX: i32 = -5;
 /// A retry policy more aggressive than the measured ceiling.
 pub const TM_E_TOO_AGGRESSIVE: i32 = -6;
+/// A direct message whose authentication tag does not verify.
+///
+/// Its own code, because it is the one failure here that means someone may be
+/// lying to you rather than that something is misconfigured. Never retry it and
+/// never use the buffer: a forged message decrypts to *something*.
+pub const TM_E_UNAUTHENTIC: i32 = -7;
+/// A peer public key that drives the shared secret to zero.
+///
+/// Distinct from [`TM_E_UNAUTHENTIC`] and from a hardware fault because the
+/// three call for opposite responses. This one is chosen deliberately by an
+/// attacker and is never retryable.
+pub const TM_E_SMALL_ORDER: i32 = -8;
 
 /// Resolve a caller's requested retry policy, or refuse it.
 ///
@@ -1169,5 +1188,255 @@ pub unsafe extern "C" fn tm_nodeinfo_encode(
             Err(_) => TM_E_SHORT,
         },
         Err(_) => TM_E_ARG,
+    }
+}}
+
+// ── PKI direct messages ─────────────────────────────────────────────────────
+
+/// A message key agreed with one peer: SHA-256 over the raw X25519 secret.
+///
+/// A distinct type for the same reason [`TmKey`] is one — it is not
+/// interchangeable with a channel key, and the two are the same shape in C. A
+/// channel key is 16 bytes of AES-128 shared by everyone on the channel; this
+/// is 32 bytes of AES-256 shared with exactly one peer, and passing one where
+/// the other belongs would fail as "the radio is broken".
+///
+/// **The full SHA-256 output, not truncated to 128 bits.** That is measured, in
+/// `tests/captures/pki_dm_record.json`, and it is the sort of parameter that is
+/// guessed wrong and then produces garbage with nothing to say why.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct TmPkiKey {
+    pub bytes: [u8; 32],
+}
+
+/// The 13-byte CCM nonce for a direct message.
+///
+/// `packet_id(LE) || extra_nonce(LE) || from(LE) || 0x00`, measured and recorded
+/// in `WIRE_REFERENCE.md`. One function rather than one per direction, because
+/// a sealer and an opener that disagree about nonce layout produce a frame that
+/// only its author can read -- and the two constructions sat six lines apart,
+/// which is exactly how that disagreement gets introduced later.
+fn pki_nonce(id: u32, extra_nonce: [u8; 4], from: u32) -> [u8; crypto::CCM_NONCE_LEN] {
+    let mut n = [0u8; crypto::CCM_NONCE_LEN];
+    for (d, s) in n.iter_mut().zip(id.to_le_bytes()) {
+        *d = s;
+    }
+    for (d, s) in n.iter_mut().skip(4).zip(extra_nonce) {
+        *d = s;
+    }
+    for (d, s) in n.iter_mut().skip(8).zip(from.to_le_bytes()) {
+        *d = s;
+    }
+    // n[12] stays 0.
+    n
+}
+
+/// Agree the message key for one peer.
+///
+/// Returns [`TM_E_SMALL_ORDER`] when the peer's public key drives the shared
+/// secret to zero. **That is never retryable and must never be treated as a
+/// transient failure** — a small-order key is chosen deliberately, and it makes
+/// the "shared" secret one the attacker knew in advance. It is a separate code
+/// from every other failure precisely so a caller cannot lump it in with a
+/// wrong length and retry.
+///
+/// Agreement is the expensive half of this scheme — a scalar multiplication —
+/// while opening a frame is cheap. Keeping them apart lets a caller agree once
+/// per peer and keep the result, rather than paying for a ladder per frame.
+#[no_mangle]
+pub unsafe extern "C" fn tm_pki_agree(
+    private_key: *const u8,
+    private_len: usize,
+    peer_public: *const u8,
+    peer_public_len: usize,
+    out: *mut TmPkiKey,
+) -> i32 { unsafe {
+    if private_key.is_null() || peer_public.is_null() || out.is_null() {
+        return TM_E_ARG;
+    }
+    if private_len != x25519::KEY_LEN || peer_public_len != x25519::KEY_LEN {
+        return TM_E_BAD_KEY_LEN;
+    }
+    let mut priv_k = [0u8; x25519::KEY_LEN];
+    let mut peer_k = [0u8; x25519::KEY_LEN];
+    for (d, s) in priv_k.iter_mut().zip(slice::from_raw_parts(private_key, private_len)) {
+        *d = *s;
+    }
+    for (d, s) in peer_k.iter_mut().zip(slice::from_raw_parts(peer_public, peer_public_len)) {
+        *d = *s;
+    }
+    let Some(shared) = x25519::x25519(&priv_k, &peer_k) else {
+        return TM_E_SMALL_ORDER;
+    };
+    (*out).bytes = sha256(&shared);
+    TM_OK
+}}
+
+/// Is this frame a PKI direct message?
+///
+/// Returns 1 if so, 0 if not, negative on a malformed input. **A channel hash
+/// of `0x00` is what marks one on the wire** — measured, not inferred — and a
+/// direct message is addressed rather than broadcast. A caller that guesses
+/// wrong runs the frame through the channel path, which does not fail: CTR
+/// decrypts anything into something.
+#[no_mangle]
+pub unsafe extern "C" fn tm_is_pki(frame: *const u8, frame_len: usize) -> i32 { unsafe {
+    if frame.is_null() {
+        return TM_E_ARG;
+    }
+    let f = slice::from_raw_parts(frame, frame_len);
+    let Ok(h) = frame::peek_header(f) else {
+        return TM_E_SHORT;
+    };
+    i32::from(h.channel == 0 && !h.is_broadcast())
+}}
+
+/// Bytes a PKI frame carries beyond its plaintext: the 8-byte tag and the
+/// 4-byte `extra_nonce`. Both are on the wire; neither is the message.
+const PKI_OVERHEAD: usize = 12;
+
+/// Open a PKI direct message in place, leaving the plaintext borrowed from the
+/// caller's buffer.
+///
+/// On success `payload` points into `frame` and `payload_len` is its length.
+///
+/// **A failed tag is reported, never returned as data.** This is the property
+/// channel encryption does not have and the reason [`TM_E_UNAUTHENTIC`] exists
+/// as its own code: a forged message decrypts to *something*, and only the tag
+/// distinguishes it from a real one. On that error the buffer holds whatever
+/// the keystream produced and must be discarded.
+///
+/// Layout, measured: `header(16) || ciphertext || tag(8) || extra_nonce(4)`,
+/// with the nonce built as `packet_id(LE) || extra_nonce || from(LE) || 0x00`.
+/// `extra_nonce` travels at the *end* of the payload, not with the header.
+#[no_mangle]
+pub unsafe extern "C" fn tm_pki_decrypt(
+    frame: *mut u8,
+    frame_len: usize,
+    key: *const TmPkiKey,
+    payload: *mut *const u8,
+    payload_len: *mut usize,
+) -> i32 { unsafe {
+    if frame.is_null() || key.is_null() || payload.is_null() || payload_len.is_null() {
+        return TM_E_ARG;
+    }
+    let f = slice::from_raw_parts_mut(frame, frame_len);
+    let Ok(h) = frame::peek_header(f) else {
+        return TM_E_SHORT;
+    };
+    let Some(body) = f.get_mut(header::HEADER_LEN..) else {
+        return TM_E_SHORT;
+    };
+    // checked_sub, not `-`: a frame shorter than the overhead is exactly the
+    // hostile input this crate refuses to panic on.
+    if body.len() < PKI_OVERHEAD {
+        return TM_E_SHORT;
+    }
+    let Some(sealed_len) = body.len().checked_sub(4) else {
+        return TM_E_SHORT;
+    };
+    let mut extra = [0u8; 4];
+    for (d, s) in extra.iter_mut().zip(body.iter().skip(sealed_len)) {
+        *d = *s;
+    }
+    let nonce = pki_nonce(h.id, extra, h.from);
+    let Some(sealed) = body.get_mut(..sealed_len) else {
+        return TM_E_SHORT;
+    };
+    match crypto::ccm_decrypt_in_place(&(*key).bytes, &nonce, sealed, crypto::CCM_TAG_LEN) {
+        Ok(n) => {
+            *payload = sealed.as_ptr();
+            *payload_len = n;
+            TM_OK
+        }
+        Err(crypto::CcmError::Unauthentic) => TM_E_UNAUTHENTIC,
+        Err(_) => TM_E_SHORT,
+    }
+}}
+
+/// Build and seal a PKI direct message. Returns the frame length.
+///
+/// `extra_nonce` must not repeat for a given `(from, id)` — it is nonce input,
+/// and a repeat under the same key reproduces a keystream. Draw it from the
+/// same source as any other nonce material.
+///
+/// The channel hash is forced to `0x00`, which is what marks the frame as PKI
+/// on the wire; there is no channel key involved and no channel to name.
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn tm_pki_encode(
+    from: u32,
+    to: u32,
+    id: u32,
+    hop_limit: u8,
+    want_ack: u8,
+    key: *const TmPkiKey,
+    extra_nonce: u32,
+    portnum: u32,
+    payload: *const u8,
+    payload_len: usize,
+    out: *mut u8,
+    out_cap: usize,
+) -> i32 { unsafe {
+    if key.is_null() || payload.is_null() || out.is_null() {
+        return TM_E_ARG;
+    }
+    let data = Data {
+        portnum,
+        payload: slice::from_raw_parts(payload, payload_len),
+        ..Default::default()
+    };
+    let mut work = [0u8; 240];
+    let Ok(plain_len) = data.encode(&mut work) else {
+        return TM_E_SHORT;
+    };
+
+    let nonce = pki_nonce(id, extra_nonce.to_le_bytes(), from);
+    let Ok(sealed) = crypto::ccm_encrypt_in_place(
+        &(*key).bytes, &nonce, &mut work, plain_len, crypto::CCM_TAG_LEN,
+    ) else {
+        return TM_E_SHORT;
+    };
+
+    let header = Header {
+        to,
+        from,
+        id,
+        hop_limit,
+        want_ack: want_ack != 0,
+        via_mqtt: false,
+        hop_start: hop_limit,
+        channel: 0x00,
+        next_hop: 0,
+        relay_node: (from & 0xFF) as u8,
+    };
+    let hdr = header.encode();
+
+    let Some(total) = sealed.checked_add(header::HEADER_LEN).and_then(|v| v.checked_add(4)) else {
+        return TM_E_SHORT;
+    };
+    if out_cap < total {
+        return TM_E_SHORT;
+    }
+    let dst = slice::from_raw_parts_mut(out, out_cap);
+    for (d, s) in dst.iter_mut().zip(hdr.iter()) {
+        *d = *s;
+    }
+    let Some(after_hdr) = dst.get_mut(header::HEADER_LEN..) else {
+        return TM_E_SHORT;
+    };
+    for (d, s) in after_hdr.iter_mut().zip(work.iter().take(sealed)) {
+        *d = *s;
+    }
+    let Some(after_body) = after_hdr.get_mut(sealed..) else {
+        return TM_E_SHORT;
+    };
+    for (d, s) in after_body.iter_mut().zip(extra_nonce.to_le_bytes()) {
+        *d = s;
+    }
+    match i32::try_from(total) {
+        Ok(v) => v,
+        Err(_) => TM_E_SHORT,
     }
 }}

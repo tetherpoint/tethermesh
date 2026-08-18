@@ -59,15 +59,28 @@ extern "C" {
 #define TM_E_BAD_KEY_LEN -4
 #define TM_E_BAD_INDEX   -5
 #define TM_E_TOO_AGGRESSIVE -6  /* retry policy exceeds the measured ceiling */
+#define TM_E_UNAUTHENTIC -7   /* a direct message whose tag does not verify.
+                               * Its own code because it is the one failure here
+                               * that means someone may be LYING to you rather
+                               * than that something is misconfigured. Never
+                               * retry it, and never use the buffer: a forged
+                               * message decrypts to *something*. */
+#define TM_E_SMALL_ORDER -8   /* a peer public key that drives the shared secret
+                               * to zero. Chosen deliberately by an attacker,
+                               * who then knows the "shared" secret in advance.
+                               * Never retryable. Distinct from a hardware fault
+                               * and from a wrong length on purpose -- the three
+                               * call for opposite responses. */
 
 /* Bumped on any change to a signature, struct layout, or enum value below.
  * Compare against tm_abi_version() at startup. */
-#define TM_ABI_VERSION 4u
+#define TM_ABI_VERSION 5u
 
 uint32_t tm_abi_version(void);
 
 /* Pass this header's own sizeofs. See the note at the top of this file. */
-int32_t tm_check_layout(size_t sizeof_rx, size_t sizeof_key, size_t sizeof_user);
+int32_t tm_check_layout(size_t sizeof_rx, size_t sizeof_key, size_t sizeof_user,
+                        size_t sizeof_pki_key);
 
 /* ── Channel keys ──────────────────────────────────────────────────────────
  *
@@ -359,6 +372,68 @@ int32_t tm_nodeinfo_encode(uint32_t from, uint32_t to, uint32_t id,
                            uint8_t want_response,
                            const tm_key_t *key, const tm_user_t *user,
                            uint8_t *out, size_t out_cap);
+
+/* ── PKI direct messages ───────────────────────────────────────────────────
+ *
+ * A direct message is NOT channel-encrypted. It is X25519 + AES-256-CCM, marked
+ * on the wire by a channel hash of 0x00, laid out as
+ *
+ *     header(16) || ciphertext || tag(8) || extra_nonce(4)
+ *
+ * with the nonce built as packet_id(LE) || extra_nonce || from(LE) || 0x00.
+ * Note that extra_nonce travels at the END of the payload, not with the header.
+ *
+ * DO NOT run one of these through tm_frame_decrypt(). That is AES-CTR under a
+ * channel key, and CTR does not fail -- it will decrypt anything into
+ * something. Use tm_is_pki() to choose the path. */
+
+/* A message key agreed with exactly one peer: SHA-256 over the raw X25519
+ * secret, the FULL 32-byte output and not truncated to 128 bits.
+ *
+ * A distinct type from tm_key_t deliberately. A channel key is 16 bytes of
+ * AES-128 shared by everyone on the channel; this is 32 bytes of AES-256 shared
+ * with one peer. Passing one where the other belongs would present as a broken
+ * radio. */
+typedef struct {
+    uint8_t bytes[32];
+} tm_pki_key_t;
+
+/* Agree the message key for one peer. Both keys must be 32 bytes.
+ *
+ * Agreement is the expensive half -- a scalar multiplication -- and opening a
+ * frame is cheap, so agree once per peer and keep the result rather than paying
+ * for a ladder per frame.
+ *
+ * Returns TM_E_SMALL_ORDER when the peer's key drives the secret to zero. That
+ * is never retryable. */
+int32_t tm_pki_agree(const uint8_t *private_key, size_t private_len,
+                     const uint8_t *peer_public, size_t peer_public_len,
+                     tm_pki_key_t *out);
+
+/* 1 if this frame is a PKI direct message, 0 if not, negative if malformed.
+ * Channel hash 0x00 and an addressed (non-broadcast) destination. */
+int32_t tm_is_pki(const uint8_t *frame, size_t frame_len);
+
+/* Open a direct message in place. On success *payload points INTO frame.
+ *
+ * A failed tag is TM_E_UNAUTHENTIC and the buffer must be discarded -- it holds
+ * whatever the keystream produced. This is the property channel encryption does
+ * not have: only the tag distinguishes a forged message from a real one. */
+int32_t tm_pki_decrypt(uint8_t *frame, size_t frame_len,
+                       const tm_pki_key_t *key,
+                       const uint8_t **payload, size_t *payload_len);
+
+/* Build and seal a direct message. Returns the frame length.
+ *
+ * extra_nonce MUST NOT repeat for a given (from, id): it is nonce input, and a
+ * repeat under the same key reproduces a keystream. The channel hash is forced
+ * to 0x00 -- there is no channel key involved and no channel to name. */
+int32_t tm_pki_encode(uint32_t from, uint32_t to, uint32_t id,
+                      uint8_t hop_limit, uint8_t want_ack,
+                      const tm_pki_key_t *key, uint32_t extra_nonce,
+                      uint32_t portnum,
+                      const uint8_t *payload, size_t payload_len,
+                      uint8_t *out, size_t out_cap);
 
 #ifdef __cplusplus
 }
