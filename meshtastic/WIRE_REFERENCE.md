@@ -586,6 +586,30 @@ acknowledgement section above.
 
 ---
 
+## ANNOUNCED — upstream 2.8, NOT YET MEASURABLE
+
+**Provenance: upstream's own 2.8 punchlist and published documentation, read 2026-08-20.** This section is neither verified nor unverified in this document's usual sense, because it is not a claim about what is on the air today — it is **what upstream says it will change**, recorded because the pinned oracle predates all of it. Nothing below is measured and none of it is implemented. Ranked by what it costs this implementation.
+
+**1. Pre-hop drop — an acceptance-rule change.** Upstream will block packets with a missing or invalid `hop_start`. Frames from here must carry a valid one or a 2.8 node **drops them without comment**. This turns a defect class this repository has already had into a *delivery* failure rather than a correctness one: the hop-field transposition recorded above passed 102 host tests, 24 ABI tests and every proof, and was caught only by capturing a relayed frame. Under 2.8's rule the same bug means total loss of delivery to updated nodes. **The relayed-frame fixture is the regression test and should be re-run first.**
+
+**2. `longname` becomes `mediumname`.** Upstream's XEdDSA signing reuses each node's existing X25519 keypair to produce Ed25519 signatures — 64 bytes, against a 256-byte packet. Those bytes come out of the node's name field. **That is a packet-format change to a field this library already decodes**; the `User` message and the NodeInfo path are affected whether or not a signature is ever verified here.
+
+**3. The default preset may move off LongFast** to US 500 kHz LongTurbo, with `TinyFast` and `TinySlow` queued as new presets. The table above records LongTurbo at 908.750 MHz, so a shipped-default move means stock nodes **arrive on a different carrier** — indistinguishable, from the receiving end, from a dead radio. New presets add rows and shift nothing already measured.
+
+**4. Amateur-band operation (`HamParam`) forces plaintext to stay possible.** Amateur allocations generally prohibit encryption and require station identification. **Any assumption that every frame is encrypted therefore has an exception it must handle** — a uniform receive path, fixed-bucket padding, or replay handling that exists only inside the AEAD envelope. Better known before the assumption hardens than after.
+
+**5. New regions** — `EU868_N`, `EU866`, `ITU1/2/3_2M`, `ITU2_125CM`, `ITU1/2/3_70CM`. This document records `RegionCode` at 38 values; these extend it. Cheap to absorb, cheap to measure.
+
+**6. Bespoke hops** — hop limits become adaptive from a mesh-size estimate, against the fixed expectation the routing module implements today.
+
+**7. `NODE_STATUS` (portnum 36)** is already in the pinned enum with no recorded semantics; a status message type is queued to give it some.
+
+Post-2.8, listed for shape only: BLE meshing, extended environment and air-quality telemetry, zero-hop MQTT downlinking. Only the telemetry fields are a wire change to what is implemented here.
+
+**When a 2.8.x release becomes pinnable the job is a re-measurement pass, not one feature:** re-run the relayed-frame fixture first, re-derive the preset table if the default moved, sweep the new regions, then look at XEdDSA and at what `longname → mediumname` does to the `User` decode.
+
+Sources: the [2.8 punchlist](https://github.com/meshtastic/firmware/issues/10462), the [encryption technical reference](https://meshtastic.org/docs/development/reference/encryption-technical/), and [encryption limitations](https://meshtastic.org/docs/about/overview/encryption/limitations/).
+
 ## Corrections this phase forces
 
 **To the commonly-repeated description of the protocol:** the preset table (7 vs 17, two deprecated), `DATA_PAYLOAD_LEN` (233 not 237), the absence of `next_hop` routing, and the absence of XEdDSA and KEY_VERIFICATION.

@@ -70,6 +70,19 @@ That second point is the structural fact the design rests on: Meshtastic's flood
 
 The extension boundary is precise. Everything new lives in the payload and the channel/PortNum space; the 16-byte header and the modem preset are fixed, because changing either stops stock nodes relaying.
 
+## Extensions that break compatibility, and where they live
+
+**The compatibility claim above is the point of this repository, and it is narrow on purpose:** a stock node relays what it cannot read. Anything that breaks that stops being an extension in the sense used here.
+
+Some work does break it — a different modulation, or a mode that deliberately silences the mesh in order to take a measurement. Neither can ride a PortNum, because both change the physical layer or the channel's availability rather than the payload, and a stock node cannot relay either. **That work lives in a separate repository, `tethermesh-extensions`. Nothing here depends on it, and taking this library never means taking it.**
+
+The test is written the same way in both places, so it can be applied rather than argued. An extension belongs **here** only if both hold:
+
+1. **an unmodified stock node relays it**, and
+2. **a node without the extension still communicates normally.**
+
+Work that fails either test is outside this repository *and outside the compatibility claim this repository makes*. That boundary is stated from both sides deliberately: a reader who finds one of those crates first should not have to infer it.
+
 ## What this library is, and what has to sit around it
 
 This is a **protocol layer**. It is not a node. An implementer supplies a radio driver below and a scheduler above, and needs to know exactly where the seam falls — including one capability the protocol requires that this library does **not** currently provide.
