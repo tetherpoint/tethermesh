@@ -19,7 +19,7 @@ The goal is adoption by other implementers, including commercial ones. Everythin
 
 These are enforced by `tools/check_all.sh` on every run, not left to discipline. Each has already caught a real defect.
 
-- **Clean-room from the protocol, never from the source.** Facts about the wire may be learned; expression may not. The `.proto` files are read as specification and never vendored or run through a code generator; the GPL-3.0 radio-driver library this ecosystem builds on is off limits entirely. Enforced by `tools/check_cleanroom.sh`, over the working tree *and* the vendored submodules.
+- **Clean-room from the protocol, never from the source.** Facts about the wire may be learned; expression may not. The `.proto` files are read as specification and never vendored or run through a code generator; the radio-driver library this ecosystem builds on — RadioLib, which is **MIT** — may be read for facts and is never derived from. Enforced by `tools/check_cleanroom.sh`, over the working tree *and* the vendored submodules.
 - **No panics on hostile input.** This parses untrusted frames from a public mesh. With `panic = "abort"` a panic halts the node, so an unchecked panic path turns a memory bug into a remote denial of service. No `unwrap`, no indexing, no bare arithmetic. Checked against the **built object**, not the source — which is what caught a live panic path in `frame::encode` that source review had missed.
 - **No allocation.** `no_std`, no global allocator, caller-provided buffers. An allocator on a microcontroller is a failure mode, not a convenience. This is why a formally verified crypto crate was rejected after measurement.
 - **No mutable global state.** `Send`/`Sync` do not cross an FFI boundary that a foreign RTOS scheduler calls into, so concurrency safety is a property of API shape, not of the language.
@@ -136,7 +136,9 @@ The line is **facts versus expression**. Field numbers, wire layouts and transcr
 
 **When tempted, stop.** If a piece of work seems to need a routing decision or a state machine copied from upstream, that means the specification is under-documented. The correct response is to write down our own design and cite the wire behaviour it implements — never to read their source.
 
-Enforced by `tools/check_cleanroom.sh`, which refuses vendored `.proto`, generated `*.pb.*`, GPL licence headers and RadioLib references, and is red-tested against all three. (RadioLib is **MIT**, not GPL — it is refused for independence of implementation, not licence contamination. Documents here said GPL-3.0 until 2026-08-17; that was simply wrong about somebody else's project.)
+Enforced by `tools/check_cleanroom.sh`, which refuses vendored `.proto`, generated `*.pb.*` and GPL licence headers, and is red-tested against each.
+
+**On RadioLib, and this changed on 2026-08-20.** It is **MIT**, and referencing or reading it is no longer refused. Documents here called it GPL-3.0 until 2026-08-17 — simply wrong about somebody else's project — and the blanket refusal that outlasted that correction was a stricter rule than the facts supported. **What still holds is non-derivation**, which `NOTICE` states and which no script can check: a gate that matched the word never proved anything about expression, only about vocabulary.
 
 ### The four sources, and nothing else
 

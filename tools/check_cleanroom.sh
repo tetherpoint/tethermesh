@@ -45,12 +45,21 @@
 #     a GPL input. This is why PLAN.md specifies a hand-written ~300-line
 #     protobuf codec instead of nanopb: licence-safe as well as dependency-light.
 #   - linking any GPL component
-#   - linking or deriving from RadioLib. NOTE THE DIFFERENT REASON: RadioLib is
-#     MIT, so this one is not about copyleft at all. It is refused because
-#     WIRE_REFERENCE.md's byte-level entries rest on "our own SX1262 receiver,
-#     written from the datasheet, not RadioLib", and that evidence stops being
-#     true the moment anything is taken from there. This file said "GPL-3.0"
-#     until 2026-08-17, which was simply wrong about somebody else's project.
+#   - DERIVING from RadioLib -- which this script no longer attempts to check,
+#     and the reasoning is worth keeping because the rule changed twice.
+#
+#     This file said RadioLib was "GPL-3.0" until 2026-08-17. That was simply
+#     wrong about somebody else's project: it is MIT. The blanket refusal
+#     outlasted the correction, and on 2026-08-20 it went too -- a permissively
+#     licensed second implementation is a legitimate source of FACTS, on the
+#     same footing as the datasheet and Semtech's own driver.
+#
+#     WHAT REMAINS TRUE IS NON-DERIVATION, and it is stated in NOTICE for
+#     adopters' legal review. WHAT CHANGED IS THAT NO SCRIPT CLAIMS TO ENFORCE
+#     IT. Matching the word "RadioLib" never proved anything about expression --
+#     only about vocabulary -- so it caught citations and would have missed a
+#     copied state machine. A check that cannot fail on the thing it names is
+#     worse than no check, because it is mistaken for one.
 #
 # THE RULE WHEN TEMPTED: if you find yourself wanting to copy a routing
 # decision or a state machine, STOP. That means the spec is under-documented,
@@ -170,10 +179,7 @@ while IFS= read -r f; do
     if grep -qE "$GPL_HEADER_RE" "$p" 2>/dev/null; then
         fail "$f — carries a GPL licence header."
     fi
-    if [ "$may_name_it" -eq 0 ] && grep -qiE "\bRadioLib\b" "$p" 2>/dev/null; then
-        fail "$f — references RadioLib. This stack carries no radio
-              driver; if one is added it must be independently written."
-    fi
+    # RADIOLIB IS NO LONGER REFUSED HERE. Removed 2026-08-20; see the header.
 done <<< "$files"
 
 # ── vendored submodules: the real GPL risk is a version bump ───────────────
