@@ -106,6 +106,14 @@ head "licence declaration (SPDX)"
 head "clean-room (GPL boundary)"
 "$ROOT/tools/check_cleanroom.sh" || rc=1
 
+head "scope (nothing about a consuming product)"
+# Runs beside the clean-room check because they guard the same class of harm:
+# something that cannot be taken back once it is in an open repository's
+# history. On 2026-08-20 a consuming product's driver repo and an internal
+# constant of its were named inside an otherwise-correct wire-reference entry --
+# the rationale leaked even though the fact was in scope. Nothing caught it.
+"$ROOT/tools/check_scope.sh" || rc=1
+
 head "documentation matches the code"
 # Added after the 2026-08-16 audit, which found three documents asserting
 # things that had stopped being true -- including one arguing at length for a

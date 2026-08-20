@@ -7,6 +7,10 @@ This repository is **open**. Assume everything committed here will be read by pe
 
 That makes this document a gate, not a preference. It is easier to keep something out than to take it back.
 
+**Part of it is now mechanically enforced.** `tools/check_scope.sh`, wired into `check_all.sh`, fails the build if a consuming product's name appears in a tracked file. It exists because on 2026-08-20 one did: a wire-reference entry about the `LORA_24` channel — a legitimate on-air fact, correctly placed — explained *why* the measurement was wanted and named a consuming product's driver repository and a constant from its header. **The fact was in scope and the rationale around it was not**, which is exactly the accidental arrival this document warns about below. Nothing flagged it; it was caught by a passing question, and a question is not a control.
+
+**What that check cannot do is decide whether a fact belongs here.** It matches names, so it catches the crude case and none of the interesting ones — a paragraph describing a consuming system's design without naming it passes cleanly. The judgement stays human; the check only removes the excuse of not noticing.
+
 ## The rule
 
 > **If it is not part of a Meshtastic-compatible protocol implementation or its extensions, it does not belong here.**
