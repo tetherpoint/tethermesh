@@ -62,6 +62,10 @@ pub enum Error {
 /// The payload is copied in and then encrypted in place, so `plaintext` is
 /// left untouched.
 ///
+/// **This is the Meshtastic-compatible path and its ceiling is
+/// [`MAX_PAYLOAD`].** Anything larger needs [`encode_bounded`], and needs to
+/// have read why that is a different function.
+///
 /// # Errors
 ///
 /// [`Error::PayloadTooLong`] above [`MAX_PAYLOAD`], [`Error::BufferTooSmall`]
@@ -73,7 +77,50 @@ pub fn encode(
     extra_nonce: u32,
     out: &mut [u8],
 ) -> Result<usize, Error> {
-    if plaintext.len() > MAX_PAYLOAD {
+    encode_bounded(header, plaintext, key, extra_nonce, MAX_PAYLOAD, out)
+}
+
+/// Build a frame with an explicit payload ceiling.
+///
+/// **[`encode`] is this with `max_payload = MAX_PAYLOAD`, and on any
+/// Meshtastic carrier that is the only correct value.** A frame carrying more
+/// than 233 bytes is not a Meshtastic frame: a stock node cannot parse it, and
+/// emitting one on a shared channel spends airtime that reaches nobody.
+///
+/// # Why this exists at all
+///
+/// Nothing about the frame *layout* is 233-specific. The header is 16 bytes,
+/// the payload is CTR-encrypted in place, and [`decode_in_place`] already
+/// carries no payload bound whatever — it decrypts what it is given. The 233
+/// is `Constants.DATA_PAYLOAD_LEN`, an upstream constant, and it was the only
+/// thing in this module that assumed a carrier.
+///
+/// A carrier that is not LoRa may carry more. FLRC's frame is 511 bytes, and a
+/// consumer fragmenting above this module to stay inside 233 pays about **13%**
+/// extra airtime for frames it did not need to split. This lets that consumer
+/// decide, without a fork and without this module knowing what FLRC is.
+///
+/// # This does not weaken the compatibility claim, and the reason is structural
+///
+/// The default is unchanged, [`encode`] is byte-identical to what it was, and
+/// no code that does not pass a larger ceiling can produce a frame that differs
+/// by one bit. **A caller that passes a larger ceiling has left Meshtastic
+/// deliberately and knows it** — which is a different thing from a library that
+/// drifts.
+///
+/// # Errors
+///
+/// [`Error::PayloadTooLong`] above `max_payload`, [`Error::BufferTooSmall`]
+/// if `out` cannot hold header plus payload.
+pub fn encode_bounded(
+    header: &Header,
+    plaintext: &[u8],
+    key: &[u8; BLOCK],
+    extra_nonce: u32,
+    max_payload: usize,
+    out: &mut [u8],
+) -> Result<usize, Error> {
+    if plaintext.len() > max_payload {
         return Err(Error::PayloadTooLong);
     }
     let total = HEADER_LEN.checked_add(plaintext.len()).ok_or(Error::PayloadTooLong)?;

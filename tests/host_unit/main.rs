@@ -3610,3 +3610,88 @@ fn the_reference_position_decodes_and_rebuilds_byte_for_byte() {
         "re-encoding must reproduce the reference's bytes, precision_bits included"
     );
 }
+
+// ── encode_bounded: a carrier that is not LoRa may carry more ──────────────
+//
+// Added 2026-08-20 with `frame::encode_bounded`. The property that matters is
+// not that a larger frame can be built -- it is that the DEFAULT DID NOT MOVE,
+// because the compatibility claim rests on that and nothing else.
+
+/// A plain header for the bounded-encode tests. Values are unremarkable on
+/// purpose: what is under test is the payload ceiling, not the header.
+fn bounded_test_header() -> Header {
+    Header {
+        to: 0xFFFF_FFFF,
+        from: 0x1234_5678,
+        id: 0x5100_0001,
+        hop_limit: 3,
+        hop_start: 3,
+        channel: 0x08,
+        next_hop: 0,
+        relay_node: 0x78,
+        ..Header::default()
+    }
+}
+
+#[test]
+fn encode_still_refuses_more_than_meshtastic_carries() {
+    // The guard against the whole change: `encode` must be exactly what it was.
+    let h = bounded_test_header();
+    let key = [0x11u8; 16];
+    let too_long = [0xAAu8; frame::MAX_PAYLOAD + 1];
+    let mut out = [0u8; 1024];
+    assert_eq!(
+        frame::encode(&h, &too_long, &key, 0, &mut out),
+        Err(frame::Error::PayloadTooLong),
+        "encode must still refuse above MAX_PAYLOAD -- the default is the claim"
+    );
+}
+
+#[test]
+fn encode_bounded_at_the_default_is_encode() {
+    // Byte-for-byte, not merely "also succeeds".
+    let h = bounded_test_header();
+    let key = [0x22u8; 16];
+    let body = [0x5Au8; 100];
+    let (mut a, mut b) = ([0u8; 512], [0u8; 512]);
+    let na = frame::encode(&h, &body, &key, 7, &mut a).expect("encode");
+    let nb = frame::encode_bounded(&h, &body, &key, 7, frame::MAX_PAYLOAD, &mut b)
+        .expect("encode_bounded");
+    assert_eq!(na, nb);
+    assert_eq!(a[..na], b[..nb], "the bounded form at the default must be identical");
+}
+
+#[test]
+fn a_larger_ceiling_carries_a_larger_payload_and_round_trips() {
+    // FLRC's frame is 511 bytes; 400 is a payload LoRa cannot carry at all.
+    let h = bounded_test_header();
+    let key = [0x33u8; 16];
+    let body = [0xC7u8; 400];
+    let mut out = [0u8; 1024];
+
+    assert_eq!(
+        frame::encode(&h, &body, &key, 0, &mut out),
+        Err(frame::Error::PayloadTooLong),
+        "the Meshtastic path must refuse this"
+    );
+
+    let n = frame::encode_bounded(&h, &body, &key, 0, 495, &mut out).expect("bounded encode");
+    assert_eq!(n, HEADER_LEN + body.len());
+
+    let (dh, plain) = frame::decode_in_place(&mut out[..n], &key, 0).expect("decode");
+    assert_eq!(dh.id, h.id);
+    assert_eq!(plain, &body[..], "a larger payload must survive the round trip");
+}
+
+#[test]
+fn a_larger_ceiling_is_still_a_ceiling() {
+    let h = bounded_test_header();
+    let key = [0x44u8; 16];
+    let body = [0x01u8; 496];
+    let mut out = [0u8; 1024];
+    assert_eq!(
+        frame::encode_bounded(&h, &body, &key, 0, 495, &mut out),
+        Err(frame::Error::PayloadTooLong),
+        "the supplied ceiling must be enforced, not advisory"
+    );
+}
