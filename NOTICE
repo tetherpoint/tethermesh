@@ -29,11 +29,20 @@ CLEAN-ROOM STATEMENT
 
 tethermesh is an independent implementation. It contains no code derived from
 the Meshtastic firmware, its mobile or desktop clients, its protobuf schemas, or
-from RadioLib -- all of which are GPL-3.0. Protocol facts were established from
-published documentation, from the schemas read as specification, and from
-black-box observation of a pinned reference build and of real on-air traffic.
-tools/check_cleanroom.sh enforces that boundary on every run, over the working
-tree and over vendored submodules.
+from RadioLib.
+
+The Meshtastic firmware, clients and schemas are GPL-3.0, and nothing here is
+derived from them. RadioLib is MIT, NOT GPL-3.0 -- this file said otherwise
+until 2026-08-20, which was simply wrong about somebody else's project. It may
+be read for facts, on the same footing as any other second implementation, and
+nothing here is derived from it either. Non-derivation is a statement about
+expression and is not enforced by any script: matching a project's name would
+have proved something about vocabulary and nothing about code.
+
+Protocol facts were established from published documentation, from the schemas
+read as specification, and from black-box observation of a pinned reference
+build and of real on-air traffic. tools/check_cleanroom.sh enforces the GPL
+boundary on every run, over the working tree and over vendored submodules.
 
 Meshtastic is a trademark of Meshtastic LLC. This project is not affiliated with
 or endorsed by it.
