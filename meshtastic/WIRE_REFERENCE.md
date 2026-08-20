@@ -554,6 +554,38 @@ acknowledgement section above.
 
 ---
 
+## LORA_24 — THE 2.4 GHz DEFAULT CHANNEL — MEASURED 2026-08-20, FROM THE ORACLE
+
+**The `LORA_24` default channel is not published anywhere reachable, and is now measured.** It could not be derived: the frequency slot is a hash of the channel name modulo a **band-dependent** slot count, so knowing the US answer does not yield the 2.4 GHz one. No published source gives it, and no capture from a real 2.4 GHz node was available.
+
+**Nothing was reverse-engineered — the reference was asked.** `meshtasticd` prints its whole derivation whenever a region is applied, so the region was set over the TCP API and the answer read out of the node's own log. No source was read. Same pinned build as every other oracle observation here; the harness that drives it lives outside this repository with the binary it drives.
+
+**The control is what makes the rest of the table trustworthy.** Region US was probed in the same sweep and returned **906.875 MHz, 104 × 250 kHz** — the frequency this project already interoperates with on air. A 2.4 GHz row from an instrument that could not reproduce the known answer would be worth nothing.
+
+| region | band MHz | slots | BW kHz | ch | frequency MHz | slot ms | preamble ms |
+|---|---|---|---|---|---|---|---|
+| US *(control)* | 902.000 – 928.000 | 104 | 250.0 | 19 | **906.875000** | 28 | 131 |
+| **LORA_24** | **2400.000 – 2483.500** | **102** | **812.5** | **5** | **2404.468750** | **17** | **40** |
+| NZ_865 | 864.000 – 868.000 | 16 | 250.0 | 3 | 864.875000 | 28 | 131 |
+| TH | 920.000 – 925.000 | 20 | 250.0 | 15 | 923.875000 | 28 | 131 |
+| UA_433 | 433.000 – 434.700 | 6 | 250.0 | 5 | 434.375000 | 28 | 131 |
+| UA_868 | 868.000 – 868.600 | 2 | 250.0 | 1 | 868.375000 | 28 | 131 |
+| MY_433 | 433.000 – 435.000 | 8 | 250.0 | 3 | 433.875000 | 28 | 131 |
+
+**`LORA_24 = 13` is now confirmed twice over**, which is why the neighbours are in the table at all: the value was already recorded above from the pinned `.proto`, and this sweep independently had the binary name each integer back — 11→`NZ_865`, 12→`TH`, 13→`LORA_24`, 14→`UA_433`, 15→`UA_868`, 16→`MY_433`. Two routes, one answer.
+
+**The slot arithmetic is identical on both bands**, and all seven rows satisfy it: `numChannels = floor(span / BW)` and `freq = freqStart + BW/2 + ch × BW`. US gives 902 + 0.125 + 19 × 0.25 = 906.875; LORA_24 gives 2400 + 0.40625 + 5 × 0.8125 = 2404.46875. **A trap in reading the log: the node prints both `ch=5` and `channel_num: 6`, and the multiplier the arithmetic uses is the SMALLER one.** Taking the printed `channel_num` puts the carrier exactly one slot high — 2405.28125 instead of 2404.46875, which is a plausible-looking wrong answer of precisely the kind this measurement existed to avoid.
+
+**A trap for anyone estimating the slot count rather than measuring it.** Applying the sub-GHz bandwidth of 250 kHz across 2400–2483.5 predicts roughly 334 slots, and that is wrong: the bandwidth up there is 812.5 kHz, so the count is **102**, which floor(83.5 / 0.8125) confirms. The slot arithmetic is right and the bandwidth assumed inside it is not — a wrong number reached by a correct method.
+
+**Bandwidth is 812.5 kHz and the spreading factor does NOT change.** Bandwidth is read directly from `numChannels: 102 x 812.5kHz`. SF follows from the preamble times in the same logs: sub-GHz, 131 ms over 16 symbols is an 8.192 ms symbol, which is 2¹¹ / 250 kHz; at 2.4 GHz, 40 ms / 16 = 2.5 ms, and 2.5 ms × 812.5 kHz = 2031 ≈ 2¹¹. So **LongFast at 2.4 GHz is SF11 on BW 812.5** — the same spreading factor on 3.25× the bandwidth. That is also *why* the carrier moves: the slot count moves with the bandwidth, exactly as the per-preset table above records for sub-GHz.
+
+**The coding rate is NOT measured, and must not be inferred from this.** This file already records that reception cannot reveal CR, and that an earlier "CR 4/5" was our receiver's setting rather than an observation. The oracle log does not print CR and this run produced no transmit to time. The LongFast preset's 4/5 is the reasonable expectation and it remains an expectation. **Settling it needs what settled it sub-GHz — a timing measurement differencing two payload lengths — which requires 2.4 GHz hardware.**
+
+**What this licenses, and what it does not.** It fixes the carrier, the bandwidth and the spreading factor for `LORA_24`, which is enough that a 2.4 GHz preset is no longer a guess. It is a **simulator** observation, from the same source that is 1.2% optimistic on airtime against real hardware. Nothing here has transmitted or received on 2.4 GHz. Until something has, a failing 2.4 GHz link should be suspected of this row before it is suspected of the radio.
+
+---
+
 ## Corrections this phase forces
 
 **To the commonly-repeated description of the protocol:** the preset table (7 vs 17, two deprecated), `DATA_PAYLOAD_LEN` (233 not 237), the absence of `next_hop` routing, and the absence of XEdDSA and KEY_VERIFICATION.
