@@ -6,10 +6,10 @@
 # Refreshed DELIBERATELY, never to make a build pass. If this file
 # changed without TM_ABI_VERSION moving, that is the defect the
 # check exists to catch, and the fix is the version bump.
-# TM_ABI_VERSION: 7
+# TM_ABI_VERSION: 8
 typedef struct tm_ctx_t tm_ctx_t;
 typedef struct tm_outbox_t tm_outbox_t;
-#define TM_ABI_VERSION 7
+#define TM_ABI_VERSION 8
 #define TM_OK 0
 #define TM_E_ARG -1
 #define TM_E_ABI -2
@@ -19,6 +19,7 @@ typedef struct tm_outbox_t tm_outbox_t;
 #define TM_E_TOO_AGGRESSIVE -6
 #define TM_E_UNAUTHENTIC -7
 #define TM_E_SMALL_ORDER -8
+#define TM_E_RESERVED_PORTNUM -9
 #define TM_SUPPRESSED_NONE 0
 #define TM_SUPPRESSED_DUPLICATE 1
 #define TM_SUPPRESSED_HOP_LIMIT 2
@@ -111,6 +112,18 @@ uint8_t want_ack,
 const struct tm_key_t *key,
 const uint8_t *text,
 size_t text_len,
+uint8_t *out,
+size_t out_cap);
+int32_t tm_extension_encode(uint32_t from,
+uint32_t to,
+uint32_t id,
+uint8_t hop_limit,
+uint8_t channel_hash,
+uint8_t want_ack,
+uint32_t portnum,
+const struct tm_key_t *key,
+const uint8_t *payload,
+size_t payload_len,
 uint8_t *out,
 size_t out_cap);
 int32_t tm_relay_prepare(uint8_t *frame_ptr,

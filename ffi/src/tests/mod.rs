@@ -816,3 +816,104 @@ fn tm_header_peek_refuses_a_runt_rather_than_reading_past_it() {
                "exactly 16 bytes is a header");
     assert_eq!(unsafe { tm_header_peek(core::ptr::null(), 16, &mut h) }, TM_E_ARG);
 }
+
+/// The private-use boundary is refused, not clamped, and not reinterpreted.
+///
+/// 255 and 256 are one apart and mean entirely different things: below the line
+/// the portnum is upstream's and this library constructs the body itself; at or
+/// above it the body is the caller's. A clamp would silently move a caller from
+/// one regime to the other.
+#[test]
+fn tm_extension_encode_refuses_a_portnum_below_the_private_range() {
+    let mut key = TmKey { bytes: [0u8; 16] };
+    assert_eq!(unsafe { tm_key_from_index(1, &mut key) }, TM_OK);
+    let payload = b"x";
+    let mut out = [0u8; 256];
+
+    for portnum in [0u32, 1, 4, 5, 70, 255] {
+        let rc = unsafe {
+            tm_extension_encode(
+                0x7e57_0042, 0xFFFF_FFFF, 1, 3, 0x08, 0, portnum, &key,
+                payload.as_ptr(), payload.len(), out.as_mut_ptr(), out.len(),
+            )
+        };
+        assert_eq!(
+            rc, TM_E_RESERVED_PORTNUM,
+            "portnum {portnum} is upstream's and must be refused, not encoded"
+        );
+    }
+}
+
+/// 256 and 511 both encode, and the frame is an ordinary channel packet whose
+/// payload decodes back to the portnum and bytes that went in.
+///
+/// 256 is the boundary itself and 511 is `MAX` from WIRE_REFERENCE, so this
+/// pins both ends of the sanctioned range rather than one interior value.
+#[test]
+fn tm_extension_encode_round_trips_across_the_private_range() {
+    let mut key = TmKey { bytes: [0u8; 16] };
+    assert_eq!(unsafe { tm_key_from_index(1, &mut key) }, TM_OK);
+    let payload: [u8; 11] = *b"group-seal\x01";
+
+    for portnum in [256u32, 300, 511] {
+        let mut out = [0u8; 256];
+        let n = unsafe {
+            tm_extension_encode(
+                0x7e57_0042, 0xFFFF_FFFF, 0x0bad_c0de, 3, 0x08, 0, portnum, &key,
+                payload.as_ptr(), payload.len(), out.as_mut_ptr(), out.len(),
+            )
+        };
+        assert!(n > 0, "portnum {portnum} must encode, got {n}");
+        let n = n as usize;
+
+        // Header first: the frame must look like any other originated packet.
+        let mut hdr = TmHeader {
+            to: 0, from: 0, id: 0, hop_limit: 0, hop_start: 0,
+            channel_hash: 0, next_hop: 0, relay_node: 0, want_ack: 0, via_mqtt: 0,
+        };
+        assert_eq!(unsafe { tm_header_peek(out.as_ptr(), n, &mut hdr) }, TM_OK);
+        assert_eq!(hdr.from, 0x7e57_0042);
+        assert_eq!(hdr.hop_limit, 3);
+        assert_eq!(hdr.hop_start, 3, "an originated frame has hop_start == hop_limit");
+        assert_eq!(
+            hdr.relay_node, 0x42,
+            "relay_node is the low byte of `from`, as the other two encoders do"
+        );
+
+        // Then decrypt and decode, which is what a receiver actually does.
+        let mut work = out;
+        let mut pl: *const u8 = core::ptr::null();
+        let mut pl_len: usize = 0;
+        assert_eq!(
+            unsafe { tm_frame_decrypt(work.as_mut_ptr(), n, &key, &mut pl, &mut pl_len) },
+            TM_OK
+        );
+        let mut data = TmData {
+            portnum: 0, payload: core::ptr::null(), payload_len: 0,
+            want_response: 0, request_id: 0,
+        };
+        assert_eq!(unsafe { tm_data_decode(pl, pl_len, &mut data) }, TM_OK);
+        assert_eq!(data.portnum, portnum, "the portnum must survive the round trip");
+        assert_eq!(data.payload_len, payload.len());
+        let got = unsafe { slice::from_raw_parts(data.payload, data.payload_len) };
+        assert_eq!(got, &payload[..], "the caller's bytes must be carried verbatim");
+    }
+}
+
+/// A null pointer is an argument error, and it is a DIFFERENT code from the
+/// portnum refusal -- a caller must be able to tell "you passed nothing" from
+/// "you used a portnum that is not yours".
+#[test]
+fn tm_extension_encode_separates_a_bad_pointer_from_a_bad_portnum() {
+    let mut key = TmKey { bytes: [0u8; 16] };
+    assert_eq!(unsafe { tm_key_from_index(1, &mut key) }, TM_OK);
+    let mut out = [0u8; 256];
+    let rc = unsafe {
+        tm_extension_encode(
+            1, 2, 3, 3, 0x08, 0, 256, &key,
+            core::ptr::null(), 0, out.as_mut_ptr(), out.len(),
+        )
+    };
+    assert_eq!(rc, TM_E_ARG);
+    assert_ne!(TM_E_ARG, TM_E_RESERVED_PORTNUM);
+}

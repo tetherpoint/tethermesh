@@ -86,7 +86,7 @@ typedef struct tm_outbox_t tm_outbox_t;
  otherwise silent and produces symptoms attributable to anything at all;
  four bytes to make it impossible is a trade worth taking every time.
  */
-#define TM_ABI_VERSION 7
+#define TM_ABI_VERSION 8
 
 /*
  Status codes, defined once so the ABI and its tests cannot disagree.
@@ -143,6 +143,24 @@ typedef struct tm_outbox_t tm_outbox_t;
  attacker and is never retryable.
  */
 #define TM_E_SMALL_ORDER -8
+
+/*
+ A portnum below 256 given to [`tm_extension_encode`].
+
+ Refused rather than clamped or reinterpreted, because the two ranges mean
+ different things and only the caller knows which it wanted. Below 256 the
+ portnum is upstream's and the body has a shape this library knows and
+ constructs itself -- `tm_text_encode` and `tm_nodeinfo_encode` exist for
+ exactly that. At or above 256 the body is the caller's own private format
+ and there is nothing for this library to contribute, which is why that
+ range is the one handed over.
+
+ It is NOT a security boundary and must not be described as one. Channel
+ traffic is encrypted under a published default key with no sender
+ authentication, so anyone with a radio can emit any portnum they like. This
+ keeps frame-construction knowledge in one place; it prevents nothing.
+ */
+#define TM_E_RESERVED_PORTNUM -9
 
 #define TM_SUPPRESSED_NONE 0
 
@@ -477,6 +495,47 @@ int32_t tm_text_encode(uint32_t from,
                        size_t text_len,
                        uint8_t *out,
                        size_t out_cap);
+
+/*
+ Encode a frame on a **private-use portnum** (>= 256) into `out`.
+
+ This is the carriage for extensions that ride ordinary Meshtastic packets.
+ `meshtastic/WIRE_REFERENCE.md` records `PRIVATE_APP = 256` with upstream's
+ own wording -- *"Private applications should use portnums >= 256"* -- and
+ `MAX = 511`; the range is sanctioned, an individual value in it is not.
+
+ The frame is an ordinary channel-encrypted packet in every other respect, so
+ a stock node relays it without being able to read it, and a node that does
+ not implement the extension sees a portnum it has no handler for and carries
+ on. That behaviour is recorded on hardware in
+ `tests/captures/suite_relay_record.json`.
+
+ # Why a portnum parameter here and nowhere else
+
+ For portnums upstream defines, this library knows what the body must contain
+ and builds it -- the `!`-prefixed id, the six zero `macaddr` bytes, the
+ hop_start/hop_limit pairing. That knowledge belongs in one place, and a
+ caller reconstructing it would get a slightly different answer each time.
+ Above 256 the payload is the caller's own format and there is nothing to
+ contribute, so nothing is lost by handing it over.
+
+ Returns [`TM_E_RESERVED_PORTNUM`] for a portnum below 256. See that constant
+ for why this is a knowledge boundary and explicitly not a security one.
+
+ Returns the frame length, or negative on error.
+ */
+int32_t tm_extension_encode(uint32_t from,
+                            uint32_t to,
+                            uint32_t id,
+                            uint8_t hop_limit,
+                            uint8_t channel_hash,
+                            uint8_t want_ack,
+                            uint32_t portnum,
+                            const struct tm_key_t *key,
+                            const uint8_t *payload,
+                            size_t payload_len,
+                            uint8_t *out,
+                            size_t out_cap);
 
 /*
  Patch a received frame in place so it can be rebroadcast.

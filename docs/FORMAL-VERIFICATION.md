@@ -92,6 +92,7 @@ by whoever writes them. That is the difference these rows buy.
 | `tm_header_peek_refuses_every_short_frame_and_reads_every_full_one` | every length below a header is refused and every full one decodes, proven across the boundary rather than at the two points a test would pick |
 | `tm_pki_decrypt_refuses_every_frame_too_short_to_hold_one` | every frame below `header(16) + tag(8) + extra_nonce(4)` is refused, never read past |
 | `tm_key_from_index_accepts_exactly_the_defined_range` | exactly `1..=10`, and `0` — which means "no crypto" on the wire — never silently yields a key |
+| `the_private_use_boundary_is_exactly_256` | `PRIVATE_APP` is a line, and a line checked at samples is checked nowhere in particular — this covers every `u32`, so no portnum upstream defines can ever be claimed by an extension. Proven on the helper rather than on `tm_extension_encode`, because putting protobuf encoding and AES-CTR under a model checker cost more than fifteen minutes and bought nothing; the tests carry the other half, that the encoder consults it |
 | `tm_data_decode_is_total_on_arbitrary_bytes` | no payload panics the decoder a consumer calls on anything that decrypted |
 
 **Three of these need an explicit `#[kani::unwind]`, and that is worth

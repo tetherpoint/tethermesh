@@ -155,7 +155,7 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
 /// Checked at init by the C side. A stale header against a rebuilt library is
 /// otherwise silent and produces symptoms attributable to anything at all;
 /// four bytes to make it impossible is a trade worth taking every time.
-pub const TM_ABI_VERSION: u32 = 7;
+pub const TM_ABI_VERSION: u32 = 8;
 
 #[no_mangle]
 pub extern "C" fn tm_abi_version() -> u32 {
@@ -241,6 +241,21 @@ pub const TM_E_UNAUTHENTIC: i32 = -7;
 /// three call for opposite responses. This one is chosen deliberately by an
 /// attacker and is never retryable.
 pub const TM_E_SMALL_ORDER: i32 = -8;
+/// A portnum below 256 given to [`tm_extension_encode`].
+///
+/// Refused rather than clamped or reinterpreted, because the two ranges mean
+/// different things and only the caller knows which it wanted. Below 256 the
+/// portnum is upstream's and the body has a shape this library knows and
+/// constructs itself -- `tm_text_encode` and `tm_nodeinfo_encode` exist for
+/// exactly that. At or above 256 the body is the caller's own private format
+/// and there is nothing for this library to contribute, which is why that
+/// range is the one handed over.
+///
+/// It is NOT a security boundary and must not be described as one. Channel
+/// traffic is encrypted under a published default key with no sender
+/// authentication, so anyone with a radio can emit any portnum they like. This
+/// keeps frame-construction knowledge in one place; it prevents nothing.
+pub const TM_E_RESERVED_PORTNUM: i32 = -9;
 
 /// Resolve a caller's requested retry policy, or refuse it.
 ///
@@ -683,6 +698,111 @@ pub unsafe extern "C" fn tm_text_encode(
     // review misses these. This exact line put slice_index_fail into the
     // firmware and went unnoticed because panic symbols were not re-checked
     // after the function was added.
+    let Some(body) = plain.get(..plain_len) else {
+        return TM_E_ARG;
+    };
+    match frame::encode(&header, body, unsafe { &(*key).bytes }, 0, dst) {
+        Ok(n) => n as i32,
+        Err(_) => TM_E_ARG,
+    }
+}
+
+/// Is this portnum in the private-use range an extension may claim?
+///
+/// Its own named function so the boundary can be model-checked over the whole
+/// `u32` range without CBMC having to reason about protobuf encoding and
+/// AES-CTR, which it would if the proof targeted [`tm_extension_encode`]
+/// directly — the first attempt at that ran past fifteen minutes without
+/// reporting. `resolve_retry_policy` and `classify_ack` are factored out for
+/// the same reason, and the public function keeps example tests over the
+/// boundary so that "the encoder actually consults this" is checked too.
+///
+/// 256 is `PRIVATE_APP` and 511 is `MAX`, both recorded in
+/// `meshtastic/WIRE_REFERENCE.md` from upstream's own documentation. Only the
+/// lower bound is enforced: a portnum above 511 is out of upstream's range
+/// entirely and refusing it here would be this library inventing a rule.
+const fn portnum_is_private_use(portnum: u32) -> bool {
+    portnum >= 256
+}
+
+/// Encode a frame on a **private-use portnum** (>= 256) into `out`.
+///
+/// This is the carriage for extensions that ride ordinary Meshtastic packets.
+/// `meshtastic/WIRE_REFERENCE.md` records `PRIVATE_APP = 256` with upstream's
+/// own wording -- *"Private applications should use portnums >= 256"* -- and
+/// `MAX = 511`; the range is sanctioned, an individual value in it is not.
+///
+/// The frame is an ordinary channel-encrypted packet in every other respect, so
+/// a stock node relays it without being able to read it, and a node that does
+/// not implement the extension sees a portnum it has no handler for and carries
+/// on. That behaviour is recorded on hardware in
+/// `tests/captures/suite_relay_record.json`.
+///
+/// # Why a portnum parameter here and nowhere else
+///
+/// For portnums upstream defines, this library knows what the body must contain
+/// and builds it -- the `!`-prefixed id, the six zero `macaddr` bytes, the
+/// hop_start/hop_limit pairing. That knowledge belongs in one place, and a
+/// caller reconstructing it would get a slightly different answer each time.
+/// Above 256 the payload is the caller's own format and there is nothing to
+/// contribute, so nothing is lost by handing it over.
+///
+/// Returns [`TM_E_RESERVED_PORTNUM`] for a portnum below 256. See that constant
+/// for why this is a knowledge boundary and explicitly not a security one.
+///
+/// Returns the frame length, or negative on error.
+#[no_mangle]
+pub unsafe extern "C" fn tm_extension_encode(
+    from: u32,
+    to: u32,
+    id: u32,
+    hop_limit: u8,
+    channel_hash: u8,
+    want_ack: u8,
+    portnum: u32,
+    key: *const TmKey,
+    payload: *const u8,
+    payload_len: usize,
+    out: *mut u8,
+    out_cap: usize,
+) -> i32 {
+    if !portnum_is_private_use(portnum) {
+        return TM_E_RESERVED_PORTNUM;
+    }
+    if key.is_null() || payload.is_null() || out.is_null() {
+        return TM_E_ARG;
+    }
+    let body_in = unsafe { slice::from_raw_parts(payload, payload_len) };
+
+    let data = Data {
+        portnum,
+        payload: body_in,
+        ..Default::default()
+    };
+    let mut plain = [0u8; 240];
+    let Ok(plain_len) = data.encode(&mut plain) else {
+        return TM_E_ARG;
+    };
+
+    let header = Header {
+        to,
+        from,
+        id,
+        hop_limit,
+        want_ack: want_ack != 0,
+        via_mqtt: false,
+        hop_start: hop_limit,
+        channel: channel_hash,
+        next_hop: 0,
+        // The low byte of `from`, matching tm_text_encode and
+        // tm_nodeinfo_encode. Three encoders disagreeing about this field is
+        // exactly the drift that made it wrong here until 2026-08-18.
+        relay_node: (from & 0xFF) as u8,
+    };
+
+    let dst = unsafe { slice::from_raw_parts_mut(out, out_cap) };
+    // get(), not plain[..plain_len] -- bare indexing compiles to a panic path
+    // and one reaching a linked image is a crate-rule violation.
     let Some(body) = plain.get(..plain_len) else {
         return TM_E_ARG;
     };

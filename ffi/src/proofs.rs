@@ -28,8 +28,8 @@
 //! Run with `cargo kani -p tmffi`.
 
 use crate::{
-    classify_ack, resolve_retry_policy, tm_data_decode, tm_header_peek, tm_key_from_index,
-    tm_pki_decrypt, TmData, TmHeader, TmKey, TmPkiKey, RetryPolicy,
+    classify_ack, portnum_is_private_use, resolve_retry_policy, tm_data_decode, tm_header_peek,
+    tm_key_from_index, tm_pki_decrypt, TmData, TmHeader, TmKey, TmPkiKey, RetryPolicy,
     TM_E_BAD_INDEX, TM_E_SHORT, TM_OK,
 };
 
@@ -170,4 +170,27 @@ fn tm_data_decode_is_total_on_arbitrary_bytes() {
         want_response: 0, request_id: 0,
     };
     let _ = unsafe { tm_data_decode(bytes.as_ptr(), bytes.len(), &mut out) };
+}
+
+/// The private-use boundary is exactly 256, over the WHOLE u32 range.
+///
+/// A test can name six points; this covers every value, including the two
+/// adjacent to the boundary and every portnum upstream might ever define. That
+/// exhaustiveness is the property — `PRIVATE_APP = 256` is a line, and a line
+/// checked at samples is a line checked nowhere in particular.
+///
+/// Proven on the helper rather than on `tm_extension_encode` deliberately: the
+/// encoder contains protobuf encoding and AES-CTR, and putting those under a
+/// model checker cost more than fifteen minutes and bought nothing. The tests
+/// carry the other half — that the encoder actually consults this.
+#[kani::proof]
+fn the_private_use_boundary_is_exactly_256() {
+    let portnum: u32 = kani::any();
+    assert!(
+        portnum_is_private_use(portnum) == (portnum >= 256),
+        "the boundary must be 256 for every portnum, not merely at the sampled ones"
+    );
+    if portnum < 256 {
+        assert!(!portnum_is_private_use(portnum), "upstream's range is never claimable");
+    }
 }
