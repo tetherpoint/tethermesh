@@ -42,8 +42,9 @@ const HDR: [u8; HEADER_LEN] = [
 ];
 
 fn seal_probe(buf: &mut [u8], pt: &[u8]) -> usize {
-    seal(&GK, 0xCAFE, 0, MsgType::Data, &HDR, 0x7e57_0001, 0x0bad_c0de, pt, buf)
-        .expect("seal")
+    let group = GroupEpoch { group_key: &GK, group_id: 0xCAFE, epoch: 0 };
+    let binding = Binding { header: &HDR, from: 0x7e57_0001, id: 0x0bad_c0de };
+    seal(&group, &binding, MsgType::Data, pt, buf).expect("seal")
 }
 
 #[test]
@@ -59,7 +60,8 @@ fn a_sealed_message_opens_to_what_went_in() {
     assert_eq!(e.group_id, 0xCAFE);
     assert_eq!(e.epoch, 0);
 
-    let len = open_in_place(&GK, &HDR, 0x7e57_0001, 0x0bad_c0de, &mut buf[..n]).expect("open");
+    let binding = Binding { header: &HDR, from: 0x7e57_0001, id: 0x0bad_c0de };
+    let len = open_in_place(&GK, &binding, &mut buf[..n]).expect("open");
     assert_eq!(&buf[HEADER_BYTES..HEADER_BYTES + len], pt);
 }
 
@@ -79,7 +81,11 @@ fn a_forged_sender_fails_the_tag() {
     let mut forged = HDR;
     forged[4] = 0x99;
     assert_eq!(
-        open_in_place(&GK, &forged, 0x7e57_0001, 0x0bad_c0de, &mut buf[..n]),
+        open_in_place(
+            &GK,
+            &Binding { header: &forged, from: 0x7e57_0001, id: 0x0bad_c0de },
+            &mut buf[..n],
+        ),
         Err(Error::Unauthentic),
         "a rewritten sender must not verify -- this is the property the \
          whole bundle exists for"
@@ -101,7 +107,8 @@ fn a_relayed_frame_still_verifies() {
     relayed[15] = 0x64; // a relay stamped its low byte
     relayed[14] = 0x28; // and routing set next_hop
 
-    let len = open_in_place(&GK, &relayed, 0x7e57_0001, 0x0bad_c0de, &mut buf[..n])
+    let binding = Binding { header: &relayed, from: 0x7e57_0001, id: 0x0bad_c0de };
+    let len = open_in_place(&GK, &binding, &mut buf[..n])
         .expect("a relayed frame must still verify");
     assert_eq!(&buf[HEADER_BYTES..HEADER_BYTES + len], b"relayed once");
 }
@@ -109,23 +116,28 @@ fn a_relayed_frame_still_verifies() {
 #[test]
 fn a_later_epoch_cannot_be_read_with_an_earlier_key() {
     let mut a = [0u8; 64];
-    let na = seal(&GK, 1, 0, MsgType::Data, &HDR, 1, 2, b"epoch zero", &mut a).expect("seal");
+    let e0 = GroupEpoch { group_key: &GK, group_id: 1, epoch: 0 };
+    let e1 = GroupEpoch { group_key: &GK, group_id: 1, epoch: 1 };
+    let b2 = Binding { header: &HDR, from: 1, id: 2 };
+    let b3 = Binding { header: &HDR, from: 1, id: 3 };
+    let na = seal(&e0, &b2, MsgType::Data, b"epoch zero", &mut a).expect("seal");
     let mut b = [0u8; 64];
-    let nb = seal(&GK, 1, 1, MsgType::Data, &HDR, 1, 3, b"epoch one", &mut b).expect("seal");
+    let nb = seal(&e1, &b3, MsgType::Data, b"epoch one", &mut b).expect("seal");
 
     assert_ne!(epoch_key(&GK, 0), epoch_key(&GK, 1), "epochs must derive different keys");
 
     // Each opens under its own epoch, which travels in the clear.
-    assert!(open_in_place(&GK, &HDR, 1, 2, &mut a[..na]).is_ok());
-    assert!(open_in_place(&GK, &HDR, 1, 3, &mut b[..nb]).is_ok());
+    assert!(open_in_place(&GK, &b2, &mut a[..na]).is_ok());
+    assert!(open_in_place(&GK, &b3, &mut b[..nb]).is_ok());
 
     // A revoked member holds the OLD group key. Rekeying is what stops them,
     // and it stops them only for traffic sent afterwards -- see SPEC 6.4.
     let old = [9u8; 32];
     let mut c = [0u8; 64];
-    let nc = seal(&GK, 1, 1, MsgType::Data, &HDR, 1, 4, b"after rekey", &mut c).expect("seal");
+    let b4 = Binding { header: &HDR, from: 1, id: 4 };
+    let nc = seal(&e1, &b4, MsgType::Data, b"after rekey", &mut c).expect("seal");
     assert_eq!(
-        open_in_place(&old, &HDR, 1, 4, &mut c[..nc]),
+        open_in_place(&old, &b4, &mut c[..nc]),
         Err(Error::Unauthentic),
         "a stale group key must not open later traffic"
     );
@@ -169,12 +181,24 @@ fn malformed_input_is_refused_rather_than_trusted() {
     assert_eq!(parse(&t[..n]).unwrap_err(), Error::Malformed);
 
     assert_eq!(
-        seal(&GK, 0, 0, MsgType::Data, &HDR, 1, 2, b"x", &mut buf),
+        seal(
+            &GroupEpoch { group_key: &GK, group_id: 0, epoch: 0 },
+            &Binding { header: &HDR, from: 1, id: 2 },
+            MsgType::Data,
+            b"x",
+            &mut buf,
+        ),
         Err(Error::BadGroupId)
     );
     let mut tiny = [0u8; 4];
     assert_eq!(
-        seal(&GK, 1, 0, MsgType::Data, &HDR, 1, 2, b"x", &mut tiny),
+        seal(
+            &GroupEpoch { group_key: &GK, group_id: 1, epoch: 0 },
+            &Binding { header: &HDR, from: 1, id: 2 },
+            MsgType::Data,
+            b"x",
+            &mut tiny,
+        ),
         Err(Error::BufferTooSmall)
     );
 }
@@ -221,3 +245,130 @@ fn the_epoch_refuses_to_wrap() {
     );
 }
 
+/// The nonce layout, pinned to SPEC.md § 3.2 rather than to our own round trip.
+///
+/// # Why a round trip cannot settle this
+///
+/// Transpose `from` and `id` in *both* `seal` and `open_in_place` and every
+/// test in this file still passes: the two ends make the same swap, the nonces
+/// agree, and the tag verifies. It was found exactly that way — a mutation that
+/// changed both call sites survived the whole suite on 2026-08-21.
+///
+/// **That is the `hop_start`/`hop_limit` defect again.** This project shipped a
+/// self-consistent transposition of two header fields that passed 102 host
+/// tests, 24 ABI tests and every Kani harness, because nothing anywhere pinned
+/// the byte positions and every captured frame had the two fields equal. It was
+/// caught only by a frame from someone else's radio.
+///
+/// There is no second implementation of this envelope to capture, so the
+/// external answer is the **written specification**, and this asserts against
+/// it. The Kani harness `nonce_construction_is_total_and_carries_the_epoch`
+/// pins the length and the epoch's position; it deliberately says nothing about
+/// the order of the two 32-bit fields, which is the gap this closes.
+#[test]
+fn the_nonce_layout_matches_the_spec_not_only_itself() {
+    // Chosen so that every byte is distinct and no rotation of the input
+    // produces the same output: a lazy fixture of 1 and 2 would not notice a
+    // swap of two equal-looking words.
+    let n = nonce(0x0403_0201, 0x0807_0605, 0x5a);
+    assert_eq!(
+        n,
+        [
+            0x01, 0x02, 0x03, 0x04, // from, little-endian
+            0x05, 0x06, 0x07, 0x08, // id, little-endian
+            0x5a, // epoch
+            0x00, 0x00, 0x00, 0x00, // padding to 13
+        ],
+        "SPEC.md § 3.2: nonce = from[4,LE] || id[4,LE] || epoch[1] || 0x00 x 4"
+    );
+}
+
+/// Sealing must **use** the epoch it was handed, not merely carry it.
+///
+/// Also found by mutation on 2026-08-21: making `seal` ignore
+/// `GroupEpoch::epoch` and derive everything under epoch 0 passed every test in
+/// this file. It stamps zero into the envelope as well, so the two ends still
+/// agree and the round trip still works — a node would simply transmit under an
+/// epoch nobody asked for, and the only symptom would be traffic a peer on the
+/// current epoch cannot read.
+#[test]
+fn seal_uses_the_epoch_it_was_given_and_not_a_default() {
+    let group = GroupEpoch { group_key: &GK, group_id: 0xCAFE, epoch: 3 };
+    let binding = Binding { header: &HDR, from: 0x7e57_0001, id: 0x0bad_c0de };
+
+    let mut buf = [0u8; 64];
+    let n = seal(&group, &binding, MsgType::Data, b"epoch three", &mut buf).expect("seal");
+
+    // It travels in the clear, so a receiver can pick the key before verifying.
+    assert_eq!(parse(&buf[..n]).expect("parse").epoch, 3, "the envelope must declare epoch 3");
+
+    // And the ciphertext really is under epoch 3's key: rewriting the declared
+    // epoch makes the receiver derive a different key, which must not verify.
+    let mut tampered = buf;
+    tampered[6] = 0;
+    assert_eq!(
+        open_in_place(&GK, &binding, &mut tampered[..n]),
+        Err(Error::Unauthentic),
+        "the epoch is authenticated through the key, not merely carried"
+    );
+
+    // The honest positive: it opens under the epoch it claims.
+    let len = open_in_place(&GK, &binding, &mut buf[..n]).expect("open");
+    assert_eq!(&buf[HEADER_BYTES..HEADER_BYTES + len], b"epoch three");
+}
+
+/// `seal` must feed the nonce in the order the SPEC gives, not merely in an
+/// order it agrees with itself about.
+///
+/// # The gap this closes, and why the obvious tests miss it
+///
+/// Transposing `binding.from` and `binding.id` at the `nonce(..)` call inside
+/// **both** `seal` and `open_in_place` survived every other test in this file,
+/// including `the_nonce_layout_matches_the_spec_not_only_itself` — that one
+/// pins what `nonce()` does with its arguments, and says nothing about which
+/// arguments `seal` hands it. Both ends swap, the nonces agree, the tag
+/// verifies. Round-tripping cannot see it and neither can a differential
+/// against ourselves.
+///
+/// So this test does not round-trip. It **re-derives the construction from
+/// SPEC.md § 3** — epoch key, nonce in the specified field order, AAD from the
+/// invariant header — encrypts the same plaintext with the same primitive, and
+/// asserts `seal` produced those exact bytes.
+///
+/// **Be honest about the strength of this.** It is not checked against an
+/// independent implementation; there is no second implementation of this
+/// envelope to check against, and SPEC.md publishes no envelope vectors. What
+/// it is: an assertion that the composition matches the written specification,
+/// resting on primitives pinned elsewhere — `nonce`'s byte layout by the test
+/// above, and CCM itself by `ccm_aad_vectors.json`, which WAS generated by an
+/// independent Python implementation. That is a real chain, and it stops short
+/// of a second implementation of the whole.
+#[test]
+fn seal_composes_the_nonce_and_aad_the_way_the_spec_says() {
+    const PT: &[u8] = b"composition, not round trip";
+    let group = GroupEpoch { group_key: &GK, group_id: 0xCAFE, epoch: 2 };
+    let binding = Binding { header: &HDR, from: 0x7e57_0001, id: 0x0bad_c0de };
+
+    let mut sealed = [0u8; 96];
+    let n = seal(&group, &binding, MsgType::Data, PT, &mut sealed).expect("seal");
+
+    // Re-derive, naming each input in the order SPEC.md § 3.2 gives it. If
+    // `seal` swapped these two arguments, this nonce differs from the one it
+    // used and the bytes below cannot match.
+    let key = epoch_key(&GK, 2);
+    let expect_nonce = nonce(binding.from, binding.id, 2);
+    let aad = aad_from_header(binding.header);
+
+    let mut body = [0u8; 96];
+    body[..PT.len()].copy_from_slice(PT);
+    let written =
+        ccm_encrypt_in_place_aad(&key, &expect_nonce, &aad, &mut body, PT.len(), CCM_TAG_LEN)
+            .expect("reference encrypt");
+
+    assert_eq!(
+        &sealed[HEADER_BYTES..n],
+        &body[..written],
+        "seal must encrypt under the SPEC's nonce and AAD, not merely under one \
+         it agrees with itself about"
+    );
+}

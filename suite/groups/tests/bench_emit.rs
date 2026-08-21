@@ -14,7 +14,9 @@ use tethermesh::crypto::{expand_psk, Psk};
 use tethermesh::frame;
 use tethermesh::header::Header;
 use tethermesh::message::Data;
-use tethermesh_groups::{open_in_place, parse, seal, MsgType, HEADER_BYTES, PORTNUM};
+use tethermesh_groups::{
+    open_in_place, parse, seal, Binding, GroupEpoch, MsgType, HEADER_BYTES, PORTNUM,
+};
 
 /// Emit a complete extension frame for the bench to transmit.
 ///
@@ -67,8 +69,10 @@ fn emit_suite_frame_for_the_bench() {
 
     let group_key = [0x42u8; 32];
     let mut envelope = [0u8; 128];
-    let n = seal(&group_key, 0xCAFE, 0, MsgType::Data, &hdr_bytes, from, id,
-                 b"suite-relay-probe", &mut envelope).expect("seal");
+    let group = GroupEpoch { group_key: &group_key, group_id: 0xCAFE, epoch: 0 };
+    let binding = Binding { header: &hdr_bytes, from, id };
+    let n = seal(&group, &binding, MsgType::Data, b"suite-relay-probe", &mut envelope)
+        .expect("seal");
 
     let data = Data { portnum: PORTNUM, payload: &envelope[..n], ..Data::default() };
     let mut plain = [0u8; 200];
@@ -90,7 +94,9 @@ fn emit_suite_frame_for_the_bench() {
         // version, type, group and epoch from the front of the buffer, which is
         // what makes those fields authenticated rather than merely present.
         let mut whole = d2.payload.to_vec();
-        let opened = open_in_place(&group_key, &h2.encode(), h2.from, h2.id, &mut whole)
+        let h2_bytes = h2.encode();
+        let back_binding = Binding { header: &h2_bytes, from: h2.from, id: h2.id };
+        let opened = open_in_place(&group_key, &back_binding, &mut whole)
             .expect("our own frame must open under our own reader");
         assert_eq!(&whole[HEADER_BYTES..HEADER_BYTES + opened], b"suite-relay-probe",
                    "our own frame must open to what went in");

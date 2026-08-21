@@ -2021,8 +2021,8 @@ fn ccm_with_aad_matches_an_independent_implementation() {
     let key_hex = json_str(&doc, "key").expect("key");
     let nonce_hex = json_str(&doc, "nonce").expect("nonce");
     let mut key = [0u8; 32];
-    key.copy_from_slice(&hex_to_bytes(&key_hex));
-    let nonce = hex_to_bytes(&nonce_hex);
+    key.copy_from_slice(&hex_to_bytes(key_hex));
+    let nonce = hex_to_bytes(nonce_hex);
 
     let mut checked = 0usize;
     let mut saw_14 = false;

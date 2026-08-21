@@ -239,6 +239,58 @@ pub fn nonce(from: u32, id: u32, epoch: u8) -> [u8; CCM_NONCE_LEN] {
     out
 }
 
+/// Which group, at which epoch, and the group's long-term key.
+///
+/// # Why these three travel together
+///
+/// They are the entire input to key selection: [`epoch_key`] takes `group_key`
+/// and `epoch`, and `group_id` is what a receiver checks before spending a CCM
+/// verification at all. Bundling them is not tidying — it removes a real
+/// hazard. `seal` used to take `group_id: u32` and `epoch: u8` as bare
+/// positional arguments immediately before `from: u32` and `id: u32`, four
+/// adjacent integers in which a transposition compiles, round-trips and passes
+/// every test, because seal and open would make the same swap. That is exactly
+/// the shape of the `hop_start`/`hop_limit` transposition this project has
+/// already shipped once and caught only by capturing a frame from someone
+/// else's radio. Named fields do not make a swap impossible; they make it
+/// visible at the call site, which is the difference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GroupEpoch<'a> {
+    /// The group's long-term key. [`epoch_key`] derives the working key from it.
+    pub group_key: &'a [u8; 32],
+    /// Which group. Never zero — [`Error::BadGroupId`] otherwise.
+    pub group_id: u32,
+    /// Which epoch of that group's key schedule.
+    pub epoch: u8,
+}
+
+/// What the AEAD is bound to: the carrying frame's invariant identity.
+///
+/// # Why this is one type and not three arguments
+///
+/// These three values are the whole of the nonce and the AAD — [`nonce`] takes
+/// `from` and `id`, [`aad_from_header`] takes `header` — and **the sealing and
+/// opening ends must supply identical values or the tag does not verify.** That
+/// is a property of a pair of calls, and until it had a name there was nowhere
+/// to write it down. It is also why `open_in_place` takes this rather than the
+/// loose triple: a reader can now see that the two sides are being handed the
+/// same thing.
+///
+/// `header` is the cleartext Meshtastic header of the frame this message rides
+/// in. Only its invariant subset is authenticated; see [`aad_from_header`] for
+/// which bytes move in transit and why covering them would fail on every
+/// multi-hop delivery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Binding<'a> {
+    /// The carrying frame's 16-byte cleartext header.
+    pub header: &'a [u8; HEADER_LEN],
+    /// The originating node number, as it appears in that header.
+    pub from: u32,
+    /// The packet id, as it appears in that header. Never reuse one within an
+    /// epoch: see [`nonce`].
+    pub id: u32,
+}
+
 /// A sealed extension message, as it sits in `Data.payload`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Envelope<'a> {
@@ -264,16 +316,13 @@ pub struct Envelope<'a> {
 /// [`Error::BadGroupId`] for a zero group, [`Error::BufferTooSmall`] if `out`
 /// cannot hold the result.
 pub fn seal(
-    group_key: &[u8; 32],
-    group_id: u32,
-    epoch: u8,
+    group: &GroupEpoch<'_>,
+    binding: &Binding<'_>,
     msg_type: MsgType,
-    header: &[u8; HEADER_LEN],
-    from: u32,
-    id: u32,
     plaintext: &[u8],
     out: &mut [u8],
 ) -> Result<usize, Error> {
+    let GroupEpoch { group_key, group_id, epoch } = *group;
     if group_id == 0 {
         return Err(Error::BadGroupId);
     }
@@ -308,8 +357,8 @@ pub fn seal(
     }
 
     let key = epoch_key(group_key, epoch);
-    let n = nonce(from, id, epoch);
-    let aad = aad_from_header(header);
+    let n = nonce(binding.from, binding.id, epoch);
+    let aad = aad_from_header(binding.header);
     let written = ccm_encrypt_in_place_aad(&key, &n, &aad, body, plaintext.len(), CCM_TAG_LEN)?;
     HEADER_BYTES.checked_add(written).ok_or(Error::BufferTooSmall)
 }
@@ -362,9 +411,7 @@ pub fn parse(payload: &[u8]) -> Result<Envelope<'_>, Error> {
 /// for it.
 pub fn open_in_place(
     group_key: &[u8; 32],
-    header: &[u8; HEADER_LEN],
-    from: u32,
-    id: u32,
+    binding: &Binding<'_>,
     buf: &mut [u8],
 ) -> Result<usize, Error> {
     let (epoch, group_id) = {
@@ -376,8 +423,8 @@ pub fn open_in_place(
     }
 
     let key = epoch_key(group_key, epoch);
-    let n = nonce(from, id, epoch);
-    let aad = aad_from_header(header);
+    let n = nonce(binding.from, binding.id, epoch);
+    let aad = aad_from_header(binding.header);
     let body = buf.get_mut(HEADER_BYTES..).ok_or(Error::Malformed)?;
     let len = ccm_decrypt_in_place_aad(&key, &n, &aad, body, CCM_TAG_LEN)?;
     Ok(len)
