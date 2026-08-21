@@ -26,10 +26,18 @@
 //! general-purpose core cannot. On a device an attacker can hold, that is the
 //! difference that matters.
 //!
-//! The secondary reason is **key custody**: a part with key storage can use a
+//! The secondary reason is **key custody**: a part with key custody can use a
 //! private key without it ever appearing in addressable memory. That is what
 //! [`SecretKey`] exists for — see below, because a seam that takes the scalar
 //! as bytes cannot express it at all.
+//!
+//! **Custody is not storage, and the two are easy to conflate.** Somewhere to
+//! *put* a key is common — write-once memory, lockable pages, read protection.
+//! Custody is somewhere a key can be *used from without being read*, which
+//! needs an engine that performs the operation with the key in place. A part
+//! with excellent storage and no such engine has none of it, because the
+//! scalar still has to reach a register to be used. `docs/HARDWARE-BACKENDS.md`
+//! records a part where exactly that distinction was got wrong.
 //!
 //! # Coverage is patchy, so this is per-primitive
 //!
@@ -107,7 +115,7 @@ pub enum Error {
     /// This backend cannot perform this operation as asked.
     ///
     /// The ordinary cause is a [`SecretKey::Slot`] given to a backend with no
-    /// key storage, or a slot provisioned for a different algorithm. It is a
+    /// key custody, or a slot provisioned for a different algorithm. It is a
     /// statement about the request, not about the hardware's health.
     Unsupported,
     /// The peer's public key is small-order, driving the shared secret to zero
@@ -146,8 +154,9 @@ pub enum SecretKey<'a> {
     /// A key held inside the accelerator, named by slot.
     ///
     /// The scalar is never returned, and on most parts cannot be. Backends
-    /// without key storage return [`Error::Unsupported`], which is what every
-    /// software default below does.
+    /// without key custody return [`Error::Unsupported`], which is what every
+    /// software default below does. Storage is not enough: a part that can
+    /// hold a key but not compute with it in place has nothing to name here.
     Slot(u16),
 }
 
@@ -252,7 +261,7 @@ pub trait Crypto {
 /// than to add behaviour — and to make "no backend" an explicit choice at a
 /// call site rather than an implicit one.
 ///
-/// It has no key storage, so [`SecretKey::Slot`] is [`Error::Unsupported`] on
+/// It has no key custody, so [`SecretKey::Slot`] is [`Error::Unsupported`] on
 /// every path. Software cannot offer custody it does not have, and pretending
 /// otherwise by accepting a slot number would be the worst outcome available.
 #[derive(Debug, Clone, Copy, Default)]

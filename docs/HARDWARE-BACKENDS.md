@@ -10,7 +10,9 @@
 Not speed. A frame is at most 233 bytes and the radio spends the better part of a second sending it, so software crypto is never the bottleneck on this stack. Two other reasons matter:
 
 - **Side-channel resistance.** `meshtastic/core/x25519.rs` states that its constant-time property is a strong expectation, not a guarantee — Rust cannot express "do not compile this mask into a branch" and nothing in this project inspects the emitted code for it. Hardware built against timing and power analysis can promise what software on a general-purpose core cannot.
-- **Key custody.** A part with key storage performs an agreement using a private key that never becomes addressable. Nothing running on the MCU can read it, including this crate.
+- **Key custody.** A part with key custody performs an agreement using a private key that never becomes addressable. Nothing running on the MCU can read it, including this crate.
+
+  **Custody is not the same as storage, and this document used to blur them.** Somewhere to *put* a key is common; somewhere a key can be *used from without being read* is rare. A part can have write-once memory, page locks and read protection and still have no custody, because if the agreement runs on the CPU the scalar has to reach a register to be used at all. Custody requires an engine that performs the operation with the key in place. That distinction is what `SecretKey::Slot` means, and getting it wrong is not academic — see the RP2350 note below.
 
 ## Confidence convention
 
@@ -23,7 +25,7 @@ No entry here is "proven" in the sense `docs/FORMAL-VERIFICATION.md` uses that w
 
 ## Coverage
 
-| part | X25519 | SHA-256 | AES | key storage | confidence |
+| part | X25519 | SHA-256 | AES | key custody | confidence |
 |---|---|---|---|---|---|
 | **nRF54LM20** (CRACEN) | **yes**, with side-channel countermeasures | yes | yes | yes | verified for the curve, believed for the rest |
 | **ESP32-S31** | no — ECC unit is NIST-prime only | yes | yes | no | verified for the unit, believed for the curve list |
@@ -32,12 +34,16 @@ No entry here is "proven" in the sense `docs/FORMAL-VERIFICATION.md` uses that w
 | **ESP32-S3** | no — **no ECC unit at all** | yes | yes | no | verified |
 | **ESP32-S2** | no — **no ECC unit at all** | yes | yes | no | verified |
 | **ESP32-C3** | no — **no ECC unit at all** | yes | yes | no | verified |
-| **RP2350** | no | yes | no | no | verified |
+| **RP2350** | no | yes | no | no — **but it does have key storage**; see below | verified |
 | **ATECC608B** (companion, I²C) | no — NIST P-256 only | yes | AES-128 | **yes** | verified |
 
 **No two of the original four accelerate the same set.** That is the entire justification for the seam being per-primitive rather than all-or-nothing: an implementer would otherwise have to reimplement everything or use none of it.
 
 **Across every part surveyed, exactly one accelerates this stack's curve.** The nRF54LM20 is the only entry with a *yes* in the X25519 column. That is worth stating plainly because it inverts the intuition an implementer arrives with: an "ECC accelerator" on the datasheet is overwhelmingly likely to be a NIST-prime engine that cannot touch Curve25519 at all.
+
+**The last column says CUSTODY, and it used to say STORAGE — the rename is a correction, not tidying.** Under the old heading the RP2350's *no* read as "this part has nowhere to put a key", which is false: it has 8 kB of antifuse OTP with lockable pages. The cell was right about custody and wrong about everything a reader would take from it, and this document contradicted itself eleven lines into the RP2350 section, where its own feature list says "8 kB of antifuse OTP for key storage".
+
+**It was believed downstream, which is how a one-word column becomes a defect.** Two files in the consuming integration tree carried "the RP2350 has no key storage" on the strength of this table until 2026-08-21. Nothing they concluded from it was wrong — `SecretKey::Slot` really is `Unsupported` on that part — but they had the reason wrong, and a correct conclusion resting on a false premise fails silently the moment the premise is load-bearing for something else. The lesson is the same one the ESP32-H2 note below records: **directionally right and factually wrong is still wrong**, and a column that answers a subtle question in one word invites exactly that.
 
 ### nRF54LM20 / CRACEN — the only one that does X25519
 
@@ -58,7 +64,7 @@ Note "on some SOCs" — that is Nordic's hedge, not this document's. Confirm aga
 
 Verified from Microchip's `cryptoauthlib`: `lib/cryptoauthlib.h` and `lib/calib/calib_command.h` mention P-256 thirteen times between them and **25519 zero times**. It is NIST P-256 for ECDSA and ECDH, plus AES-128 and SHA-256, with hardware key slots.
 
-So it accelerates none of this stack's asymmetric work — Meshtastic's curve and the ATECC608B's curve simply do not match. Its value here is the key storage and the AES/SHA engines, not the ECC unit.
+So it accelerates none of this stack's asymmetric work — Meshtastic's curve and the ATECC608B's curve simply do not match. Its value here is the key custody and the AES/SHA engines, not the ECC unit.
 
 It is also the part that drove the seam's error handling. It is an **off-chip I²C device**: it can NAK, time out, return a bad CRC, or report a self-test failure. That is not a hypothetical failure mode, it is ordinary bus behaviour.
 
@@ -121,9 +127,25 @@ Verified. SHA-256 acceleration is stated by the pico-sdk's own header, `src/rp2_
  SHA-256 hash algorithm."
 ```
 
-Secure boot uses secp256k1 ECDSA over a SHA-256 image hash, with allowed public-key fingerprints in OTP — Raspberry Pi's *Understanding RP2350's security features* white paper. The security feature set is signed boot, 8 KB of antifuse OTP for key storage, SHA-256 acceleration, a hardware TRNG and glitch detectors; **no AES engine and no Curve25519 engine appear anywhere in it.**
+Secure boot uses secp256k1 ECDSA over a SHA-256 image hash, with allowed public-key fingerprints in OTP — Raspberry Pi's *Understanding RP2350's security features* white paper. The security feature set is signed boot, 8 kB of antifuse OTP, SHA-256 acceleration, a hardware TRNG and glitch detectors; **no AES engine and no Curve25519 engine appear anywhere in it.**
 
 Note that secp256k1 is a Koblitz curve used for boot-image signatures, not a key-agreement engine this stack could route X25519 onto, so it does not change the coverage row.
+
+#### It has key storage. It does not have key custody, and that is why the column says *no*
+
+Verified from the RP2350 datasheet, not from a summary. §13: **8 kB of one-time-programmable storage**, physically 4096 rows of 24 bits, whose listed contents include *"symmetric keys for decryption of flash contents into SRAM"* and *"any other user-defined data, such as per-device personalisation values"*. §10.1.2 gives the protection, in two forms quoted verbatim:
+
+> hard locks, which permanently revoke read or write access by Secure or Non-secure code
+>
+> soft locks, which revoke permissions only until the next reset of the OTP block
+
+So a key can be placed in OTP and made unreadable to every later boot stage, including the PICOBOOT path `picotool` reads OTP over. **That is real key storage and this document should never have implied otherwise.**
+
+**It is still not custody, because custody is about use and not about rest.** The RP2350 has no Curve25519 engine — the point the row above establishes — so an X25519 agreement runs on the CPU, and the scalar has to be readable into a register for that to happen at all. OTP would protect the key while nothing is using it and protect nothing while something is. `SecretKey::Slot` promises a scalar that is *never* addressable, which is a promise this part cannot make for this curve at any storage configuration. Hence `Unsupported`, on the same grounds as `Software` and for a completely different reason from "nowhere to put it".
+
+**What would change the answer** is not better storage but an engine: a Curve25519 unit that takes a key by reference. Nothing in the RP2350's published feature set is one.
+
+**A note for anyone acting on this section rather than reading it.** OTP is antifuse — bits program from zero to one and never back — and a hard lock is permanent and takes the value with it. There is no erase and no second attempt on that part. This document records a capability; it is not a recommendation to program anything.
 
 ## How the seam is used
 
@@ -151,7 +173,7 @@ The first version of this trait was written against an on-chip accelerator and w
 
 **Hardware fails, and failure is not an answer.** Methods originally returned bare values — `sha256` returned `[u8; 32]`. A backend on an I²C companion that NAKed had exactly two options, both unacceptable: panic, which `DISTRIBUTION.md` forbids outright, or invent a digest, which is worse. Every method now returns `Result`.
 
-**A key that never leaves the part cannot be passed as bytes.** The custody argument above is void if the signature demands the scalar, and the original `x25519(&self, secret: &[u8; 32], ...)` demanded it. The caller now *names* the key — `SecretKey::Bytes` for software, `SecretKey::Slot` for a key the accelerator holds and will not surrender. A backend without key storage returns `Error::Unsupported`, which is what every software default does. Accepting a slot number and quietly agreeing a secret under some other key would have been the worst available outcome, so that path is tested.
+**A key that never leaves the part cannot be passed as bytes.** The custody argument above is void if the signature demands the scalar, and the original `x25519(&self, secret: &[u8; 32], ...)` demanded it. The caller now *names* the key — `SecretKey::Bytes` for software, `SecretKey::Slot` for a key the accelerator holds and will not surrender. A backend without key custody returns `Error::Unsupported`, which is what every software default does. Accepting a slot number and quietly agreeing a secret under some other key would have been the worst available outcome, so that path is tested.
 
 ### Errors that must stay distinct
 
