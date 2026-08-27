@@ -137,6 +137,16 @@ while read -r target crate ceiling measured note; do
     src="$ROOT/target/$target/release/libtmffi.a"
     [ -f "$src" ] || die "$target produced no archive"
 
+    # ADDED 2026-08-27. This script built each archive and copied it into the
+    # release WITHOUT EVER CHECKING IT -- the panic-freedom and no-allocator
+    # promises were verified on a crate object elsewhere and never on the thing
+    # actually shipped. That was survivable only because check_rust_rules.sh
+    # refused every archive anyway (A18) and so could not have been run here.
+    # Both halves are fixed together: the check reads archives correctly, and
+    # the release refuses to ship one that does not pass.
+    "$ROOT/tools/check_rust_rules.sh" --binary "$src" \
+        || die "$target: the archive does not satisfy the crate rules DISTRIBUTION.md promises — it will not be released"
+
     base="tethermesh_${target}_v${VERSION}_${HASH}"
     cp "$src" "$OUT/${base}.a"
     # ONE header for the whole release, not one per target. It is byte-identical

@@ -28,8 +28,10 @@
 #
 # USAGE
 #   tools/check_rust_rules.sh            source-level checks
-#   tools/check_rust_rules.sh --binary <obj.o>   also check for panic machinery
-#       (an ELF object, NOT an .rlib and NOT bitcode — see the note below)
+#   tools/check_rust_rules.sh --binary <obj.o|lib.a>  also check for panic machinery
+#       (an ELF object or a static archive, NOT an .rlib and NOT bitcode — see
+#       the note below. The archive form is what dist/ ships, and it was
+#       accepted-but-broken until 2026-08-27.)
 #
 set -euo pipefail
 
@@ -236,9 +238,10 @@ if [ "${1:-}" = "--binary" ]; then
     [ -f "$LIBA" ] || { printf '\033[31m[rust-rules] --binary given but %s not found\033[0m\n' "$LIBA" >&2; exit 1; }
 
     magic=$(head -c 4 "$LIBA" | od -An -tx1 | tr -d ' \n')
+    is_archive=0
     case "$magic" in
         7f454c46) : ;;                       # ELF
-        213c6172) : ;;                       # "!<ar" archive
+        213c6172) is_archive=1 ;;            # "!<ar" archive
         4243c0de)
             printf '\033[31m[rust-rules] REFUSING: %s is LLVM bitcode, not object code.\033[0m\n' "$LIBA" >&2
             printf '        LTO is on, so nm sees an empty symbol table and this check\n' >&2
@@ -251,7 +254,83 @@ if [ "${1:-}" = "--binary" ]; then
     esac
 
     NM=$(command -v llvm-nm || command -v nm)
-    total=$("$NM" "$LIBA" 2>/dev/null | grep -c . || true)
+
+    # ── ARCHIVES: THE PATH THIS SCRIPT ACCEPTED AND HAD NEVER RUN ──────────
+    # Corrected 2026-08-27. `!<ar` was listed as a supported input above from
+    # the beginning, and every archive on every architecture was REFUSED --
+    # 1219 flagged "symbols" on the shipped riscv32imc artifact, 490 on a live
+    # thumbv8m build. It survived because check_all.sh only ever feeds this a
+    # single .o, so the archive path was documented and never exercised. It
+    # fails CLOSED (a spurious refusal, never a missed violation), which is the
+    # only reason it was harmless; it is not harmless in what it prevented,
+    # because the .a is what dist/ SHIPS, so this is the check a consumer would
+    # run against the released artifact and it could not pass.
+    #
+    # TWO INDEPENDENT CAUSES, and fixing either alone still refuses:
+    #
+    #   1. `nm` prints a bare "member.o:" header line before each member's
+    #      symbols. `awk '{print $NF}'` read those filenames AS SYMBOL NAMES.
+    #      Fixed by `-A`, which puts the provenance on every symbol line
+    #      instead, leaving no header lines to misread.
+    #   2. `nm -u` lists each member's undefined symbols WITHOUT resolving them
+    #      against other members of the same archive. compiler_builtins ships
+    #      inside the archive and calls its own helpers, so libm_math::sqrt and
+    #      scalbn read as outside references while being defined two members
+    #      away. A linker resolves those; this did not.
+    #
+    # THE SUBTRACTION IN (2) IS APPLIED TO ARCHIVES ONLY, deliberately. In a
+    # single object a symbol is either defined or undefined and never both, so
+    # subtracting would be a no-op -- and confining it here means the object
+    # path this gate has always run is bit-identical to before. This file's
+    # header forbids weakening the check to make something pass, and the way to
+    # honour that is to leave the exercised path alone and give the unexercised
+    # one the semantics it always claimed.
+    #
+    # AND THE SUBTRACTION OPENS A HOLE THAT MUST BE CLOSED IN THE SAME BREATH:
+    # if panic machinery were bundled INTO the archive -- which LTO can do, by
+    # merging core into our member -- resolving against the archive's own
+    # symbols would hide the reference that is the whole signal. So an archive
+    # additionally has its own members scanned for panic entry points DEFINED
+    # inside them. See the scan below.
+    members=0
+    if [ "$is_archive" = 1 ]; then
+        members=$(ar t "$LIBA" 2>/dev/null | grep -c . || true)
+        if [ "$members" -lt 1 ]; then
+            printf '\033[31m[rust-rules] REFUSING: %s is an archive with no members\033[0m\n' "$LIBA" >&2
+            exit 1
+        fi
+        # A BITCODE MEMBER IS INVISIBLE TO nm, so a mixed archive would report
+        # OK while leaving that member uninspected -- trap 2 in the header
+        # above, at member granularity. A member that yielded symbols was
+        # plainly parsed; only the SILENT ones need their magic read, which is
+        # 13 subprocesses rather than 490 on a real archive. Some are genuinely
+        # empty and legitimate: the 128-bit compiler-rt builtins (absvti2,
+        # cmpti2, ...) compile to nothing on a 32-bit target.
+        seen_members=$("$NM" -A "$LIBA" 2>/dev/null | sed "s|^${LIBA}:||" \
+            | cut -d: -f1 | sort -u)
+        while IFS= read -r m; do
+            [ -n "$m" ] || continue
+            mm=$( { ar p "$LIBA" "$m" 2>/dev/null || true; } | head -c 4 \
+                | od -An -tx1 | tr -d ' \n')
+            case "$mm" in
+                7f454c46) : ;;
+                4243c0de)
+                    printf '\033[31m[rust-rules] REFUSING: member %s of %s is LLVM bitcode\033[0m\n' "$m" "$LIBA" >&2
+                    printf '        nm cannot read it, so it would be reported OK while never\n' >&2
+                    printf '        being inspected. Rebuild with CARGO_PROFILE_RELEASE_LTO=false.\n' >&2
+                    exit 1 ;;
+                *)
+                    printf '\033[31m[rust-rules] REFUSING: member %s of %s is not object code (magic %s)\033[0m\n' "$m" "$LIBA" "$mm" >&2
+                    exit 1 ;;
+            esac
+        done < <(comm -23 <(ar t "$LIBA" 2>/dev/null | sort -u) <(printf '%s\n' "$seen_members"))
+        say "archive: $members member(s), every one object code nm can read"
+    fi
+
+    # -A on both, so an archive's member names land on the symbol lines rather
+    # than on header lines of their own. On a single object this is a no-op:
+    # verified by diffing the extracted names with and without it.
+    total=$("$NM" -A "$LIBA" 2>/dev/null | grep -c . || true)
     if [ "$total" -lt 5 ]; then
         printf '\033[31m[rust-rules] REFUSING: only %s symbol(s) in %s\033[0m\n' "$total" "$LIBA" >&2
         printf '        An artifact this bare cannot demonstrate anything. A check that\n' >&2
@@ -259,8 +338,6 @@ if [ "${1:-}" = "--binary" ]; then
         exit 1
     fi
 
-    # Compiler intrinsics are the only outside references a no_std, no-alloc,
-    # panic-free crate legitimately needs.
     # Compiler intrinsics are the only outside references a no_std, no-alloc,
     # panic-free crate legitimately needs -- and WHICH ones depends on the
     # target, which this list did not account for until 2026-08-16.
@@ -286,8 +363,15 @@ if [ "${1:-}" = "--binary" ]; then
     #     iterates `cargo metadata` and runs it per package, so a panic path in
     #     tethermesh fails on tethermesh's own object rather than hiding here;
     #   * a panicking generic INSTANTIATED in this crate is a DEFINED symbol in
-    #     this object, not an undefined one, so it is still caught by the
-    #     panic-machinery scan above;
+    #     this object, but the panic ENTRY POINT it calls is not: every path
+    #     bottoms out in core::panicking, which lives in `core` and is never a
+    #     workspace crate, so it surfaces as an undefined reference that this
+    #     whitelist cannot match. (Until 2026-08-27 these three lines instead
+    #     said such a symbol "is still caught by the panic-machinery scan
+    #     above". THERE IS NO SUCH SCAN -- the legacy pattern scan was replaced
+    #     by the undefined-reference test, for the reason given at the top of
+    #     this section, and the sentence justifying this whitelist named a
+    #     mechanism that had stopped existing.)
     #   * and the linked image -- the only place the question has a final answer
     #     -- is checked separately by check_artifact_link.sh.
     #
@@ -297,7 +381,12 @@ if [ "${1:-}" = "--binary" ]; then
     #
     # v0 mangling embeds the crate name length-prefixed, so `10tethermesh`
     # identifies tethermesh unambiguously inside a symbol.
-    ws_crates=$(cd "$ROOT" && cargo metadata --no-deps --format-version 1 2>/dev/null \
+    #
+    # Two forms are derived from the one metadata call: the v0 form for
+    # matching inside a mangled symbol, and the plain name for matching an
+    # ARCHIVE MEMBER filename, which is how our members are told apart from
+    # compiler_builtins' below.
+    ws_both=$(cd "$ROOT" && cargo metadata --no-deps --format-version 1 2>/dev/null \
         | python3 -c 'import json,sys
 try: m = json.load(sys.stdin)
 except Exception: sys.exit(0)
@@ -305,9 +394,11 @@ for p in m.get("packages", []):
     if "/third_party/" in p.get("manifest_path", ""):
         continue
     n = p["name"].replace("-", "_")
-    print("%d%s" % (len(n), n))' 2>/dev/null || true)
+    print("%d%s\t%s" % (len(n), n, n))' 2>/dev/null || true)
+    ws_crates=$(printf '%s' "$ws_both" | cut -f1)
+    ws_names=$(printf '%s' "$ws_both" | cut -f2)
 
-    undef=$("$NM" -u "$LIBA" 2>/dev/null | awk '{print $NF}' \
+    undef=$("$NM" -A -u "$LIBA" 2>/dev/null | awk '{print $NF}' \
         | grep -vE '^(memcpy|memset|memmove|memcmp|bcmp|__aeabi_[a-z0-9_]+|__[a-z]+[dsq]i[23]|__clz[sd]i2|__ctz[sd]i2|__popcount[sd]i2)$' || true)
 
     if [ -n "$ws_crates" ] && [ -n "$undef" ]; then
@@ -324,6 +415,15 @@ for p in m.get("packages", []):
         done <<< "$undef"
         undef=$(printf '%s' "$keep")
     fi
+
+    # ARCHIVES ONLY: resolve what a linker would resolve. A member's undefined
+    # reference that ANOTHER MEMBER defines is satisfied inside this file and
+    # never reaches outside it, which is the question being asked.
+    if [ "$is_archive" = 1 ] && [ -n "$undef" ]; then
+        undef=$(comm -23 \
+            <(printf '%s\n' "$undef" | grep -v '^$' | sort -u) \
+            <("$NM" -A --defined-only "$LIBA" 2>/dev/null | awk '{print $NF}' | sort -u))
+    fi
     if [ -n "$undef" ]; then
         fail "$LIBA references machinery outside the crate — every one of these is a
               path that can fail, and several panic entry points are named things
@@ -331,6 +431,58 @@ for p in m.get("packages", []):
         printf '%s\n' "$undef" | sed 's/^/                /' >&2
     else
         say "binary carries no panic machinery ($total symbols inspected, no outside references)"
+    fi
+
+    # ── ARCHIVES ONLY: panic entry points DEFINED in our own members ────────
+    #
+    # This exists because the resolution step above could otherwise hide the
+    # very thing this gate is for. Under LTO a staticlib can merge core's code
+    # into our member, so core::panicking could become a DEFINED symbol in the
+    # archive -- and every reference to it would then resolve internally and
+    # vanish from the report. The undefined-reference test cannot see that; a
+    # defined-symbol scan can.
+    #
+    # SCOPED TO OUR MEMBERS, and the exclusion is not cosmetic:
+    # compiler_builtins legitimately defines __compilerrt_abort_impl, which is
+    # compiler-rt's own helper and the same class as the memcpy/__aeabi_*
+    # intrinsics already whitelisted above.
+    #
+    # rust_begin_unwind IS EXCLUDED AND MUST BE. It is the crate's own
+    # #[panic_handler], which no_std requires to exist at all -- it is the
+    # abort sink, not a path that reaches one. What would be a violation is a
+    # panic ENTRY POINT beside it. Measured 2026-08-27: it is defined in the
+    # LTO-off object and absent from every archive, because with LTO on nothing
+    # calls it and it is dropped -- which is itself evidence that no panic path
+    # survives into what ships.
+    if [ "$is_archive" = 1 ]; then
+        ours_re=$(printf '%s' "$ws_names" | paste -sd'|' -)
+        # REFUSE RATHER THAN SKIP, and this was found by the self-test rather
+        # than by review. `cargo metadata` returns nothing whenever cargo is not
+        # on PATH -- which is the DEFAULT in this environment, hence CLAUDE.md's
+        # export line -- and the first version of this scan simply did nothing in
+        # that case while printing the same green line as a real inspection. An
+        # empty crate list makes the whitelist above STRICTER, so it fails
+        # closed; it makes this scan VACUOUS, so it must not be allowed to pass.
+        if [ -z "$ours_re" ]; then
+            printf '\033[31m[rust-rules] REFUSING: cannot derive the workspace crate list\033[0m\n' >&2
+            printf '        Without it the panic scan below has nothing to scope to and\n' >&2
+            printf '        would report OK having inspected nothing. Is cargo on PATH?\n' >&2
+            exit 1
+        fi
+        panic_defs=$("$NM" -A --defined-only "$LIBA" 2>/dev/null \
+            | sed "s|^${LIBA}:||" \
+            | awk -F: -v re="^($ours_re)-" '$1 ~ re' \
+            | awk '{print $NF}' \
+            | grep -E 'panic|unwind|len_mismatch_fail|unwrap_failed|expect_failed|_index_fail|_index_overflow_fail' \
+            | grep -v 'rust_begin_unwind' | sort -u || true)
+        if [ -n "$panic_defs" ]; then
+            fail "$LIBA DEFINES panic machinery inside its own members. Resolving
+              references within the archive would make every call to these
+              invisible, so they are refused where they are defined:"
+            printf '%s\n' "$panic_defs" | sed 's/^/                /' >&2
+        else
+            say "no panic entry point defined in our own members (archive-only check)"
+        fi
     fi
 
     # ── NO ALLOCATION, checked on the object rather than asserted ──────────

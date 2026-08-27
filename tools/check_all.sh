@@ -262,6 +262,61 @@ else
     printf '\033[33m[check] cargo not available — panic-free artifact NOT verified\033[0m\n' >&2
 fi
 
+head "the artifact gate still says NO (self-test)"
+# The four archives inspected below all pass, and would pass just as happily if
+# check_rust_rules.sh were `exit 0`. This runs it against archives built to be
+# refused, and against mutated copies of itself, so a green tick above means
+# something.
+"$ROOT/tools/check_rust_rules_selftest.sh" || {
+    st=$?
+    # 2 is "a toolchain this needs is absent", which is a skip and says so
+    # loudly; anything else is a failure.
+    [ "$st" = 2 ] || rc=1
+}
+
+head "panic-free SHIPPED ARCHIVE, not just the crate object"
+# ADDED 2026-08-27, AND THE ABSENCE OF IT IS WHY A18 SURVIVED. The loop above
+# inspects a single .o per crate. What dist/ ships is a static ARCHIVE, and
+# check_rust_rules.sh listed `!<ar` as a supported input from the start while
+# refusing every archive on every architecture -- because nothing ever fed it
+# one. A path that is documented and never exercised is a path that rots
+# silently, and this one had.
+#
+# The staticlib is what a C consumer links, so it is the artifact the promise
+# is actually made about. Warm this costs ~0.07s per target; the archive is
+# already built by the same profile the release uses.
+if command -v cargo >/dev/null 2>&1; then
+    rc_ar=0; ar_checked=0
+    installed_t="$(rustup target list --installed 2>/dev/null || true)"
+    # targets.conf carries one row PER CRATE, so the triples repeat. The
+    # staticlib is one artifact per triple, hence sort -u: without it each
+    # target would be inspected three times and the count would read as
+    # coverage it does not have.
+    while read -r t; do
+        [ -n "$t" ] || continue
+        printf '%s\n' "$installed_t" | grep -qx "$t" || continue
+        ( cd "$ROOT" && cargo build --release -p tmffi --target "$t" ) >/dev/null 2>&1 || {
+            printf '\033[31m[check] %s: staticlib did not build\033[0m\n' "$t" >&2; rc_ar=1; continue; }
+        a="$ROOT/target/$t/release/libtmffi.a"
+        [ -f "$a" ] || { printf '\033[31m[check] %s: no archive produced\033[0m\n' "$t" >&2; rc_ar=1; continue; }
+        printf '\033[36m[check]\033[0m %s\n' "inspecting archive for $t"
+        "$ROOT/tools/check_rust_rules.sh" --binary "$a" || rc_ar=1
+        ar_checked=$((ar_checked+1))
+    done < <(grep -v '^#' "$ROOT/targets.conf" | awk 'NF{print $1}' | sort -u)
+    # An absent counter must not read as zero: if no archive was inspected this
+    # section proved nothing, and saying so is the difference between a check
+    # and a green tick.
+    if [ "$ar_checked" -lt 1 ]; then
+        printf '\033[33m[check] NO ARCHIVE INSPECTED — this section is not a pass\033[0m\n' >&2
+        rc_ar=1
+    else
+        printf '\033[36m[check]\033[0m %s\n' "$ar_checked archive(s) inspected"
+    fi
+    [ "$rc_ar" = 0 ] || rc=1
+else
+    printf '\033[33m[check] cargo not available — shipped archive NOT verified\033[0m\n' >&2
+fi
+
 head "size budget across the declared target set"
 # DISTRIBUTION.md promises this is gated rather than discovered on a device.
 # Cheap on a warm cargo cache; the first run after a clean builds each target.

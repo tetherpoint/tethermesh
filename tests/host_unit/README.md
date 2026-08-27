@@ -71,6 +71,28 @@ meaningful, and tests for **undefined references outside a compiler-intrinsic
 allowlist** rather than for names containing "panic". `check_all.sh` builds a
 suitable object and runs it every time.
 
+**A fourth way was found on 2026-08-27, and it is the inverse of the first
+three.** Those three passed while proving nothing. This one *refused* while
+proving nothing: the gate accepted `!<ar` as an input from the beginning and
+rejected **every archive on every architecture** — 1219 flagged "symbols" on the
+shipped `riscv32imc` artifact, none of which were symbols. Two causes, and
+fixing either alone still refuses. `nm` prints a bare `member.o:` header line
+before each member's symbols and the gate read those filenames as symbol names;
+and `nm -u` reports each member's undefined symbols without resolving them
+against other members, so `compiler_builtins` calling its own `sqrt` read as an
+outside reference. Corrected, the shipped archives come out with **zero** outside
+references — the property held all along and the gate could not say so.
+
+**What it survived on is the part worth keeping.** It fails closed, so it was
+never a missed violation. But `check_all.sh` only ever fed it a single `.o`, so
+the archive path was documented, believed, and never once executed — while the
+`.a` is exactly what `dist/` ships and what a consumer would link. A path that is
+never exercised is not protected by being fail-closed; it is simply unknown. Both
+halves are now wired shut: `check_all.sh` builds and inspects the staticlib for
+every declared target, and `check_rust_rules_selftest.sh` asserts the gate still
+refuses what it must, using mutated copies of the gate itself so that reverting
+either half turns the suite red and names the half.
+
 ## Proven, not just tested
 
 Some properties are now machine-checked over every input rather than sampled:
@@ -131,6 +153,11 @@ Per the rule above, recorded rather than claimed:
 | AES-256 key schedule | dropped the extra `SubWord` at `i % 8 == 4` | FIPS-197 vector, both CCM vector sets, and the captured DM all failed |
 | CCM flags byte | wrong tag-length field in `B0` | independent vectors and the captured DM failed |
 | whole-frame encode | wrote the payload before the header | captured frame did not rebuild |
+| archive reading, member headers | ran the gate without `nm -A`, as it was until 2026-08-27 | a clean two-member archive refused, the flagged "symbols" being the member filenames |
+| archive reading, cross-member resolution | removed the step that resolves a reference against the archive's own members | an archive whose second member defines what the first calls refused |
+| defined-panic scan | disabled it | an archive with `panic_bounds_check` defined in a `tethermesh-*` member passed |
+| defined-panic scan, vacuity | *not deliberate* — ran it with cargo off `PATH` | the scan printed its OK line having scoped to an empty crate list and inspected nothing; it now refuses instead |
+| mutation anchor rot | pointed a mutation's `sed` at text that no longer occurs | `mutant 'no_dash_A' is IDENTICAL to the gate — its anchor no longer matches, so it tests nothing` |
 
 The X25519 row is the strongest argument in this table for published vectors.
 The bug was a wrong constant in `fe_sub` — biasing by p rather than 2p — plus
