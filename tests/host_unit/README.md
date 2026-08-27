@@ -96,8 +96,10 @@ either half turns the suite red and names the half.
 ## Proven, not just tested
 
 Some properties are now machine-checked over every input rather than sampled:
-`cargo kani` verifies six harnesses in `meshtastic/core/proofs.rs`, all
-against our own code. See `docs/FORMAL-VERIFICATION.md` for what is proven,
+`cargo kani --workspace` verifies 26 harnesses across the three crates'
+`proofs.rs`, all against our own code. (This said "six harnesses in
+`meshtastic/core/proofs.rs`" until 2026-08-27, having been written when that
+was the only crate carrying any.) See `docs/FORMAL-VERIFICATION.md` for what is proven,
 what is merely checked against a third party's answer, and what is neither.
 
 A red test found its way in here too: the first draft of the proof module
