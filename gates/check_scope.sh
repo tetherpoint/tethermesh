@@ -68,12 +68,12 @@ bad()  { printf '\033[31m[scope] %s\033[0m\n' "$*" >&2; }
 
 # name|why it must not appear
 FORBIDDEN=(
-  'a consuming product|a consuming product (integration firmware)'
+  'tetherchat|a consuming product (integration firmware)'
   'tetherpoint-ncm|a consuming product (USB-NCM + OTA)'
-  'a sibling mesh layer|a sibling mesh layer in a consuming product'
-  'a sibling PHY/MAC stack|a sibling PHY/MAC stack in a consuming product'
-  'a companion radio driver|a radio driver repository; no driver detail belongs here'
-  'that radio family|the same radio family, under its family name'
+  'tethergrid|a sibling mesh layer in a consuming product'
+  'espnow154|a sibling PHY/MAC stack in a consuming product'
+  'lr2021|a radio driver repository; no driver detail belongs here'
+  'lr20xx|the same radio family, under its family name'
   'meshcore|a different mesh protocol carried by a consuming product'
   'tetherbot|a consuming product'
 )
@@ -94,7 +94,7 @@ PATHSPEC=(':(exclude)gates/check_scope.sh')
 #
 # It was not hypothetical. Found 2026-09-02, preparing the first public push:
 #
-#   cea7993  2026-08-16  docs/PLAN-a companion radio driver.md added
+#   cea7993  2026-08-16  docs/PLAN-LR2021.md added
 #   446a54a  2026-08-16  ...and removed the same day, deliberately, to keep
 #                        this repository protocol-only
 #   51b9055  2026-08-20  this check was written -- FOUR DAYS LATER
