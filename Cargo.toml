@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 The tethermesh Authors
+# SPDX-FileCopyrightText: 2026 Matthew Klapman
 # SPDX-License-Identifier: Apache-2.0
 
 # The FFI crates are workspace MEMBERS so that `cargo metadata` reports them and
@@ -7,14 +7,14 @@
 # while still shipping. That is the "gate narrows silently" failure this repo has
 # been bitten by three times.
 #
-# No [workspace.package] inheritance. DEPS.md records why: libcrux could not be
+# No [workspace.package] inheritance. docs/DEPS.md records why: libcrux could not be
 # used as a path dependency because its manifest inherits workspace keys that
 # cannot be parsed from outside its workspace, which breaks resolution for
 # downstream consumers. Each crate declares its own keys.
 [workspace]
-members = ["ffi", "suite/groups"]
+members = ["code/c-api", "code/groups"]
 resolver = "2"
-# third_party/ is a path DEPENDENCY, never a member.
+# code/third_party/ is a path DEPENDENCY, never a member.
 #
 # A path dependency living inside the workspace directory becomes an implicit
 # member unless it is excluded, and a member is resolved with its OWN default
@@ -29,9 +29,9 @@ resolver = "2"
 # crate, not with `--workspace`, so it always got the no_std build. The bug was
 # that no `--workspace` command agreed with it.
 #
-# This also matches what SCOPE.md already says about this directory -- it "is
+# This also matches what docs/SCOPE.md already says about this directory -- it "is
 # not ours to hold to them" -- which was true of our gates and not of cargo.
-exclude = ["third_party/fiat-crypto/fiat-rust"]
+exclude = ["code/third_party/fiat-crypto/fiat-rust"]
 
 [package]
 name = "tethermesh"
@@ -62,14 +62,14 @@ publish = false
 license = "Apache-2.0"
 
 # NO DEPENDENCIES IN THE SHIPPED LIBRARY, AND THAT IS A REQUIREMENT RATHER
-# THAN A CURRENT STATE. DISTRIBUTION.md commits to no code-generation
+# THAN A CURRENT STATE. docs/DISTRIBUTION.md commits to no code-generation
 # dependency in the build, and the protobuf codec is hand-written partly so
 # that nothing here derives from a copyleft input. A dependency added later
 # must clear both bars.
 #
 # There is a third bar, discovered by measurement on 2026-08-16: the
 # panic-free artifact guarantee. The linked object must keep ZERO undefined
-# references, which is what tools/check_rust_rules.sh --binary enforces and
+# references, which is what gates/check_rust_rules.sh --binary enforces and
 # what ours currently has. A dependency must clear that bar too.
 #
 # BE PRECISE ABOUT HOW STRONG THIS ARGUMENT IS. An earlier version of this
@@ -77,7 +77,7 @@ license = "Apache-2.0"
 # artifact. That was wrong — it counted core's unreachable code, which is
 # present in an empty no_std crate regardless. docs/CRYPTO-DEPENDENCY.md
 # retracted it to +8; the 2026-08-16 audit re-measured with
-# tools/measure_panic_symbols.sh and got +0 DISTINCT panic symbol names
+# gates/measure_panic_symbols.sh and got +0 DISTINCT panic symbol names
 # (+6 raw archive entries) over a no-dependency baseline.
 #
 # So the panic bar is NOT what rules out x25519-dalek, and claiming it does
@@ -111,8 +111,8 @@ license = "Apache-2.0"
 # compiler. The "no code-generation dependency" rule above is about compiling a
 # GPL .proto into a codec, and this is not that.
 [dependencies]
-# Pinned as a SUBMODULE, not pulled from a registry: third_party/fiat-crypto
-# at a commit recorded in DEPS.md. The exact source that gets compiled is in
+# Pinned as a SUBMODULE, not pulled from a registry: code/third_party/fiat-crypto
+# at a commit recorded in docs/DEPS.md. The exact source that gets compiled is in
 # the tree, auditable offline, and identical for everyone who clones with
 # --recurse-submodules. Only fiat-rust/ is checked out (sparse), so the cost
 # is a few megabytes rather than the repository's full Coq development.
@@ -120,11 +120,11 @@ license = "Apache-2.0"
 # This works where the same approach failed for libcrux: fiat-rust inherits no
 # workspace keys and has no dependencies, so a path dependency on it resolves
 # for downstream consumers too. That was verified, not assumed.
-fiat-crypto = { path = "third_party/fiat-crypto/fiat-rust", default-features = false }
+fiat-crypto = { path = "code/third_party/fiat-crypto/fiat-rust", default-features = false }
 
 # `cfg(kani)` is set by the model checker, not by cargo, so cargo cannot know it
-# is legitimate. Declared at the WORKSPACE so every member inherits it: ffi/ and
-# suite/groups/ each carried three of these warnings, and warning noise is what
+# is legitimate. Declared at the WORKSPACE so every member inherits it: code/c-api/ and
+# code/groups/ each carried three of these warnings, and warning noise is what
 # let a real `unused_unsafe` sit unnoticed in tm_channel_hash.
 [workspace.lints.rust]
 unexpected_cfgs = { level = "allow", check-cfg = ['cfg(kani)'] }
@@ -149,7 +149,7 @@ rand = "0.8"
 
 [lib]
 name = "tethermesh"
-path = "meshtastic/core/lib.rs"
+path = "code/protocol/lib.rs"
 # rlib ONLY, and the reason is now different from the one recorded here before.
 #
 # THE OLD REASON WAS WRONG, AND IT DEFERRED L8 FOR NOTHING. It read: a no_std
@@ -168,7 +168,7 @@ path = "meshtastic/core/lib.rs"
 # ours) and undefined (U, referenced by core) in the same .a. That is the same
 # noise that made an earlier dependency measurement unreadable. The question
 # only has an answer in the FINAL LINKED IMAGE, which is exactly what
-# DISTRIBUTION.md already promises CI will build.
+# docs/DISTRIBUTION.md already promises CI will build.
 #
 # SO WHY STILL rlib? Because a library that defines a #[panic_handler] forces
 # it on every consumer, and only one may exist in a linked program. The handler
@@ -207,6 +207,6 @@ panic = "abort"
 panic = "abort"
 lto = true
 codegen-units = 1
-# DISTRIBUTION.md commits to a CI size budget. Optimising for size is the
+# docs/DISTRIBUTION.md commits to a CI size budget. Optimising for size is the
 # default posture for a library that lands on a microcontroller.
 opt-level = "z"

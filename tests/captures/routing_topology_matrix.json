@@ -1,7 +1,7 @@
 {
   "record": "routing_validated_against_the_reference_across_a_topology_matrix",
   "date": "2026-08-18",
-  "resolves": "PLAN.md L5's restated gate — 'validation against the reference across a topology matrix, not implementation'.",
+  "resolves": "docs/PLAN.md L5's restated gate — 'validation against the reference across a topology matrix, not implementation'.",
   "method": "Topology is imposed IN SOFTWARE by the consuming node's filter, which drops a named node's DIRECT frames while still accepting relayed copies of them. Directness is read from the header: a frame carries its originator's low byte in relay_node, so a copy carrying anyone else's byte came via a relay. Physical placement gives one topology, imprecisely, and not the same one tomorrow; a filter gives a matrix, reproducibly. Sound for protocol questions and UNSOUND for RF ones — the protocol cannot distinguish 'filtered' from 'out of range', which is exactly why contention, capture and duty-cycle results are NOT taken from this apparatus.",
   "topologies": [
     {
@@ -34,6 +34,6 @@
   "provenance": {
     "subject": "our node, 0x328070b9, at its -9 dBm floor",
     "reference": "three Heltec V3, stock Meshtastic 2.7.26.54e0d8d, unmodified, region US, LongFast, tx_power=1",
-    "note": "Our own nodes, our own channel, our own payloads. Publishable under TESTING.md."
+    "note": "Our own nodes, our own channel, our own payloads. Publishable under docs/TESTING.md."
   }
 }

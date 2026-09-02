@@ -1,0 +1,204 @@
+# SPDX-FileCopyrightText: 2026 Matthew Klapman
+# SPDX-License-Identifier: Apache-2.0
+#
+# tethermesh C ABI baseline -- the surface a consumer links against.
+#
+# Refreshed DELIBERATELY, never to make a build pass. If this file
+# changed without TM_ABI_VERSION moving, that is the defect the
+# check exists to catch, and the fix is the version bump.
+# TM_ABI_VERSION: 8
+typedef struct tm_ctx_t tm_ctx_t;
+typedef struct tm_outbox_t tm_outbox_t;
+#define TM_ABI_VERSION 8
+#define TM_OK 0
+#define TM_E_ARG -1
+#define TM_E_ABI -2
+#define TM_E_SHORT -3
+#define TM_E_BAD_KEY_LEN -4
+#define TM_E_BAD_INDEX -5
+#define TM_E_TOO_AGGRESSIVE -6
+#define TM_E_UNAUTHENTIC -7
+#define TM_E_SMALL_ORDER -8
+#define TM_E_RESERVED_PORTNUM -9
+#define TM_SUPPRESSED_NONE 0
+#define TM_SUPPRESSED_DUPLICATE 1
+#define TM_SUPPRESSED_HOP_LIMIT 2
+#define TM_SUPPRESSED_RELAYED_BY_OTHER 3
+#define TM_SUPPRESSED_DUTY_BUDGET 4
+typedef struct tm_key_t {
+uint8_t bytes[16];
+} tm_key_t;
+typedef struct tm_rx_t {
+uint32_t from;
+uint32_t to;
+uint32_t id;
+uint8_t hop_limit;
+uint8_t want_ack;
+uint8_t channel_hash;
+uint8_t duplicate;
+uint8_t relay;
+uint8_t relay_window_slots;
+uint8_t relay_hop_limit;
+uint8_t suppressed;
+} tm_rx_t;
+typedef struct tm_user_t {
+const uint8_t *id;
+size_t id_len;
+const uint8_t *long_name;
+size_t long_name_len;
+const uint8_t *short_name;
+size_t short_name_len;
+const uint8_t *public_key;
+size_t public_key_len;
+const uint8_t *macaddr;
+size_t macaddr_len;
+uint32_t hw_model;
+uint32_t role;
+} tm_user_t;
+typedef struct tm_pki_key_t {
+uint8_t bytes[32];
+} tm_pki_key_t;
+typedef struct tm_data_t {
+uint32_t portnum;
+const uint8_t *payload;
+size_t payload_len;
+uint8_t want_response;
+uint32_t request_id;
+} tm_data_t;
+typedef struct tm_header_t {
+uint32_t to;
+uint32_t from;
+uint32_t id;
+uint8_t hop_limit;
+uint8_t hop_start;
+uint8_t channel_hash;
+uint8_t next_hop;
+uint8_t relay_node;
+uint8_t want_ack;
+uint8_t via_mqtt;
+} tm_header_t;
+uint32_t tm_abi_version(void);
+int32_t tm_check_layout(size_t sizeof_rx,
+size_t sizeof_key,
+size_t sizeof_user,
+size_t sizeof_pki_key,
+size_t sizeof_data,
+size_t sizeof_header);
+int32_t tm_key_from_index(uint8_t index, struct tm_key_t *out);
+int32_t tm_key_from_bytes(const uint8_t *psk, size_t len, struct tm_key_t *out);
+uint8_t tm_channel_hash(const uint8_t *name, size_t name_len, const struct tm_key_t *key);
+size_t tm_ctx_size(void);
+size_t tm_ctx_align(void);
+int32_t tm_ctx_init(tm_ctx_t *ctx, uint32_t abi, uint32_t node_num);
+int32_t tm_rx_observe(tm_ctx_t *ctx,
+const uint8_t *frame_ptr,
+size_t frame_len,
+int16_t snr_q4,
+uint32_t airtime_us,
+uint64_t now_us,
+uint8_t heard_relayed,
+struct tm_rx_t *out);
+int32_t tm_frame_decrypt(uint8_t *frame_ptr,
+size_t frame_len,
+const struct tm_key_t *key,
+const uint8_t **payload_out,
+size_t *payload_len_out);
+int32_t tm_text_encode(uint32_t from,
+uint32_t to,
+uint32_t id,
+uint8_t hop_limit,
+uint8_t channel_hash,
+uint8_t want_ack,
+const struct tm_key_t *key,
+const uint8_t *text,
+size_t text_len,
+uint8_t *out,
+size_t out_cap);
+int32_t tm_extension_encode(uint32_t from,
+uint32_t to,
+uint32_t id,
+uint8_t hop_limit,
+uint8_t channel_hash,
+uint8_t want_ack,
+uint32_t portnum,
+const struct tm_key_t *key,
+const uint8_t *payload,
+size_t payload_len,
+uint8_t *out,
+size_t out_cap);
+int32_t tm_relay_prepare(uint8_t *frame_ptr,
+size_t frame_len,
+uint8_t relay_hop_limit,
+uint32_t our_node_num);
+int32_t tm_note_originated(tm_ctx_t *ctx, uint32_t from, uint32_t id);
+size_t tm_outbox_size(void);
+size_t tm_outbox_align(void);
+int32_t tm_outbox_init(tm_outbox_t *ob, uint32_t abi, uint8_t max_attempts, uint32_t interval_us);
+int32_t tm_outbox_track(tm_outbox_t *ob,
+const uint8_t *frame_ptr,
+size_t frame_len,
+uint64_t now_us);
+int32_t tm_outbox_acknowledge(tm_outbox_t *ob, uint32_t request_id);
+int32_t tm_outbox_pending(const tm_outbox_t *ob);
+int32_t tm_outbox_reap(tm_outbox_t *ob, uint64_t now_us, uint32_t *out_from, uint32_t *out_id);
+int32_t tm_outbox_next_due(tm_outbox_t *ob,
+tm_ctx_t *ctx,
+uint64_t now_us,
+uint32_t airtime_us,
+uint8_t *out,
+size_t out_cap,
+uint8_t *out_attempt);
+int32_t tm_acknowledges(const uint8_t *payload,
+size_t payload_len,
+uint32_t *out_request_id,
+uint32_t *out_status);
+int32_t tm_wants_ack(const uint8_t *frame_ptr, size_t frame_len, uint32_t our_node_num);
+int32_t tm_ack_encode(uint32_t from,
+uint32_t to,
+uint32_t id,
+uint32_t request_id,
+uint8_t hop_limit,
+uint8_t channel_hash,
+const struct tm_key_t *key,
+uint8_t *out,
+size_t out_cap);
+int32_t tm_x25519_public(const uint8_t *private_key,
+size_t private_len,
+uint8_t *out,
+size_t out_cap);
+int32_t tm_nodeinfo_encode(uint32_t from,
+uint32_t to,
+uint32_t id,
+uint8_t hop_limit,
+uint8_t channel_hash,
+uint8_t want_response,
+const struct tm_key_t *key,
+const struct tm_user_t *user,
+uint8_t *out,
+size_t out_cap);
+int32_t tm_pki_agree(const uint8_t *private_key,
+size_t private_len,
+const uint8_t *peer_public,
+size_t peer_public_len,
+struct tm_pki_key_t *out);
+int32_t tm_is_pki(const uint8_t *frame, size_t frame_len);
+int32_t tm_pki_decrypt(uint8_t *frame,
+size_t frame_len,
+const struct tm_pki_key_t *key,
+const uint8_t **payload,
+size_t *payload_len);
+int32_t tm_pki_encode(uint32_t from,
+uint32_t to,
+uint32_t id,
+uint8_t hop_limit,
+uint8_t want_ack,
+const struct tm_pki_key_t *key,
+uint32_t extra_nonce,
+uint32_t portnum,
+const uint8_t *payload,
+size_t payload_len,
+uint8_t *out,
+size_t out_cap);
+int32_t tm_data_decode(const uint8_t *payload, size_t payload_len, struct tm_data_t *out);
+int32_t tm_user_decode(const uint8_t *payload, size_t payload_len, struct tm_user_t *out);
+int32_t tm_header_peek(const uint8_t *frame, size_t frame_len, struct tm_header_t *out);

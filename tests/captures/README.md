@@ -1,9 +1,9 @@
-<!-- SPDX-FileCopyrightText: 2026 The tethermesh Authors -->
+<!-- SPDX-FileCopyrightText: 2026 Matthew Klapman -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 # Capture corpus
 
-Fixtures the day-to-day tests run against, so that testing does not depend on the oracle being present or on it staying still. Every file names the oracle it came from; see `DEPS.md`.
+Fixtures the day-to-day tests run against, so that testing does not depend on the oracle being present or on it staying still. Every file names the oracle it came from; see `docs/DEPS.md`.
 
 ## What is here
 
@@ -39,11 +39,11 @@ The labels are produced by a **schema-free** wire-format scan that walks tag and
 
 That pins down **what the header contains and what each field's value is**. It does **not** pin down the order, width, endianness or packing of those fields on the wire. A test that treats these observations as a byte layout would be asserting something never measured.
 
-**The raw packed bytes are not obtainable from this oracle.** Its simulated radio is process-local — it hands the frame to a simulated PHY inside the same process and loops it back, and no socket carries it. The UDP transport is not a substitute: the binary's own strings say `Decoding MeshPacket from UDP len=%u`, so UDP over mesh carries a protobuf `MeshPacket`, not the packed LoRa frame. See `meshtastic/WIRE_REFERENCE.md`.
+**The raw packed bytes are not obtainable from this oracle.** Its simulated radio is process-local — it hands the frame to a simulated PHY inside the same process and loops it back, and no socket carries it. The UDP transport is not a substitute: the binary's own strings say `Decoding MeshPacket from UDP len=%u`, so UDP over mesh carries a protobuf `MeshPacket`, not the packed LoRa frame. See `docs/WIRE_REFERENCE.md`.
 
 ## Privacy
 
-Per `TESTING.md`: public fixtures are synthetic, and captures from our own nodes on our own channels may be published. Everything here is one or the other — these are nodes we started, on channels we set, in a local simulation with no radio. **No third-party traffic is in this corpus, and none may be added.** Real ambient traffic carries identifiable node numbers, message metadata and position reports, and on the default channel the key is published, so those payloads are readable by anyone.
+Per `docs/TESTING.md`: public fixtures are synthetic, and captures from our own nodes on our own channels may be published. Everything here is one or the other — these are nodes we started, on channels we set, in a local simulation with no radio. **No third-party traffic is in this corpus, and none may be added.** Real ambient traffic carries identifiable node numbers, message metadata and position reports, and on the default channel the key is published, so those payloads are readable by anyone.
 
 ## Regenerating
 
@@ -53,6 +53,6 @@ Per `TESTING.md`: public fixtures are synthetic, and captures from our own nodes
     ../../../meshtastic-oracle/oracle.sh corpus  > fromradio_corpus.json
     ../../../meshtastic-oracle/oracle.sh stop
 
-No container runtime is required — see `DEPS.md`. Message counts vary slightly between runs (the node emits a few `fileInfo` records depending on what it has written), so treat the corpus as a sample of their encoder's output, not a fixed-size manifest.
+No container runtime is required — see `docs/DEPS.md`. Message counts vary slightly between runs (the node emits a few `fileInfo` records depending on what it has written), so treat the corpus as a sample of their encoder's output, not a fixed-size manifest.
 
 The harness lives outside this repository with the binaries it drives. See `../../../meshtastic-oracle/RULE.md`.

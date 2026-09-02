@@ -4,10 +4,10 @@
   "provenance": {
     "captured": "2026-08-16",
     "responder": "Heltec V3, stock Meshtastic 2.7.26.54e0d8d, US/LongFast",
-    "observer": "Heltec V3 running instruments/heltec_v3_sniffer",
+    "observer": "Heltec V3 running tests/instrument/heltec_v3_sniffer",
     "method": "Two probes were sent with want_ack set and the replies captured: one channel-encrypted direct message, and one PKI direct message. The node's responses were decrypted and decoded by tests/host_unit, not by any third-party tool.",
     "why": "WIRE_REFERENCE.md records PortNum ROUTING = 5 but has never recorded that message's structure, so acknowledgement GENERATION could not be implemented from verified facts. Rather than guess the layout, a stock node was asked for one.",
-    "note": "Our two nodes only. Ambient third-party traffic seen during capture is excluded per TESTING.md.",
+    "note": "Our two nodes only. Ambient third-party traffic seen during capture is excluded per docs/TESTING.md.",
     "clean_room_note": "Black-box: transmissions captured off the air and decoded with our own codec."
   },
   "acknowledgement_shape": {
@@ -52,8 +52,8 @@
   },
   "outbound_validation": {
     "captured": "2026-08-16",
-    "what": "An acknowledgement built by meshtastic/core/delivery.rs was transmitted to a stock node and ACCEPTED: its retransmission ladder stopped.",
-    "why_this_is_the_test_that_counts": "PLAN.md's position is that a decoder reading their traffic proves half of compatibility, and the half that fails in the field is the other one. Everything before this validated that we can READ an acknowledgement. This validates that we can WRITE one they accept.",
+    "what": "An acknowledgement built by code/protocol/delivery.rs was transmitted to a stock node and ACCEPTED: its retransmission ladder stopped.",
+    "why_this_is_the_test_that_counts": "docs/PLAN.md's position is that a decoder reading their traffic proves half of compatibility, and the half that fails in the field is the other one. Everything before this validated that we can READ an acknowledgement. This validates that we can WRITE one they accept.",
     "method": "A stock node was driven to send a want_ack direct message to us. In the control trial we sent nothing. In the test trial we emitted an acknowledgement through the shipped delivery::acknowledgement path -- not a reimplementation in the test, which would have proved only that two of our own things agree -- and transmitted it 1.4 s after their first send. Same session, same nodes, same message type; the only variable was whether we acknowledged.",
     "control": {
       "acknowledged": false,

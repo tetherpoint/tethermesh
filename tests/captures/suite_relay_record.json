@@ -1,8 +1,8 @@
 {
   "record": "extension_suite_relayed_by_an_unmodified_node",
   "date": "2026-08-18",
-  "resolves": "PLAN.md L7 gate, the clause only hardware can answer — 'an unmodified reference node relays authenticated extension traffic without reading it'",
-  "method": "A complete frame was built by suite/groups/tests/bench_emit.rs: a groups envelope sealed under a group key, carried as an ordinary Data on portnum 256, channel-encrypted with the published default key, and transmitted on air. Evidence is the receiving stock node's own log — black-box observation from outside. No reference source was read.",
+  "resolves": "docs/PLAN.md L7 gate, the clause only hardware can answer — 'an unmodified reference node relays authenticated extension traffic without reading it'",
+  "method": "A complete frame was built by code/groups/tests/bench_emit.rs: a groups envelope sealed under a group key, carried as an ordinary Data on portnum 256, channel-encrypted with the published default key, and transmitted on air. Evidence is the receiving stock node's own log — black-box observation from outside. No reference source was read.",
   "frame_hex": "ffffffffb97080321751ad0b630800b9ff8dfb7ba857fd30b897887dac230777dfe8d98405060746ad98d5262fbe7951616d9ff4e8",
   "frame_len": 53,
   "envelope": {
@@ -18,11 +18,11 @@
     "Continued serving other traffic. No error, no rejection, nothing logged about the unknown portnum."
   ],
   "what_this_establishes": "Extension traffic rides the existing mesh without any change to the nodes carrying it. The suite's confidentiality comes from the group key sealing the envelope, not from the channel — the channel key here is the PUBLISHED default, so every node on the air could decrypt the frame and still could not read the message. That is the design demonstrated rather than asserted.",
-  "what_this_does_NOT_establish": "The other half of the L7 gate — 'two instances exchange authenticated extension traffic' — is NOT shown here. That needs a second node running this stack, and this bench has one. A forged sender failing the tag and a relayed frame still verifying are settled in software (suite/groups/src/tests/), because they are properties of the construction rather than of anyone's firmware.",
+  "what_this_does_NOT_establish": "The other half of the L7 gate — 'two instances exchange authenticated extension traffic' — is NOT shown here. That needs a second node running this stack, and this bench has one. A forged sender failing the tag and a relayed frame still verifying are settled in software (code/groups/src/tests/), because they are properties of the construction rather than of anyone's firmware.",
   "provenance": {
     "transmitter": "our own node, 0x328070b9, at its -9 dBm floor",
     "receiver": "Heltec V3, stock Meshtastic 2.7.26.54e0d8d, unmodified, region US, LongFast, tx_power=1",
     "radio": "906.875 MHz, SF11, BW 250 kHz, CR 4/5, sync 0x24 0xB4",
-    "note": "Our own node, our own channel, our own payload. No third-party traffic. Publishable under TESTING.md."
+    "note": "Our own node, our own channel, our own payload. No third-party traffic. Publishable under docs/TESTING.md."
   }
 }

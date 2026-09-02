@@ -6,7 +6,7 @@
     "oracle": "meshtastic/meshtasticd@sha256:23e92b1331a3a471eaef0c63cbca4365ca40b3111a9781cfdbe5a5114e5773d4",
     "oracle_tag": "2.7.26.54e0d8d",
     "captured": "2026-08-15",
-    "note": "The two oracle-observed rows are from OUR nodes on OUR channels, so they are publishable under TESTING.md. The synthetic rows are computed from the verified function, per TESTING.md: public fixtures are synthetic."
+    "note": "The two oracle-observed rows are from OUR nodes on OUR channels, so they are publishable under docs/TESTING.md. The synthetic rows are computed from the verified function, per docs/TESTING.md: public fixtures are synthetic."
   },
   "vectors": [
     {

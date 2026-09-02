@@ -6,7 +6,7 @@
     "transmitter": "Heltec V3 running our heltec_v3_sniffer, TX power swept +14..-9 dBm via a PWR command added for this measurement",
     "observer": "Heltec V3, stock Meshtastic 2.7.26.54e0d8d, US/LongFast, ~3 m away",
     "method": "27 broadcast NodeInfo frames, each with a distinct packet id to defeat duplicate suppression. The node logs 'rx_snr found. hop_limit:N rx_snr:X' and 'Setting tx delay:Y' each time it relays; pairs were read from its own output.",
-    "note": "Our two nodes, our own frames. No third-party traffic. Publishable under TESTING.md.",
+    "note": "Our two nodes, our own frames. No third-party traffic. Publishable under docs/TESTING.md.",
     "clean_room_note": "Black-box observation of the reference node's log. No reference source was read."
   },
   "primary_axis_failed": {
@@ -86,7 +86,7 @@
       "status": "MEASURED AT ONE SNR ONLY. With 33 uniform samples the true upper bound is likely somewhat above 142; the low end of the window, at low SNR, is NOT measured because the SNR axis could not be varied."
     }
   ],
-  "consequence_for_our_implementation": "meshtastic/core/routing.rs shipped ContentionWindow::MESHTASTIC_SHAPE with max_slots = 8. The measured window at high SNR is at least 142 slots - wrong by more than an order of magnitude. The documented DIRECTION was right; the scale was a guess and the guess was bad. Separately, slots_for_snr returned a deterministic wait, whereas the real behaviour draws uniformly within the window.",
+  "consequence_for_our_implementation": "code/protocol/routing.rs shipped ContentionWindow::MESHTASTIC_SHAPE with max_slots = 8. The measured window at high SNR is at least 142 slots - wrong by more than an order of magnitude. The documented DIRECTION was right; the scale was a guess and the guess was bad. Separately, slots_for_snr returned a deterministic wait, whereas the real behaviour draws uniformly within the window.",
   "pairs": [
     {
       "hop_limit": 2,

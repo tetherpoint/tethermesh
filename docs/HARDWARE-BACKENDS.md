@@ -1,15 +1,15 @@
-<!-- SPDX-FileCopyrightText: 2026 The tethermesh Authors -->
+<!-- SPDX-FileCopyrightText: 2026 Matthew Klapman -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 # Hardware crypto accelerators: what each part actually covers
 
-**2026-08-16.** `meshtastic/core/backend.rs` lets an implementer route any subset of the crate's cryptographic primitives onto silicon. This document records which parts cover which primitive, **how confident each claim is**, and which document would settle it. It follows the convention of `docs/FORMAL-VERIFICATION.md`: the point is to separate what was verified from what is believed, because a confident summary of an accelerator's feature list is exactly the kind of claim that is stale as often as not.
+**2026-08-16.** `code/protocol/backend.rs` lets an implementer route any subset of the crate's cryptographic primitives onto silicon. This document records which parts cover which primitive, **how confident each claim is**, and which document would settle it. It follows the convention of `docs/FORMAL-VERIFICATION.md`: the point is to separate what was verified from what is believed, because a confident summary of an accelerator's feature list is exactly the kind of claim that is stale as often as not.
 
 ## Why a backend at all
 
 Not speed. A frame is at most 233 bytes and the radio spends the better part of a second sending it, so software crypto is never the bottleneck on this stack. Two other reasons matter:
 
-- **Side-channel resistance.** `meshtastic/core/x25519.rs` states that its constant-time property is a strong expectation, not a guarantee — Rust cannot express "do not compile this mask into a branch" and nothing in this project inspects the emitted code for it. Hardware built against timing and power analysis can promise what software on a general-purpose core cannot.
+- **Side-channel resistance.** `code/protocol/x25519.rs` states that its constant-time property is a strong expectation, not a guarantee — Rust cannot express "do not compile this mask into a branch" and nothing in this project inspects the emitted code for it. Hardware built against timing and power analysis can promise what software on a general-purpose core cannot.
 - **Key custody.** A part with key custody performs an agreement using a private key that never becomes addressable. Nothing running on the MCU can read it, including this crate.
 
   **Custody is not the same as storage, and this document used to blur them.** Somewhere to *put* a key is common; somewhere a key can be *used from without being read* is rare. A part can have write-once memory, page locks and read protection and still have no custody, because if the agreement runs on the CPU the scalar has to reach a register to be used at all. Custody requires an engine that performs the operation with the key in place. That distinction is what `SecretKey::Slot` means, and getting it wrong is not academic — see the RP2350 note below.
@@ -171,7 +171,7 @@ Use `backend::Software` to state explicitly that no accelerator is in play, rath
 
 The first version of this trait was written against an on-chip accelerator and was wrong for two of the parts above. Both corrections are recorded here because both are invisible until an implementer hits them.
 
-**Hardware fails, and failure is not an answer.** Methods originally returned bare values — `sha256` returned `[u8; 32]`. A backend on an I²C companion that NAKed had exactly two options, both unacceptable: panic, which `DISTRIBUTION.md` forbids outright, or invent a digest, which is worse. Every method now returns `Result`.
+**Hardware fails, and failure is not an answer.** Methods originally returned bare values — `sha256` returned `[u8; 32]`. A backend on an I²C companion that NAKed had exactly two options, both unacceptable: panic, which `docs/DISTRIBUTION.md` forbids outright, or invent a digest, which is worse. Every method now returns `Result`.
 
 **A key that never leaves the part cannot be passed as bytes.** The custody argument above is void if the signature demands the scalar, and the original `x25519(&self, secret: &[u8; 32], ...)` demanded it. The caller now *names* the key — `SecretKey::Bytes` for software, `SecretKey::Slot` for a key the accelerator holds and will not surrender. A backend without key custody returns `Error::Unsupported`, which is what every software default does. Accepting a slot number and quietly agreeing a secret under some other key would have been the worst available outcome, so that path is tested.
 

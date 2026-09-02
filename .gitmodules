@@ -1,9 +1,9 @@
-# SPDX-FileCopyrightText: 2026 The tethermesh Authors
+# SPDX-FileCopyrightText: 2026 Matthew Klapman
 # SPDX-License-Identifier: Apache-2.0
 
-[submodule "third_party/libcrux"]
-	path = third_party/libcrux
+[submodule "code/third_party/libcrux"]
+	path = code/third_party/libcrux
 	url = https://github.com/cryspen/libcrux
-[submodule "third_party/fiat-crypto"]
-	path = third_party/fiat-crypto
+[submodule "code/third_party/fiat-crypto"]
+	path = code/third_party/fiat-crypto
 	url = https://github.com/mit-plv/fiat-crypto

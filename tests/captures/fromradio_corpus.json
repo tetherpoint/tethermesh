@@ -537,7 +537,7 @@
     "oracle_tag": "2.7.26.54e0d8d",
     "captured": "2026-08-15",
     "schema_pin": "meshtastic/protobufs @ 84bfb0fdb3b853ea18abc4535497fa41a1b09546",
-    "note": "Our node, our channel, local simulation, no radio. Publishable under TESTING.md. No third-party traffic."
+    "note": "Our node, our channel, local simulation, no radio. Publishable under docs/TESTING.md. No third-party traffic."
   },
   "verified_properties": {
     "top_level_round_trip_bit_identical": "43/43",

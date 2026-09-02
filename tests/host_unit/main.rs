@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 The tethermesh Authors
+// SPDX-FileCopyrightText: 2026 Matthew Klapman
 // SPDX-License-Identifier: Apache-2.0
 
 //! Host-side tests.
@@ -8,7 +8,7 @@
 //! transcribed into a test drifts from the capture it came from, and the
 //! drift is invisible because both sides still agree with themselves.
 //!
-//! `tools/check_rust_rules.sh` exempts `*/tests/*` from the no-panic rules.
+//! `gates/check_rust_rules.sh` exempts `*/tests/*` from the no-panic rules.
 //! An assertion is a panic, and that is what an assertion is for.
 
 use std::fs;
@@ -1366,7 +1366,7 @@ fn frame_size_limits_are_enforced_not_assumed() {
 ///
 /// Run with `--nocapture`; the bench harness greps the `CONFORMANCE_FRAME`
 /// line and puts those exact bytes on the air. This is the direction
-/// `TESTING.md` says fails in the field — a decoder that is merely lenient
+/// `docs/TESTING.md` says fails in the field — a decoder that is merely lenient
 /// passes every inbound test while emitting frames nobody accepts — so the
 /// bytes must come from the real encoder rather than from a script that
 /// happens to agree with it.
@@ -2001,7 +2001,7 @@ fn ccm_matches_an_independent_implementation() {
 /// AES-256-CCM **with AAD**, against a different implementation.
 ///
 /// The committed CCM vectors all use an EMPTY aad, so they say nothing about
-/// the AAD framing added for `suite/groups`. Checking that framing by its own
+/// the AAD framing added for `code/groups`. Checking that framing by its own
 /// round trip would be worthless: an encrypt and a decrypt that build the MAC
 /// input wrongly in the same way agree perfectly.
 ///
@@ -2142,7 +2142,7 @@ fn an_unknown_portnum_is_carried_not_rejected() {
 /// not have to reproduce.
 ///
 /// It is an oracle and never a dependency: it requires a global allocator,
-/// which `DISTRIBUTION.md` forbids in the shipped library. A test binary has
+/// which `docs/DISTRIBUTION.md` forbids in the shipped library. A test binary has
 /// std, so nothing is given up here.
 #[test]
 fn x25519_agrees_with_a_formally_verified_implementation() {
@@ -2596,8 +2596,8 @@ fn deciding_to_relay_does_not_itself_spend_the_budget() {
 // proof never sees: length prefixes that overrun, nested wrappers, payloads at
 // and beyond MAX_PAYLOAD.
 //
-// The panic-free CLAIM rests on tools/check_rust_rules.sh inspecting the built
-// artifact, and PLAN.md is explicit that fuzzing alone only shows nothing
+// The panic-free CLAIM rests on gates/check_rust_rules.sh inspecting the built
+// artifact, and docs/PLAN.md is explicit that fuzzing alone only shows nothing
 // crashed today. These are here to reach the cases that argument does not
 // cover by itself, not to replace it.
 // ===========================================================================

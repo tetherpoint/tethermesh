@@ -1,7 +1,7 @@
 {
   "corpus": "ccm_aad_vectors",
   "boundary": "AES-256-CCM with additional authenticated data, tag 8 bytes, nonce 13 bytes",
-  "why": "suite/groups/SPEC.md binds the cleartext header as AAD. Our CCM had no AAD support at all, and the committed AES-256-CCM vectors all use EMPTY aad -- so adding AAD would have been validated only by its own round trip, which cannot catch an encrypt and decrypt that are wrong in the same way. These come from elsewhere.",
+  "why": "code/groups/SPEC.md binds the cleartext header as AAD. Our CCM had no AAD support at all, and the committed AES-256-CCM vectors all use EMPTY aad -- so adding AAD would have been validated only by its own round trip, which cannot catch an encrypt and decrypt that are wrong in the same way. These come from elsewhere.",
   "provenance": {
     "generated_by": "python cryptography 46.0.6 AESCCM (OpenSSL)",
     "generated": "2026-08-17",

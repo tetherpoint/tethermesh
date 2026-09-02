@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 The tethermesh Authors
+# SPDX-FileCopyrightText: 2026 Matthew Klapman
 # SPDX-License-Identifier: Apache-2.0
 
 # Build artefacts
@@ -42,11 +42,11 @@ RESUME.md
 # artifact. Tracking and loading are independent — this still loads.
 CLAUDE.md
 
-# ESP-IDF build output for instruments/. Source and sdkconfig.defaults are
+# ESP-IDF build output for tests/instrument/. Source and sdkconfig.defaults are
 # tracked; everything the toolchain generates is not.
-instruments/**/build/
-instruments/**/sdkconfig
-instruments/**/sdkconfig.old
+tests/instrument/**/build/
+tests/instrument/**/sdkconfig
+tests/instrument/**/sdkconfig.old
 
 # Release artifacts. Built on demand by tools/release.sh, never committed --
 # a binary in git is a binary nobody rebuilt.

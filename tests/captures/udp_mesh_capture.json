@@ -125,7 +125,7 @@
     "captured": "2026-08-15",
     "schema_pin": "meshtastic/protobufs @ 84bfb0fdb3b853ea18abc4535497fa41a1b09546",
     "setup": "Two local meshtasticd instances with network.enabled_protocols = UDP_BROADCAST (0x0001), hand-written LocalConfig, default LongFast channel.",
-    "note": "Our nodes, our channel, local only, no radio. Publishable under TESTING.md."
+    "note": "Our nodes, our channel, local only, no radio. Publishable under docs/TESTING.md."
   },
   "findings": [
     "UDP over mesh DOES link two local meshtasticd instances: each node's DB independently listed the other. Over the process-local SimRadio they cannot hear each other at all.",

@@ -7,7 +7,7 @@
     "transmitter": "Heltec V3 running bench/firmware/heltec_v3_sniffer, an independently written SX1262 driver; frame bytes produced by tests/host_unit emit_pki_dm_frame_for_the_bench",
     "receiver": "Heltec V3, stock Meshtastic 2.7.26.54e0d8d, unmodified, region US, LongFast",
     "radio": "906.875 MHz, SF11, BW 250 kHz, CR 4/5, preamble 16, sync 0x24 0xB4",
-    "note": "Our two nodes, our own text. No third-party traffic. Publishable under TESTING.md.",
+    "note": "Our two nodes, our own text. No third-party traffic. Publishable under docs/TESTING.md.",
     "clean_room_note": "Evidence is the reference node's own log output - black-box observation from outside. No reference source was read."
   },
   "our_frame": {

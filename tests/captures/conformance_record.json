@@ -2,7 +2,7 @@
   "record": "conformance_our_encoder_their_decoder",
   "date": "2026-08-16",
   "question": "Does an unmodified stock node accept a frame built entirely by our encoder?",
-  "why_this_direction": "TESTING.md: a decoder that is merely lenient passes every inbound test while emitting frames nobody accepts. This is the direction that fails in the field, and the only one that proves interoperability.",
+  "why_this_direction": "docs/TESTING.md: a decoder that is merely lenient passes every inbound test while emitting frames nobody accepts. This is the direction that fails in the field, and the only one that proves interoperability.",
   "setup": {
     "transmitter": "Heltec V3 running our own SX1262 driver; the host supplied the frame bytes verbatim, the firmware interprets nothing",
     "frame_built_by": "tethermesh: header::encode, channel::channel_hash, crypto::expand_psk + ctr_apply + nonce, message::Data::encode, frame::encode",
@@ -81,7 +81,7 @@
     "note": "A repeated (from, id) is silently dropped by their duplicate suppression \u2014 the same behaviour history.rs implements, observed from the far side. A rerun with a stale id looks identical to a frame that never arrived, which is why the id is overridable."
   },
   "interoperability_gate": {
-    "source": "PLAN.md: a physical, unmodified device must show our node, render our text, accept a direct message, and list us in a route trace",
+    "source": "docs/PLAN.md: a physical, unmodified device must show our node, render our text, accept a direct message, and list us in a route trace",
     "show our node": "DONE \u2014 listed as !7e570001 / tethermesh / tm",
     "render our text": "DONE \u2014 'tethermesh-conformance-1' displayed and relayed",
     "accept a direct message": "DONE for channel encryption \u2014 an addressed, non-broadcast packet was accepted and answered; PKI untested",

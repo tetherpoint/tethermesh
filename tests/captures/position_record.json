@@ -33,7 +33,7 @@
   "provenance": {
     "transmitter": "Heltec V3, stock Meshtastic 2.7.26.54e0d8d, driven over its serial API",
     "receiver": "Heltec V3, stock, same build, unmodified",
-    "note": "Our own nodes, our own channel, synthetic coordinates. Publishable under TESTING.md."
+    "note": "Our own nodes, our own channel, synthetic coordinates. Publishable under docs/TESTING.md."
   },
   "finding_the_sender_quantises_and_declares_it": "A stock node does NOT transmit the coordinate it was handed. Given latitude_i 123456789 = 0x075BCD15 it put 123469824 = 0x075C0000 on the air -- ROUNDED, not truncated, to eighteen trailing zero bits -- and added Position field 23, precision_bits = 13, which we never supplied. altitude and time went out exactly as given. So a Position on the air carries the sender's declared precision, and an encoder that omits precision_bits produces something shorter than the reference does.",
   "their_encoding_hex": "0d00005c0715000024c5182a25e0cda268b8010d"

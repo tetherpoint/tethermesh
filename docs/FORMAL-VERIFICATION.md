@@ -1,4 +1,4 @@
-<!-- SPDX-FileCopyrightText: 2026 The tethermesh Authors -->
+<!-- SPDX-FileCopyrightText: 2026 Matthew Klapman -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 # What is proven, what is checked, and what is neither
@@ -9,7 +9,7 @@ claim gets overstated, so they are separated here.
 
 ## Proven — machine-checked, over every input
 
-`cargo kani` runs the harnesses in `meshtastic/core/proofs.rs` against **our
+`cargo kani` runs the harnesses in `code/protocol/proofs.rs` against **our
 own code**. No third-party library is involved. Kani explores the whole input
 space symbolically, so a harness that passes has ruled out panics, arithmetic
 overflow and out-of-bounds access on that path altogether — not for the inputs
@@ -54,9 +54,9 @@ proof that does not terminate proves nothing.
 | `retransmission_never_exceeds_the_configured_ceiling` | the outbox never hands out more transmissions than the policy allows, counting the caller's own first send — over arbitrary times, including clocks that run backwards |
 | `an_acknowledged_entry_is_never_retransmitted` | an acknowledgement retires only the entry its id names, and nothing is retransmitted afterwards; `acknowledge` and `reap` are total |
 
-### `suite/groups` — the extension bundle
+### `code/groups` — the extension bundle
 
-`SCOPE.md` requires a bundle crate to inherit the whole regime, and the proof
+`docs/SCOPE.md` requires a bundle crate to inherit the whole regime, and the proof
 table is part of it. Run with `cargo kani --workspace`, which covers both crates.
 
 > **Not bare `cargo kani`.** That builds the workspace's default member only
@@ -75,7 +75,7 @@ table is part of it. Run with `cargo kani --workspace`, which covers both crates
 | `the_epoch_never_wraps_from_any_starting_value` | from any epoch, a bump either advances by exactly one or refuses at 255. A wrap would reproduce epoch 0's key and reuse every nonce under it |
 | `nonce_construction_is_total_and_carries_the_epoch` | total, 13 bytes, and the epoch reaches the nonce |
 
-## The C ABI — `ffi/src/proofs.rs`
+## The C ABI — `code/c-api/src/proofs.rs`
 
 **This crate had no proofs until 2026-08-18, which was the wrong way round.** It
 is the surface a C consumer actually reaches, it grew from ABI v3 to v7 in a
@@ -87,7 +87,7 @@ by whoever writes them. That is the difference these rows buy.
 
 | harness | property |
 |---|---|
-| `no_request_can_beat_the_retry_ceiling` | over every `(max_attempts, interval_us)`, no accepted policy exceeds the measured ceiling. This is the mechanism enforcing `PLAN.md`'s shared-airtime rule, and it had four example tests; a single attempt is exempt because it never retransmits |
+| `no_request_can_beat_the_retry_ceiling` | over every `(max_attempts, interval_us)`, no accepted policy exceeds the measured ceiling. This is the mechanism enforcing `docs/PLAN.md`'s shared-airtime rule, and it had four example tests; a single attempt is exempt because it never retransmits |
 | `classify_ack_is_total_on_arbitrary_bytes` | no payload panics it — attacker-reachable, because channel decryption authenticates nothing and turns any bytes into some other bytes |
 | `tm_header_peek_refuses_every_short_frame_and_reads_every_full_one` | every length below a header is refused and every full one decodes, proven across the boundary rather than at the two points a test would pick |
 | `tm_pki_decrypt_refuses_every_frame_too_short_to_hold_one` | every frame below `header(16) + tag(8) + extra_nonce(4)` is refused, never read past |
@@ -116,7 +116,7 @@ each length refuse or decode — is finite and is better asked that way.
 
 **What these do not cover, and it is the larger half.** Nothing here says
 anything about **pointer validity**. The FFI boundary is the trust edge
-`DISTRIBUTION.md` names — a caller passing a bad pointer or a wrong length
+`docs/DISTRIBUTION.md` names — a caller passing a bad pointer or a wrong length
 cannot be validated — so these harnesses supply real buffers and prove what
 happens for arbitrary contents and lengths *within* them. That is the half that
 is ours to guarantee. Null is checked at run time everywhere, because null is
@@ -180,7 +180,7 @@ Stated plainly, because the gap is real:
   Hardware can close this gap where software cannot: of the parts surveyed in
   `docs/HARDWARE-BACKENDS.md`, only the nRF54LM20's CRACEN accelerates
   Curve25519, and Nordic documents extended side-channel countermeasures for
-  Montgomery curve multiplication on some SoCs. `meshtastic/core/backend.rs`
+  Montgomery curve multiplication on some SoCs. `code/protocol/backend.rs`
   is the seam that lets an implementer take it.
 - **The ladder.** The field operations under it are proven; that the
   Montgomery ladder composes them into the right group operation is supported
@@ -191,7 +191,7 @@ Stated plainly, because the gap is real:
 
 Measured, not argued — see `docs/CRYPTO-DEPENDENCY.md`. `libcrux-curve25519`
 is genuinely formally verified Rust, derived from HACL*. It also **requires a
-global allocator**, which `DISTRIBUTION.md` forbids outright, and adds 37
+global allocator**, which `docs/DISTRIBUTION.md` forbids outright, and adds 37
 panic-related symbols over a no-dependency baseline where ours adds zero.
 
 That is not a contradiction, and it is worth understanding rather than

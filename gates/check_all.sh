@@ -1,0 +1,338 @@
+#!/usr/bin/env bash
+#
+# SPDX-FileCopyrightText: 2026 Matthew Klapman
+# SPDX-License-Identifier: Apache-2.0
+#
+# check_all.sh — the one entry point for this repository's guard rails.
+#
+# Every rule this project commits to in README.md, docs/SCOPE.md and
+# docs/DISTRIBUTION.md is enforced by something here. A rule stated in a document
+# and enforced by nobody decays silently, and usually in the direction of
+# whoever is in a hurry.
+#
+# NO SILENT NO-OPS. A check with nothing to check yet reports that and returns
+# non-zero. A pass that never ran is worse than a failure, because it is
+# indistinguishable from a real one in a log.
+#
+# USAGE
+#   gates/check_all.sh                run every applicable check
+#   gates/check_all.sh --pending      list checks not yet implementable, and why
+#
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+say()  { printf '\033[36m[check]\033[0m %s\n' "$*"; }
+head() { printf '\n\033[1m── %s\033[0m\n' "$*"; }
+
+if [ "${1:-}" = "--pending" ]; then
+    cat <<'EOF'
+Checks that exist as requirements but cannot run until there is something to
+check. Each is listed here so the gap is visible rather than forgotten.
+
+  artifact test         gates/check_artifact_link.sh links a real C consumer
+                        and inspects the linked image. ALL FOUR declared
+                        targets now pass, RISC-V included -- it was reported as
+                        PARTIAL until 2026-08-18 on the belief that no RISC-V
+                        cross-gcc existed here. One did: ESP-IDF's
+                        riscv32-esp-elf, which this bench compiles ESP32-C6
+                        with daily. The search had looked for
+                        riscv32-unknown-elf and clang and concluded absence.
+
+                        Two things had to be fixed once it ran, and both are the
+                        same failure mode this file keeps recording. The machine
+                        flags table had no RISC-V row, and the "did the call
+                        survive" grep matched ARM's `bl` only -- so a perfectly
+                        good RISC-V image was REFUSED, and refused with the
+                        message "the call was optimised away", which is a
+                        different and more alarming claim than the truth. It is
+                        `jal` on RISC-V; the pattern now takes bl/jal/call and
+                        is anchored so it cannot match a label or an internal
+                        branch.
+
+                        Still not automated in this script, because the
+                        toolchain paths are arguments rather than guesses -- a
+                        cross compiler found by guessing is one nobody can
+                        reproduce. Run it per target with the prefix.
+
+Implemented since this list was written, and no longer pending:
+
+  ABI stability         gates/check_abi_stability.sh, wired into this script.
+                        It needed a previous version on record and there had
+                        been no release; v0.1.0 is that record. The baseline is
+                        the ABI SURFACE of the released header -- declarations,
+                        layouts and constants -- because comments change
+                        constantly and mean nothing to a linker. A surface
+                        change with TM_ABI_VERSION standing still FAILS; a
+                        change with a bump is a declared break and passes. Both
+                        red-tested. It cannot tell an intended break from an
+                        accident, which is why refreshing the baseline is a
+                        deliberate --accept rather than automatic.
+
+
+  reproducible build    gates/check_reproducible.sh builds twice -- the second
+                        time from a COPY AT A DIFFERENT PATH, which is what a
+                        third party actually does -- and compares sha256. It
+                        catches embedded-path and build-ordering
+                        nondeterminism. It does NOT prove reproducibility
+                        across machines or toolchains; that is a release
+                        pipeline's job, and the script says so.
+
+  size budget           gates/check_size_budget.sh, driven by targets.conf.
+                        Every declared target must BUILD, and crate-object
+                        .text must stay under its ceiling. Both red-tested.
+
+  conformance vectors   met by the host suite: every_captured_frame_rebuilds_
+                        byte_for_byte decodes real captured traffic and
+                        re-encodes it bit-for-bit across the whole on-air
+                        corpus -- 29 to 102 bytes, three portnums -- and the
+                        fromradio corpus does the same for 43 protobuf
+                        messages. That is exactly what this line asked for.
+EOF
+    exit 0
+fi
+
+rc=0
+
+head "licence declaration (SPDX)"
+# Added with the 2026-08-16 licence decision. One licence today, which is
+# exactly when this looks unnecessary and exactly when it is cheapest: the
+# failure it prevents is a file arriving later with no header and inheriting
+# nothing.
+"$ROOT/gates/check_spdx.sh" || {
+    s=$?
+    [ "$s" = 3 ] || rc=1
+}
+
+head "clean-room (GPL boundary)"
+"$ROOT/gates/check_cleanroom.sh" || rc=1
+
+head "scope (nothing about a consuming product)"
+# Runs beside the clean-room check because they guard the same class of harm:
+# something that cannot be taken back once it is in an open repository's
+# history. On 2026-08-20 a consuming product's driver repo and an internal
+# constant of its were named inside an otherwise-correct wire-reference entry --
+# the rationale leaked even though the fact was in scope. Nothing caught it.
+"$ROOT/gates/check_scope.sh" || rc=1
+
+head "documentation matches the code"
+# Added after the 2026-08-16 audit, which found three documents asserting
+# things that had stopped being true -- including one arguing at length for a
+# dependency arrangement the next commit reversed. Cross-references rot without
+# anyone editing the document, so they are checked rather than reviewed.
+"$ROOT/gates/check_docs.sh" || {
+    s=$?
+    [ "$s" = 3 ] || rc=1
+}
+
+head "generated C header matches the crate"
+# T8. The header was hand-written until 2026-08-18 and drifted silently by
+# construction. Generating it is only half the fix: without this check the
+# generator exists and the committed file still rots the first time someone
+# edits the Rust and forgets to run it.
+"$ROOT/gates/check_header.sh" || {
+    s=$?
+    [ "$s" = 3 ] || rc=1
+}
+
+head "ABI stability within a major version"
+# docs/DISTRIBUTION.md promises "header struct layouts are frozen within a major
+# version, and any break takes a major bump". An ABI break fails at RUNTIME, in
+# the field, confusingly -- so it gets a check rather than a convention. Listed
+# as pending until 2026-08-18 for a real reason: it needs a previous version on
+# record, and there had been no release.
+"$ROOT/gates/check_abi_stability.sh" || {
+    s=$?
+    [ "$s" = 3 ] || rc=1
+}
+
+head "crate rules (panic-free, no alloc, no global state)"
+"$ROOT/gates/check_rust_rules.sh" || {
+    s=$?
+    # 3 means "nothing to check yet" — expected before the crate exists, and
+    # reported rather than hidden. It is not a pass and not a failure.
+    [ "$s" = 3 ] || rc=1
+}
+
+head "panic-free artifact (no path can fail on hostile input)"
+# Built here rather than left to a --pending note, because this is the claim
+# docs/DISTRIBUTION.md leads with and it went unverified for as long as it was
+# somebody's job to remember. LTO must be off or the emitted artifact is
+# bitcode, which reads as an empty symbol table and passes without inspecting
+# anything — see the note in check_rust_rules.sh.
+# EVERY crate with a library target, not just the default one.
+#
+# This built a single `--lib` until 2026-08-16. With the extension suite planned
+# as one crate per bundle, a second crate's panic paths would simply never have
+# been inspected -- and the panic-free artifact guarantee is the claim
+# docs/DISTRIBUTION.md leads with. Enumerated from cargo metadata rather than
+# guessed, so a crate added later is covered without anyone remembering to.
+if command -v cargo >/dev/null 2>&1 && [ -f "$ROOT/Cargo.toml" ]; then
+    pkgs=$( cd "$ROOT" && cargo metadata --no-deps --format-version 1 2>/dev/null \
+        | python3 -c 'import json,sys
+try:
+    m=json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for p in m.get("packages", []):
+    # code/third_party/ is pinned upstream source. check_rust_rules.sh excludes it
+    # from OUR source rules -- "we did not write it and may not edit it without
+    # voiding its provenance" -- so holding it to our artifact rule separately
+    # would be inconsistent, and would attribute a failure to the wrong place.
+    # What it does to the linked object is still measured, because it is linked
+    # INTO ours and inspected there.
+    if "/code/third_party/" in p.get("manifest_path", ""):
+        continue
+    if any(t.get("crate_types") and set(t["crate_types"]) & {"lib","rlib","staticlib","cdylib"}
+           for t in p.get("targets", [])):
+        print(p["name"])' )
+    [ -n "$pkgs" ] || pkgs="$(basename "$ROOT")"
+    say "library crates to inspect: $(echo "$pkgs" | tr '\n' ' ')"
+
+    rc_obj=0
+    while IFS= read -r pkg; do
+        [ -n "$pkg" ] || continue
+        objdir="$ROOT/target/objcheck/$pkg"
+        rm -rf "$objdir"; mkdir -p "$objdir"
+        # Compiler output is KEPT, not discarded. This build used to send both
+        # streams to /dev/null, so the gate inspected the object while throwing
+        # away everything the compiler said while producing it -- and an
+        # `unused_unsafe` sat in tm_channel_hash unnoticed because of it.
+        #
+        # That warning is not cosmetic here. An unnecessary `unsafe` block is a
+        # false claim that an obligation was discharged, which is the exact
+        # signature of a narrowing done wrong -- and narrowing whole-body blocks
+        # to targeted operations is how this crate keeps its FFI honest. A gate
+        # that reads the object but not the diagnostics misses that whole class.
+        # NO `-o`. It made rustc emit two warnings of its own about the flag
+        # combination ("output file name will be adapted", "ignoring --out-dir
+        # due to -o"), which would keep this check permanently red -- and
+        # filtering two known strings would have been a gate weakened to make
+        # something pass. Without it the object lands in cargo's own out-dir
+        # under a hashed name, which the glob below already handles; the stale
+        # sweep is what keeps a previous build's hash from being inspected
+        # instead of this one's.
+        # NO `-o`. It made rustc emit two warnings of its own about the flag
+        # combination ("output file name will be adapted", "ignoring --out-dir
+        # due to -o"), which would keep the diagnostics check below permanently
+        # red -- and filtering two known strings would have been a gate weakened
+        # to make something pass. Without it the object lands in cargo's own
+        # out-dir under a hashed name, which the glob below handles.
+        #
+        # A DEDICATED TARGET DIR, wiped each run, because the object has to be
+        # there. Sharing the main target/ meant a warm cache made the crate
+        # fresh, rustc never re-ran, and no object was emitted at all -- so this
+        # check would have started reporting "object emit produced nothing"
+        # instead of inspecting anything.
+        buildlog="$objdir/build.log"
+        if ( cd "$ROOT" && CARGO_PROFILE_RELEASE_LTO=false \
+                CARGO_TARGET_DIR="$objdir" \
+                cargo rustc --release -p "$pkg" --lib -- --emit=obj ) >"$buildlog" 2>&1; then
+            # Matched on the PER-CRATE SUMMARY line rustc emits last
+            # ("warning: `tmffi` (lib) generated 3 warnings"), not on every
+            # `^warning`. A dependency's warnings are not ours to fix and would
+            # make this hostage to an upstream bump -- and they appear only on a
+            # cold cache, so a broad grep would be flaky as well as wrong.
+            if grep -qE "^warning: .$pkg. \\(lib\\) generated" "$buildlog"; then
+                printf '\033[31m[check] %s: compiler warnings\033[0m\n' "$pkg" >&2
+                grep -E '^warning' -A6 "$buildlog" >&2
+                rc_obj=1
+            fi
+        # A glob, not `ls | head -1`: this script defines its own `head`
+        # function for section headings, so piping into head calls THAT,
+        # discards stdin and kills the pipeline with SIGPIPE under pipefail.
+            obj=""
+            for f in "$objdir"/release/deps/"$pkg"-*.o; do
+                [ -f "$f" ] || continue
+                obj="$f"; break
+            done
+            if [ -n "$obj" ]; then
+                printf '\033[36m[check]\033[0m %s\n' "inspecting $pkg"
+                "$ROOT/gates/check_rust_rules.sh" --binary "$obj" || rc_obj=1
+            else
+                printf '\033[31m[check] %s: object emit produced nothing\033[0m\n' "$pkg" >&2
+                rc_obj=1
+            fi
+        else
+            printf '\033[31m[check] %s: could not build an object to inspect\033[0m\n' "$pkg" >&2
+            rc_obj=1
+        fi
+    done <<< "$pkgs"
+    [ "$rc_obj" = 0 ] || rc=1
+else
+    printf '\033[33m[check] cargo not available — panic-free artifact NOT verified\033[0m\n' >&2
+fi
+
+head "the artifact gate still says NO (self-test)"
+# The four archives inspected below all pass, and would pass just as happily if
+# check_rust_rules.sh were `exit 0`. This runs it against archives built to be
+# refused, and against mutated copies of itself, so a green tick above means
+# something.
+"$ROOT/gates/check_rust_rules_selftest.sh" || {
+    st=$?
+    # 2 is "a toolchain this needs is absent", which is a skip and says so
+    # loudly; anything else is a failure.
+    [ "$st" = 2 ] || rc=1
+}
+
+head "panic-free SHIPPED ARCHIVE, not just the crate object"
+# ADDED 2026-08-27, AND THE ABSENCE OF IT IS WHY A18 SURVIVED. The loop above
+# inspects a single .o per crate. What dist/ ships is a static ARCHIVE, and
+# check_rust_rules.sh listed `!<ar` as a supported input from the start while
+# refusing every archive on every architecture -- because nothing ever fed it
+# one. A path that is documented and never exercised is a path that rots
+# silently, and this one had.
+#
+# The staticlib is what a C consumer links, so it is the artifact the promise
+# is actually made about. Warm this costs ~0.07s per target; the archive is
+# already built by the same profile the release uses.
+if command -v cargo >/dev/null 2>&1; then
+    rc_ar=0; ar_checked=0
+    installed_t="$(rustup target list --installed 2>/dev/null || true)"
+    # targets.conf carries one row PER CRATE, so the triples repeat. The
+    # staticlib is one artifact per triple, hence sort -u: without it each
+    # target would be inspected three times and the count would read as
+    # coverage it does not have.
+    while read -r t; do
+        [ -n "$t" ] || continue
+        printf '%s\n' "$installed_t" | grep -qx "$t" || continue
+        ( cd "$ROOT" && cargo build --release -p tmffi --target "$t" ) >/dev/null 2>&1 || {
+            printf '\033[31m[check] %s: staticlib did not build\033[0m\n' "$t" >&2; rc_ar=1; continue; }
+        a="$ROOT/target/$t/release/libtmffi.a"
+        [ -f "$a" ] || { printf '\033[31m[check] %s: no archive produced\033[0m\n' "$t" >&2; rc_ar=1; continue; }
+        printf '\033[36m[check]\033[0m %s\n' "inspecting archive for $t"
+        "$ROOT/gates/check_rust_rules.sh" --binary "$a" || rc_ar=1
+        ar_checked=$((ar_checked+1))
+    done < <(grep -v '^#' "$ROOT/targets.conf" | awk 'NF{print $1}' | sort -u)
+    # An absent counter must not read as zero: if no archive was inspected this
+    # section proved nothing, and saying so is the difference between a check
+    # and a green tick.
+    if [ "$ar_checked" -lt 1 ]; then
+        printf '\033[33m[check] NO ARCHIVE INSPECTED — this section is not a pass\033[0m\n' >&2
+        rc_ar=1
+    else
+        printf '\033[36m[check]\033[0m %s\n' "$ar_checked archive(s) inspected"
+    fi
+    [ "$rc_ar" = 0 ] || rc=1
+else
+    printf '\033[33m[check] cargo not available — shipped archive NOT verified\033[0m\n' >&2
+fi
+
+head "size budget across the declared target set"
+# docs/DISTRIBUTION.md promises this is gated rather than discovered on a device.
+# Cheap on a warm cargo cache; the first run after a clean builds each target.
+"$ROOT/gates/check_size_budget.sh" || rc=1
+
+head "reproducible build"
+# docs/DISTRIBUTION.md calls "rebuild it yourself and compare" the only thing that
+# makes shipping a crypto binary defensible. It was a slogan until nothing had
+# ever built it twice.
+"$ROOT/gates/check_reproducible.sh" || rc=1
+
+head "summary"
+if [ "$rc" = 0 ]; then
+    say "all applicable checks passed"
+    say "run 'gates/check_all.sh --pending' for checks awaiting an artifact"
+else
+    printf '\033[31m[check] FAILED\033[0m\n' >&2
+fi
+exit "$rc"

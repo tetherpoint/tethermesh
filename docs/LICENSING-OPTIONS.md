@@ -1,11 +1,11 @@
-<!-- SPDX-FileCopyrightText: 2026 The tethermesh Authors -->
+<!-- SPDX-FileCopyrightText: 2026 Matthew Klapman -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 # Licensing — DECIDED
 
 **Status: DECIDED 2026-08-16. Apache-2.0, for code and specification alike.
 `LICENSE` and `NOTICE` are in the repo, `Cargo.toml` carries
-`license = "Apache-2.0"`, and `tools/check_spdx.sh` enforces that every file
+`license = "Apache-2.0"`, and `gates/check_spdx.sh` enforces that every file
 declares it.**
 
 ## The decision, and the reasoning that settled it
@@ -25,7 +25,7 @@ implementers actually work from would be self-defeating.
 
 Three things reinforce it:
 
-- **These "spec" files are not prose.** `meshtastic/WIRE_REFERENCE.md` carries
+- **These "spec" files are not prose.** `docs/WIRE_REFERENCE.md` carries
   hex frames, byte-offset tables, register values, a measured preset table.
   The argument against a code licence for documents is weakest exactly here.
 - **It removes the demarcation problem entirely.** The objection recorded
@@ -42,7 +42,7 @@ it is aesthetic; it was traded against a substantive patent benefit.
 anyone adapting the spec must mark their changes. For a specification that is
 arguably a feature: forks stay identifiable.
 
-**And the patent pledge is kept anyway**, in `suite/README.md`. Apache §3's
+**And the patent pledge is kept anyway**, in `docs/EXTENSIONS.md`. Apache §3's
 grant attaches to "the Work", and its reach over *someone read the document and
 wrote independent code* is not airtight — copyright does not restrict
 implementing a described method in the first place, which is what makes the
@@ -54,7 +54,7 @@ residual doubt that makes a cautious implementer hesitate.
 
 ## The options as recorded 2026-08-14, kept for the reasoning
 
-What *is* settled: tethermesh will be **permissively** licensed, not copyleft. That is a decision, because the clean-room constraint depends on it — refusing GPL derivation only makes sense if the result ends up permissive. See `PLAN.md` § clean-room constraint.
+What *is* settled: tethermesh will be **permissively** licensed, not copyleft. That is a decision, because the clean-room constraint depends on it — refusing GPL derivation only makes sense if the result ends up permissive. See `docs/PLAN.md` § clean-room constraint.
 
 What is open: **which** permissive licence for the code, and **whether to license the specification separately**. Neither blocks development. Both block publication, because an unlicensed spec is an unusable one and the entire extend strategy depends on other people being free to implement it.
 
@@ -116,7 +116,7 @@ For most projects the permissive licences are interchangeable in practice. Here 
 
 ## Separating the specification — CC-BY-4.0
 
-The proposal is `LICENSE` (Apache-2.0 or MIT) for code, `LICENSE-SPEC` (CC-BY-4.0) for `suite/EXTENSION_SUITE.md` and `meshtastic/WIRE_REFERENCE.md`.
+The proposal is `LICENSE` (Apache-2.0 or MIT) for code, `LICENSE-SPEC` (CC-BY-4.0) for `suite/EXTENSION_SUITE.md` and `docs/WIRE_REFERENCE.md`.
 
 **Arguments for**
 

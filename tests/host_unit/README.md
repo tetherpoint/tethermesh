@@ -1,4 +1,4 @@
-<!-- SPDX-FileCopyrightText: 2026 The tethermesh Authors -->
+<!-- SPDX-FileCopyrightText: 2026 Matthew Klapman -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 # host_unit — the algorithmic layer, no hardware
@@ -98,7 +98,7 @@ either half turns the suite red and names the half.
 Some properties are now machine-checked over every input rather than sampled:
 `cargo kani --workspace` verifies 26 harnesses across the three crates'
 `proofs.rs`, all against our own code. (This said "six harnesses in
-`meshtastic/core/proofs.rs`" until 2026-08-27, having been written when that
+`code/protocol/proofs.rs`" until 2026-08-27, having been written when that
 was the only crate carrying any.) See `docs/FORMAL-VERIFICATION.md` for what is proven,
 what is merely checked against a third party's answer, and what is neither.
 

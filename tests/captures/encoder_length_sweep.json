@@ -26,6 +26,6 @@
   "provenance": {
     "transmitter": "our own node, 0x328070b9, at its -9 dBm floor",
     "receivers": "three Heltec V3, stock Meshtastic 2.7.26.54e0d8d, unmodified, region US, LongFast, tx_power=1",
-    "note": "Our own nodes, our own channel, our own payloads. No third-party traffic. Publishable under TESTING.md."
+    "note": "Our own nodes, our own channel, our own payloads. No third-party traffic. Publishable under docs/TESTING.md."
   }
 }

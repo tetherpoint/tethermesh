@@ -1,4 +1,4 @@
-<!-- SPDX-FileCopyrightText: 2026 The tethermesh Authors -->
+<!-- SPDX-FileCopyrightText: 2026 Matthew Klapman -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 # The curve implementation: verified field arithmetic, our ladder
@@ -30,7 +30,7 @@ field-arithmetic bug, and field arithmetic is what fiat proves.
 
 **On linkage.** It is an in-tree git submodule, pinned at
 `a6ddbd4e89e1714cb825437a401505b9c76537cf` and sparse-checked-out to
-`fiat-rust/` only. `Cargo.toml` carries a path dependency on it; see `DEPS.md`
+`fiat-rust/` only. `Cargo.toml` carries a path dependency on it; see `docs/DEPS.md`
 for the pin of record.
 
 An earlier draft of this section argued the opposite — that a crates.io pull
@@ -65,7 +65,7 @@ assuming nobody thought about it.
 
 Overwhelming, and it should be stated first. A bug in a curve implementation
 is not a crash — it is silent key compromise. The first draft of
-`meshtastic/core/x25519.rs` biased `fe_sub` by `p` instead of `2p` and had a
+`code/protocol/x25519.rs` biased `fe_sub` by `p` instead of `2p` and had a
 muddled final reduction. The result was **entirely self-consistent**: it
 added, multiplied, inverted and round-tripped without complaint, and agreed
 with itself everywhere. Only RFC 7748's published vectors exposed it. No
@@ -79,18 +79,18 @@ compatible with this project's permissive intent.
 
 ## The constraint that decided it
 
-`DISTRIBUTION.md` promises that no path can panic on hostile input, and
-`tools/check_rust_rules.sh` enforces it against the built artifact. A
+`docs/DISTRIBUTION.md` promises that no path can panic on hostile input, and
+`gates/check_rust_rules.sh` enforces it against the built artifact. A
 dependency's panic paths become ours.
 
 Measured as staticlibs, `no_std`, `panic = "abort"`, LTO off, each against a
 baseline containing no dependency at all — because `core` contributes panic
 symbols regardless and counting them absolutely makes any crate look bad.
 
-**Run it yourself: `tools/measure_panic_symbols.sh`.** The methodology lives in
+**Run it yourself: `gates/measure_panic_symbols.sh`.** The methodology lives in
 that script rather than in this prose, for a reason given below.
 
-Re-measured 2026-08-16 on `rustc 1.97.1`, the toolchain `DEPS.md` pins:
+Re-measured 2026-08-16 on `rustc 1.97.1`, the toolchain `docs/DEPS.md` pins:
 
 | staticlib | total symbols | panic-related (raw) | distinct names | above baseline |
 |---|---|---|---|---|
@@ -100,7 +100,7 @@ Re-measured 2026-08-16 on `rustc 1.97.1`, the toolchain `DEPS.md` pins:
 
 `libcrux-curve25519` is not a row that can be filled in: it fails to compile
 with *"no global memory allocator found but one is required"*. That is the
-finding, and it is the one that actually rules it out — `DISTRIBUTION.md`
+finding, and it is the one that actually rules it out — `docs/DISTRIBUTION.md`
 forbids an allocator outright, so the panic count never gets a vote.
 
 **Why this table was rewritten, and what it costs the argument.** The earlier
@@ -196,7 +196,7 @@ stronger claim than agreement with either.
 
 ## The submodule was tried, not just discussed
 
-`third_party/libcrux` is a real pinned submodule (`9ea7743c`, sparse, 744 KB)
+`code/third_party/libcrux` is a real pinned submodule (`9ea7743c`, sparse, 744 KB)
 and the curve code was linked into the crate and measured. It builds. It is
 not shippable, for two reasons found by doing it:
 

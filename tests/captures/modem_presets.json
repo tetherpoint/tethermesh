@@ -4,9 +4,9 @@
   "provenance": {
     "captured": "2026-08-16",
     "node": "Heltec V3, stock Meshtastic 2.7.26.54e0d8d, region US",
-    "oracle_version": "2.7.26.54e0d8d - same build as the pinned container in DEPS.md",
+    "oracle_version": "2.7.26.54e0d8d - same build as the pinned container in docs/DEPS.md",
     "method": "For each preset 0..16: write the WHOLE LoRaConfig section with use_preset=true and that modem_preset, reboot, and read the values the node reports at boot.",
-    "note": "Our own board, our own configuration. No third-party traffic, nothing identifiable. Publishable under TESTING.md.",
+    "note": "Our own board, our own configuration. No third-party traffic, nothing identifiable. Publishable under docs/TESTING.md.",
     "clean_room_note": "Values are read from the node's own log output - black-box observation. No reference source was read."
   },
   "derivation": {
@@ -29,7 +29,7 @@
       16
     ],
     "invalid_behaviour": "Reported as name=Invalid and silently served LongFast parameters. Preset 2 is the deprecated VERY_LONG_SLOW; 10-16 are beyond the enum.",
-    "correction": "PLAN.md previously recorded 'sixteen presets remain'. There are eight further VALID presets beyond LongFast, not sixteen.",
+    "correction": "docs/PLAN.md previously recorded 'sixteen presets remain'. There are eight further VALID presets beyond LongFast, not sixteen.",
     "coding_rate": "ALL NINE VALID PRESETS USE CR 4/5. The preset table therefore varies only spreading factor and bandwidth; coding rate is constant. Residuals against the 4/5 prediction ranged 0.2 to 4.3 ms, all within the receiver's 10 ms polling quantisation, while the nearest alternative (4/6) was between 27 ms and 328 ms away depending on preset.",
     "bitrate_ratio_explained": "This retroactively explains a drift recorded when CR was still unknown: the ratio of the node's reported bitrate to SF*BW/2^SF varies with spreading factor, 0.697 at SF11 against 0.725 at SF7. With coding rate now known to be constant, that drift can only be the packet-overhead term. The earlier refusal to invert the bitrate to recover CR was correct, and for the right reason."
   },
