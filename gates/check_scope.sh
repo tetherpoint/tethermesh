@@ -83,6 +83,61 @@ FORBIDDEN=(
 # to hold these words.
 PATHSPEC=(':(exclude)gates/check_scope.sh')
 
+# ── --history: SCAN EVERY COMMIT, NOT JUST THE CURRENT TREE ─────────────────
+#
+# THIS MODE EXISTS BECAUSE THE CHECK BELOW CANNOT SEE THE ONE THING SCOPE.md
+# WARNS ABOUT MOST LOUDLY. That document opens with "git history is permanent --
+# a file deleted in a later commit is still in the history, and a repository
+# that has been cloned once cannot be un-cloned", and then the check enforcing
+# it looked only at `git ls-files`. A rule with no script lapses; so does a
+# script that checks a narrower thing than the rule.
+#
+# It was not hypothetical. Found 2026-09-02, preparing the first public push:
+#
+#   cea7993  2026-08-16  docs/PLAN-a companion radio driver.md added
+#   446a54a  2026-08-16  ...and removed the same day, deliberately, to keep
+#                        this repository protocol-only
+#   51b9055  2026-08-20  this check was written -- FOUR DAYS LATER
+#
+# So the content was added and deleted before the check existed, and the check
+# could never have seen it afterwards either. A 16 KB driver bring-up plan
+# naming another repository's internals sat in the objects, invisible to a green
+# run, and would have been published by the push it was removed to prevent.
+#
+# RUN THIS BEFORE ANY FIRST PUBLICATION, and after any history rewrite meant to
+# clean one. It is deliberately NOT part of check_all.sh: it walks every blob in
+# every commit, which is far too slow for an inner loop, and on a healthy
+# repository it can only ever repeat what the tree scan already said.
+if [ "${1:-}" = "--history" ]; then
+    commits=$(git rev-list --all)
+    ncommits=$(printf '%s\n' "$commits" | grep -c . || true)
+    say "scanning ALL history: $ncommits commit(s)"
+    hrc=0
+    for entry in "${FORBIDDEN[@]}"; do
+        name="${entry%%|*}"
+        why="${entry#*|}"
+        # `git grep <rev>...` searches those trees; exclude this file, which
+        # names every forbidden string by design, in its historical paths too.
+        if out=$(git grep -Iil -- "$name" $commits 2>/dev/null \
+                 | grep -vE ':(gates|tools)/check_scope\.sh$'); then
+            if [ -n "$out" ]; then
+                bad "IN HISTORY: '$name' -- $why"
+                printf '%s\n' "$out" | awk -F: '{print $2}' | sort -u \
+                    | sed 's/^/         file: /' >&2
+                hrc=1
+            fi
+        fi
+    done
+    if [ "$hrc" = 0 ]; then
+        say "OK — no forbidden name appears in any commit"
+    else
+        bad "A forbidden name is reachable from the published objects."
+        bad "Deleting it in a later commit does NOT remove it. The history must"
+        bad "be rewritten (git-filter-repo) before this repository is made public."
+    fi
+    exit "$hrc"
+fi
+
 rc=0
 hits=0
 for entry in "${FORBIDDEN[@]}"; do
@@ -100,6 +155,7 @@ scanned=$(git ls-files -- "${PATHSPEC[@]}" | wc -l)
 
 if [ "$rc" = 0 ]; then
     say "OK — $scanned file(s) scanned, no consuming-product names"
+    say "     (working tree only -- run '$0 --history' before publishing)"
 else
     bad "$hits forbidden name(s) present. docs/SCOPE.md: this repository is OPEN and"
     bad "git history is permanent. Remove it BEFORE committing, not after."
